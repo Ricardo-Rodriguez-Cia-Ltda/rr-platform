@@ -134,6 +134,7 @@ Al migrar o configurar el servidor en otro PC:
 
 - `git clone` del repositorio.
 - `npm install`.
+- `mkdir logs` (requerido para que Task Scheduler pueda guardar los logs de ejecución).
 - Crear `.env.local` con credenciales de **producción** (no las de preview/test).
 - Confirmar que la IP pública del PC es la registrada en Intcomex.
 - Correr `npm run serve` una vez de forma interactiva para verificar que responde antes de automatizar nada.
