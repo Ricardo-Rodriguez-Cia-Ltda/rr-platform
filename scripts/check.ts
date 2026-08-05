@@ -1,4 +1,4 @@
-import { intcomex } from '../lib/providers/intcomex';
+import { intcomex } from '../lib/providers/intcomex.js';
 
 const raw = process.argv[2];
 if (!raw) {

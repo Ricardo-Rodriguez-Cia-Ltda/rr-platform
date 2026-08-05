@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAuthorized } from '../lib/auth';
+import { isAuthorized } from '../lib/auth.js';
 
 describe('isAuthorized', () => {
   it('accepts matching keys', () => {

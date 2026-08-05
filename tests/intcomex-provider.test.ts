@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { intcomex } from '../lib/providers/intcomex';
-import { ProviderError } from '../lib/types';
+import { intcomex } from '../lib/providers/intcomex.js';
+import { ProviderError } from '../lib/types.js';
 
 const IWS_PRODUCT = {
   Sku: 'SE001MSE01',

@@ -1,17 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { ProviderError } from '../lib/types';
+import { ProviderError } from '../lib/types.js';
 
 const getPriceMock = vi.fn();
 
-vi.mock('../lib/providers/intcomex', () => ({
+vi.mock('../lib/providers/intcomex.js', () => ({
   intcomex: {
     name: 'intcomex',
     getPrice: (query: unknown) => getPriceMock(query),
   },
 }));
 
-const { default: handler } = await import('../api/price');
+const { default: handler } = await import('../api/price.js');
 
 function makeReq(
   query: Record<string, string | string[]>,

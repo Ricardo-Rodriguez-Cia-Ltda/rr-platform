@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { isAuthorized } from '../lib/auth';
-import { intcomex } from '../lib/providers/intcomex';
-import type { Provider } from '../lib/types';
-import { ProviderError } from '../lib/types';
+import { isAuthorized } from '../lib/auth.js';
+import { intcomex } from '../lib/providers/intcomex.js';
+import type { Provider } from '../lib/types.js';
+import { ProviderError } from '../lib/types.js';
 
 const providers: Record<string, Provider> = {
   intcomex,
