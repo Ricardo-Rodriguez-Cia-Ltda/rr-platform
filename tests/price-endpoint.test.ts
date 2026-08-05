@@ -113,7 +113,24 @@ describe('GET /api/price', () => {
     const res = makeRes();
     await handler(makeReq({ sku: 'X' }, AUTH), res);
     expect(res.statusCode).toBe(502);
-    expect(res.body).toMatchObject({ error: 'upstream' });
+    expect(res.body).toMatchObject({ error: 'upstream', detail: 'Intcomex responded with HTTP 500' });
+  });
+
+  it('surfaces ProviderError.detail when present', async () => {
+    getPriceMock.mockRejectedValue(
+      new ProviderError('upstream', 'Intcomex responded with HTTP 500', 'kaboom'),
+    );
+    const res = makeRes();
+    await handler(makeReq({ sku: 'X' }, AUTH), res);
+    expect(res.statusCode).toBe(502);
+    expect(res.body).toMatchObject({ error: 'upstream', detail: 'kaboom' });
+  });
+
+  it('returns 405 for non-GET methods', async () => {
+    const res = makeRes();
+    await handler({ ...makeReq({ sku: 'X' }, AUTH), method: 'POST' } as VercelRequest, res);
+    expect(res.statusCode).toBe(405);
+    expect(res.body).toMatchObject({ error: 'method_not_allowed' });
   });
 
   it('maps unexpected errors to 502 without leaking details', async () => {

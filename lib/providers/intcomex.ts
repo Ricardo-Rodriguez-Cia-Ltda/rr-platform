@@ -38,7 +38,7 @@ function getConfig(): { apiKey: string; accessKey: string; baseUrl: string } {
   if (!apiKey || !accessKey || !baseUrl) {
     throw new ProviderError('upstream', 'Intcomex credentials are not configured');
   }
-  return { apiKey, accessKey, baseUrl };
+  return { apiKey, accessKey, baseUrl: baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/` };
 }
 
 export const intcomex: Provider = {

@@ -88,6 +88,19 @@ describe('intcomex.getPrice', () => {
     expect((error as ProviderError).detail ?? '').not.toContain('secret-key');
   });
 
+  it('normalizes INTCOMEX_BASE_URL without a trailing slash', async () => {
+    vi.stubEnv('INTCOMEX_BASE_URL', 'https://intcomex-test.apigee.net/v1');
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(IWS_PRODUCT), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await intcomex.getPrice({ sku: 'SE001MSE01' });
+
+    const [url] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    expect(url.href).toContain('/v1/getproduct');
+  });
+
   it('throws upstream when credentials are not configured', async () => {
     vi.stubEnv('INTCOMEX_ACCESS_KEY', '');
 

@@ -13,6 +13,11 @@ function firstString(value: string | string[] | undefined): string | undefined {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
+  if (req.method && req.method !== 'GET') {
+    res.status(405).json({ error: 'method_not_allowed', detail: 'Use GET' });
+    return;
+  }
+
   const apiKeyHeader = firstString(req.headers['x-api-key']);
   if (!isAuthorized(apiKeyHeader, process.env.API_SECRET_KEY)) {
     res.status(401).json({ error: 'unauthorized', detail: 'Missing or invalid x-api-key header' });
@@ -47,7 +52,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   } catch (error) {
     if (error instanceof ProviderError) {
       const status = error.kind === 'not_found' ? 404 : 502;
-      res.status(status).json({ error: error.kind, detail: error.message });
+      res.status(status).json({ error: error.kind, detail: error.detail ?? error.message });
       return;
     }
     res.status(502).json({ error: 'upstream', detail: 'Unexpected error calling provider' });
