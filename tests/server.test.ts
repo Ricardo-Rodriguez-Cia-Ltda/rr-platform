@@ -116,3 +116,49 @@ describe('local server adapter', () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe('BASE_PATH routing', () => {
+  let prefixed: Server;
+  let prefixedBase: string;
+
+  beforeAll(async () => {
+    vi.stubEnv('BASE_PATH', '/rr/captador-precios');
+    prefixed = createApp();
+    await new Promise<void>((resolve) => prefixed.listen(0, '127.0.0.1', resolve));
+    prefixedBase = `http://127.0.0.1:${(prefixed.address() as AddressInfo).port}`;
+  });
+
+  afterAll(async () => {
+    prefixed.closeAllConnections();
+    await new Promise((resolve) => prefixed.close(resolve));
+    vi.unstubAllEnvs();
+  });
+
+  beforeEach(() => {
+    vi.stubEnv('API_SECRET_KEY', 'test-secret');
+    getPriceMock.mockReset();
+  });
+
+  it('serves the price endpoint under the configured prefix', async () => {
+    getPriceMock.mockResolvedValue(RESULT);
+    const res = await fetch(`${prefixedBase}/rr/captador-precios/price?sku=SE001MSE01`, {
+      headers: { 'x-api-key': 'test-secret' },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(RESULT);
+  });
+
+  it('still serves /api/price so Vercel and local stay in parity', async () => {
+    getPriceMock.mockResolvedValue(RESULT);
+    const res = await fetch(`${prefixedBase}/api/price?sku=SE001MSE01`, {
+      headers: { 'x-api-key': 'test-secret' },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('404s a path that only partially matches the prefix', async () => {
+    const res = await fetch(`${prefixedBase}/rr/captador-precios/otra`);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: 'not_found' });
+  });
+});
