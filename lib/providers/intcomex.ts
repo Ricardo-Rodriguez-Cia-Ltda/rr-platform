@@ -77,7 +77,13 @@ export const intcomex: Provider = {
       );
     }
 
-    const product = (await response.json()) as IwsProduct;
+    let product: IwsProduct;
+    try {
+      product = (await response.json()) as IwsProduct;
+    } catch {
+      throw new ProviderError('upstream', 'Intcomex returned an invalid JSON response');
+    }
+
     if (product.Price?.UnitPrice == null) {
       throw new ProviderError('not_found', 'Intcomex returned no price for this product');
     }

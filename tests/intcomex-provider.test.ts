@@ -95,4 +95,15 @@ describe('intcomex.getPrice', () => {
       kind: 'upstream',
     });
   });
+
+  it('throws upstream when the response is not valid JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('not json', { status: 200 })),
+    );
+
+    await expect(intcomex.getPrice({ sku: 'X' })).rejects.toMatchObject({
+      kind: 'upstream',
+    });
+  });
 });
