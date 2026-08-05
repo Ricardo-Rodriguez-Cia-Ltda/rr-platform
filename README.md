@@ -108,7 +108,13 @@ cloudflared service install
 
 ### Autoarranque del servidor
 
-Task Scheduler → Create Task: trigger "At startup", action "Start a program":
+Hay un script que deja todo instalado (túnel como servicio + servidor como tarea programada al arrancar el equipo + desactivar suspensión). En PowerShell **como Administrador**:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install-autostart.ps1
+```
+
+Para hacerlo a mano en vez del script: Task Scheduler → Create Task: trigger "At startup", action "Start a program":
 - Program: `cmd`
 - Arguments: `/c cd /d C:\ruta\al\proyecto && npm run serve >> logs\serve.log 2>&1`
 - Marcar "Run whether user is logged on or not".
@@ -118,6 +124,13 @@ Task Scheduler → Create Task: trigger "At startup", action "Start a program":
 
 ```
 GET https://precios.TUDOMINIO.cl/api/price?sku=...   (o mpn= / upc=)
+Header: x-api-key: <API_SECRET_KEY>
+```
+
+Instalación actual de Ricardo Rodríguez y Cía. (túnel `captador-precios`, `BASE_PATH=/rr/captador-precios`):
+
+```
+GET https://api.pyxis-latam.cl/rr/captador-precios/price?sku=...   (o mpn= / upc=)
 Header: x-api-key: <API_SECRET_KEY>
 ```
 
