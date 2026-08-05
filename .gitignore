@@ -1,5 +1,7 @@
 node_modules/
+.superpowers/
 .vercel/
+logs/
 .env
 .env.*
 !.env.example
