@@ -67,6 +67,8 @@ npm run serve        # sirve en http://127.0.0.1:3000 (PORT/HOST para cambiar)
 
 Usa el mismo handler y `.env.local` que el resto del proyecto.
 
+Variable opcional `BASE_PATH`: expone el endpoint tambien bajo un prefijo de ruta, util cuando el subdominio del tunel agrupa varios servicios. Con `BASE_PATH=/rr/captador-precios` responden tanto `/api/price` como `/rr/captador-precios/price`. Sin la variable, solo `/api/price`.
+
 ### Cloudflare Tunnel (una vez, como servicio de Windows)
 
 Requisitos: dominio de la empresa con DNS en Cloudflare (plan gratuito).
