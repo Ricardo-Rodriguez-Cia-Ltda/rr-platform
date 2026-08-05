@@ -1,0 +1,20 @@
+{
+  "name": "scrapper-proveedores",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check": "tsx --env-file=.env.local scripts/check.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@vercel/node": "^5",
+    "tsx": "^4",
+    "typescript": "^5",
+    "vitest": "^3"
+  }
+}
