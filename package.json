@@ -8,7 +8,8 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "check": "tsx --env-file=.env.local scripts/check.ts"
+    "check": "tsx --env-file=.env.local scripts/check.ts",
+    "serve": "tsx --env-file=.env.local server.ts"
   },
   "devDependencies": {
     "@types/node": "^22",
