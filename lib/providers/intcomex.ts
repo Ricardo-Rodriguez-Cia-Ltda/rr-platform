@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
-import type { PriceQuery, PriceResult, Provider } from '../types';
-import { ProviderError } from '../types';
+import type { PriceQuery, PriceResult, Provider } from '../types.js';
+import { ProviderError } from '../types.js';
 
 export function formatUtcTimestamp(date: Date): string {
   return date.toISOString().replace(/\.\d{3}Z$/, 'Z');
