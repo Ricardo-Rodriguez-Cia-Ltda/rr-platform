@@ -71,6 +71,8 @@ Usa el mismo handler y `.env.local` que el resto del proyecto.
 
 Requisitos: dominio de la empresa con DNS en Cloudflare (plan gratuito).
 
+El siguiente bloque debe ejecutarse en una consola de PowerShell abierta **como Administrador**: instalar el servicio de Windows requiere permisos elevados.
+
 ```powershell
 winget install Cloudflare.cloudflared
 cloudflared tunnel login                 # abre el navegador; elegir el dominio
@@ -84,21 +86,31 @@ tunnel: <TUNNEL-ID>
 credentials-file: C:\Users\<usuario>\.cloudflared\<TUNNEL-ID>.json
 ingress:
   - hostname: precios.TUDOMINIO.cl
-    service: http://localhost:3000
+    service: http://127.0.0.1:3000
   - service: http_status:404
 ```
+
+Nota: el servidor local escucha solo en IPv4 (`127.0.0.1`); en Windows `localhost` puede resolver primero a `::1` (IPv6) y fallar la conexión, por eso se usa la IP explícita.
 
 ```powershell
 cloudflared tunnel route dns precios precios.TUDOMINIO.cl
 cloudflared service install              # queda como servicio de Windows (auto-arranca)
 ```
 
+Importante: `cloudflared service install` copia `config.yml` y el archivo de credenciales al perfil de `LocalSystem`. Si luego editas el `config.yml` de tu usuario, el servicio **no** toma los cambios automáticamente; hay que reinstalarlo:
+
+```powershell
+cloudflared service uninstall
+cloudflared service install
+```
+
 ### Autoarranque del servidor
 
 Task Scheduler → Create Task: trigger "At startup", action "Start a program":
 - Program: `cmd`
-- Arguments: `/c cd /d C:\ruta\al\proyecto && npm run serve`
+- Arguments: `/c cd /d C:\ruta\al\proyecto && npm run serve >> logs\serve.log 2>&1`
 - Marcar "Run whether user is logged on or not".
+- En la pestaña Settings, activar "If the task fails, restart every 1 minute, up to 3 times" para que se recupere solo ante un cierre inesperado.
 
 ### Consumo externo
 
@@ -107,6 +119,28 @@ GET https://precios.TUDOMINIO.cl/api/price?sku=...   (o mpn= / upc=)
 Header: x-api-key: <API_SECRET_KEY>
 ```
 
-El PC debe permanecer encendido y con internet. Si cambia `.env.local`, reiniciar el servidor (la tarea programada o `npm run serve`).
+El PC debe permanecer encendido y con internet. Si cambia `.env.local`, reiniciar el servidor (la tarea programada o `npm run serve`). Evitar que el equipo entre en suspensión o hibernación, ya que eso corta el túnel:
+
+```powershell
+powercfg /change standby-timeout-ac 0
+powercfg /change hibernate-timeout-ac 0
+```
+
+También conviene configurar las "Active Hours" de Windows Update (Configuración → Windows Update → Horas activas) para que los reinicios automáticos no ocurran mientras el servicio debe estar disponible.
+
+### Checklist de PC nuevo
+
+Al migrar o configurar el servidor en otro PC:
+
+- `git clone` del repositorio.
+- `npm install`.
+- Crear `.env.local` con credenciales de **producción** (no las de preview/test).
+- Confirmar que la IP pública del PC es la registrada en Intcomex.
+- Correr `npm run serve` una vez de forma interactiva para verificar que responde antes de automatizar nada.
+- Recién ahí configurar la tarea programada (Task Scheduler) y el servicio de Cloudflare Tunnel.
+
+### Seguridad
+
+El endpoint queda accesible desde internet con la `x-api-key` como única barrera. Se recomienda agregar una regla de rate limiting en el WAF de Cloudflare (disponible en el plan gratuito) y, si el sistema consumidor tiene IP fija, una regla que solo permita el tráfico desde esa IP.
 
 Referencia IWS: https://iws.intcomex.com/reference/api.html
