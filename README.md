@@ -55,4 +55,58 @@ vercel            # deploy preview
 vercel --prod     # deploy a producción
 ```
 
+## Hosting local (PC oficina) + Cloudflare Tunnel
+
+Intcomex valida IP de origen; las IPs de Vercel son dinámicas. Alternativa: servir la API desde un PC de la oficina (IP registrada) y exponerla con Cloudflare Tunnel.
+
+### Servidor local
+
+```bash
+npm run serve        # sirve en http://127.0.0.1:3000 (PORT/HOST para cambiar)
+```
+
+Usa el mismo handler y `.env.local` que el resto del proyecto.
+
+### Cloudflare Tunnel (una vez, como servicio de Windows)
+
+Requisitos: dominio de la empresa con DNS en Cloudflare (plan gratuito).
+
+```powershell
+winget install Cloudflare.cloudflared
+cloudflared tunnel login                 # abre el navegador; elegir el dominio
+cloudflared tunnel create precios        # anota el TUNNEL-ID que imprime
+```
+
+Crear `C:\Users\<usuario>\.cloudflared\config.yml`:
+
+```yaml
+tunnel: <TUNNEL-ID>
+credentials-file: C:\Users\<usuario>\.cloudflared\<TUNNEL-ID>.json
+ingress:
+  - hostname: precios.TUDOMINIO.cl
+    service: http://localhost:3000
+  - service: http_status:404
+```
+
+```powershell
+cloudflared tunnel route dns precios precios.TUDOMINIO.cl
+cloudflared service install              # queda como servicio de Windows (auto-arranca)
+```
+
+### Autoarranque del servidor
+
+Task Scheduler → Create Task: trigger "At startup", action "Start a program":
+- Program: `cmd`
+- Arguments: `/c cd /d C:\ruta\al\proyecto && npm run serve`
+- Marcar "Run whether user is logged on or not".
+
+### Consumo externo
+
+```
+GET https://precios.TUDOMINIO.cl/api/price?sku=...   (o mpn= / upc=)
+Header: x-api-key: <API_SECRET_KEY>
+```
+
+El PC debe permanecer encendido y con internet. Si cambia `.env.local`, reiniciar el servidor (la tarea programada o `npm run serve`).
+
 Referencia IWS: https://iws.intcomex.com/reference/api.html
