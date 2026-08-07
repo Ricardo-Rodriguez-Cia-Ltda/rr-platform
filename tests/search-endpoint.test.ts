@@ -314,3 +314,106 @@ describe('GET /search', () => {
     expect(res.body.total).toBe(26);
   });
 });
+
+// --- Paginado de candidatos cuando hay filtros activos ---
+//
+// Los filtros de precio y stock solo pueden aplicarse despues de cotizar, asi
+// que si solo miramos los primeros 50 candidatos una busqueda con filtros
+// devuelve vacio aunque mas abajo si haya productos que cumplen. Medido contra
+// el catalogo real: solo el 27% de los productos tiene stock.
+describe('GET /search — paginado con filtros', () => {
+  // 250 productos "notebook" de la misma marca: sin el paginado, los que
+  // cumplen (los ultimos) quedan fuera de la ventana de candidatos.
+  const CATALOGO_GRANDE = Array.from({ length: 250 }, (_, i) =>
+    producto(`S${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
+  );
+
+  // Solo los SKUs a partir del 150 tienen stock; todos valen 100.
+  function preciosPorLote(skus: string[]) {
+    return new Map(
+      skus.map((sku) => {
+        const n = Number(sku.slice(1));
+        return [sku, { price: 100, currency: 'us', inStock: n >= 150 ? 7 : 0 }];
+      }),
+    );
+  }
+
+  beforeEach(() => {
+    vi.stubEnv('API_SECRET_KEY', 'test-secret');
+    obtenerCatalogoMock.mockReset().mockReturnValue(CATALOGO_GRANDE);
+    getPricesMock.mockReset().mockImplementation((skus: string[]) => Promise.resolve(preciosPorLote(skus)));
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('sigue cotizando lotes hasta encontrar productos que pasen el filtro de stock', async () => {
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.productos).toHaveLength(3);
+    expect(res.body.productos.every((p: any) => p.stock > 0)).toBe(true);
+    // Necesita mas de un lote: los que tienen stock empiezan en el indice 150.
+    expect(getPricesMock.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('informa cuantos candidatos alcanzo a cotizar', async () => {
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
+    expect(res.body.evaluados).toBeGreaterThanOrEqual(200);
+  });
+
+  it('no pagina cuando no hay filtros activos (una sola llamada)', async () => {
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', limite: '3' }, AUTH), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(getPricesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('deja de cotizar apenas junta el limite pedido', async () => {
+    // Con stock desde el indice 0, el primer lote basta.
+    getPricesMock.mockImplementation((skus: string[]) =>
+      Promise.resolve(new Map(skus.map((sku) => [sku, { price: 100, currency: 'us', inStock: 5 }]))),
+    );
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '2' }, AUTH), res);
+
+    expect(res.body.productos).toHaveLength(2);
+    expect(getPricesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('cuando nada pasa los filtros explica por que y ofrece una alternativa', async () => {
+    // Ningun producto tiene stock.
+    getPricesMock.mockImplementation((skus: string[]) =>
+      Promise.resolve(
+        new Map(skus.map((sku) => [sku, { price: Number(sku.slice(1)) + 500, currency: 'us', inStock: 0 }])),
+      ),
+    );
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.productos).toHaveLength(0);
+    expect(res.body.sin_resultados.motivo).toBe('sin_stock');
+    // La alternativa es el mas barato de los evaluados, aunque no cumpla.
+    expect(res.body.sin_resultados.alternativa.precio).toBe(500);
+    expect(res.body.sin_resultados.alternativa.sku).toBe('S0');
+  });
+
+  it('distingue el caso de presupuesto insuficiente', async () => {
+    // Hay stock, pero todos cuestan mas que el tope pedido.
+    getPricesMock.mockImplementation((skus: string[]) =>
+      Promise.resolve(new Map(skus.map((sku) => [sku, { price: 900, currency: 'us', inStock: 4 }]))),
+    );
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', precio_max: '500', limite: '3' }, AUTH), res);
+
+    expect(res.body.productos).toHaveLength(0);
+    expect(res.body.sin_resultados.motivo).toBe('sobre_presupuesto');
+    expect(res.body.sin_resultados.alternativa.precio).toBe(900);
+    expect(res.body.sin_resultados.alternativa.stock).toBeGreaterThan(0);
+  });
+});

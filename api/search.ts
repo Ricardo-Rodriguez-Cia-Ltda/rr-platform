@@ -6,11 +6,46 @@ import { buscar, calcularFacetas, tokenizar } from '../lib/search.js';
 import { ProviderError } from '../lib/types.js';
 
 const UMBRAL_AMBIGUEDAD = 25;
-const MAX_CANDIDATOS_A_COTIZAR = 50;
 const LIMITE_POR_DEFECTO = 10;
+const TAMANO_LOTE = 100;
+// Sin filtros, el orden por relevancia ya deja arriba lo que sirve: un lote basta.
+const MAX_CANDIDATOS_SIN_FILTROS = 50;
+// Con filtros hay que buscar mas abajo: precio y stock solo se conocen al
+// cotizar, y en el catalogo real apenas el 27% de los productos tiene stock.
+const MAX_CANDIDATOS_CON_FILTROS = 300;
 
 function firstString(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
+}
+
+interface Cotizado {
+  sku: string;
+  mpn: string | null;
+  nombre: string | null;
+  marca: string | null;
+  categoria: string | null;
+  precio: number;
+  moneda: string;
+  stock: number | null;
+}
+
+function masBarato(productos: Cotizado[]): Cotizado {
+  return productos.reduce((a, b) => (b.precio < a.precio ? b : a));
+}
+
+function explicarVacio(
+  evaluados: Cotizado[],
+  soloConStock: boolean,
+): { motivo: string; alternativa: Cotizado } {
+  const conStock = evaluados.filter((p) => (p.stock ?? 0) > 0);
+
+  if (soloConStock && conStock.length === 0) {
+    return { motivo: 'sin_stock', alternativa: masBarato(evaluados) };
+  }
+  return {
+    motivo: 'sobre_presupuesto',
+    alternativa: masBarato(conStock.length > 0 ? conStock : evaluados),
+  };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
@@ -93,27 +128,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  const candidatos = productosCoincidentes.slice(0, MAX_CANDIDATOS_A_COTIZAR);
+  const hayFiltros = soloConStock || Number.isFinite(precioMax);
+  const maxCandidatos = hayFiltros ? MAX_CANDIDATOS_CON_FILTROS : MAX_CANDIDATOS_SIN_FILTROS;
+  const candidatos = productosCoincidentes.slice(0, maxCandidatos);
 
-  let precios;
-  try {
-    precios = await getPrices(candidatos.map((p) => p.Sku));
-  } catch (error) {
-    if (error instanceof ProviderError) {
-      console.error('[search] fallo getPrices', { candidatos: candidatos.length, error });
-      res.status(502).json({ error: 'upstream', detail: error.message, upstream: error.detail });
+  const productos: Cotizado[] = [];
+  const evaluados: Cotizado[] = [];
+
+  // Se cotiza por lotes y se corta apenas se junta el limite pedido: sin
+  // filtros esto es un solo lote, igual que antes.
+  for (let i = 0; i < candidatos.length && productos.length < limite; i += TAMANO_LOTE) {
+    const lote = candidatos.slice(i, i + TAMANO_LOTE);
+
+    let precios;
+    try {
+      precios = await getPrices(lote.map((p) => p.Sku));
+    } catch (error) {
+      if (error instanceof ProviderError) {
+        console.error('[search] fallo getPrices', { candidatos: lote.length, error });
+        res.status(502).json({ error: 'upstream', detail: error.message, upstream: error.detail });
+        return;
+      }
+      console.error('[search] fallo getPrices', { candidatos: lote.length, error });
+      res.status(502).json({ error: 'upstream', detail: 'Unexpected error calling provider' });
       return;
     }
-    console.error('[search] fallo getPrices', { candidatos: candidatos.length, error });
-    res.status(502).json({ error: 'upstream', detail: 'Unexpected error calling provider' });
-    return;
-  }
 
-  const productos = candidatos
-    .map((p) => {
+    for (const p of lote) {
       const precio = precios.get(p.Sku);
-      if (!precio) return null;
-      return {
+      if (!precio) continue;
+
+      const cotizado: Cotizado = {
         sku: p.Sku,
         mpn: p.Mpn ?? null,
         nombre: p.Description ?? null,
@@ -123,11 +168,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
         moneda: precio.currency,
         stock: precio.inStock,
       };
-    })
-    .filter((p): p is NonNullable<typeof p> => p !== null)
-    .filter((p) => p.precio <= precioMax)
-    .filter((p) => (soloConStock ? (p.stock ?? 0) > 0 : true))
-    .slice(0, limite);
+      evaluados.push(cotizado);
+
+      if (cotizado.precio > precioMax) continue;
+      if (soloConStock && (cotizado.stock ?? 0) <= 0) continue;
+      if (productos.length < limite) productos.push(cotizado);
+    }
+  }
 
   const preciosDevueltos = productos.map((p) => p.precio);
   const facetasConPrecio =
@@ -135,5 +182,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       ? { ...facetas, precio: { min: Math.min(...preciosDevueltos), max: Math.max(...preciosDevueltos) } }
       : facetas;
 
-  res.status(200).json({ total: coincidencias.length, productos, facetas: facetasConPrecio });
+  res.status(200).json({
+    total: coincidencias.length,
+    evaluados: evaluados.length,
+    productos,
+    facetas: facetasConPrecio,
+    // Vacio con candidatos cotizados no es lo mismo que "no existe": hay que
+    // decir por que fallo y ofrecer lo mas cercano, o el consumidor reintenta
+    // la misma busqueda con otras palabras creyendo que fue un error tecnico.
+    ...(productos.length === 0 && evaluados.length > 0
+      ? { sin_resultados: explicarVacio(evaluados, soloConStock) }
+      : {}),
+  });
 }
