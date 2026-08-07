@@ -53,9 +53,12 @@ Register-ScheduledTask -TaskName "CaptadorPrecios-API" -Action $accionApi -Trigg
 Write-Host "Tarea CaptadorPrecios-API registrada."
 
 # --- 3. Tunel de Cloudflare ---
-# --config explicito: como SYSTEM, cloudflared no ve el perfil del usuario.
-$accionTunel = New-ScheduledTaskAction -Execute "cmd.exe" `
-  -Argument "/c `"$cloudflared`" --config `"$configTunel`" tunnel run >> `"$proj\logs\tunnel.log`" 2>&1"
+# Se ejecuta cloudflared directamente, sin cmd.exe: `cmd /c "ruta con espacios"`
+# se come las comillas y la tarea muere con codigo 1 sin escribir nada.
+# --config explicito porque, como SYSTEM, cloudflared no ve el perfil del usuario;
+# --logfile porque sin cmd no hay redireccion de salida.
+$accionTunel = New-ScheduledTaskAction -Execute $cloudflared `
+  -Argument "--config `"$configTunel`" --logfile `"$proj\logs\tunnel.log`" tunnel run"
 Register-ScheduledTask -TaskName "CaptadorPrecios-Tunnel" -Action $accionTunel -Trigger $trigger `
   -Settings $settings -Principal $principal `
   -Description "Cloudflare Tunnel para api.pyxis-latam.cl" -Force | Out-Null
