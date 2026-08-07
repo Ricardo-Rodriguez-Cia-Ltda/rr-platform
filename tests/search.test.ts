@@ -140,3 +140,38 @@ describe('calcularFacetas', () => {
     expect(facetas.categoria[0]).toEqual({ valor: 'Computadores', n: 2 });
   });
 });
+
+// Cuando se filtra por marca o categoria, esos terminos ya no deben puntuar:
+// si lo hacen, ahogan al termino que de verdad discrimina. Medido en vivo:
+// q="notebook HP" + marca=HP devolvia mochilas, mouses y monitores HP, porque
+// "hp" sumaba 13 puntos en los 804 productos de la marca y "notebook" solo 3.
+describe('buscar — el termino del filtro no puntua', () => {
+  const CATALOGO_HP: CatalogProduct[] = [
+    producto('NT1', 'MPN-NT1', 'HP ProBook 640 - Notebook - 14"', 'HP'),
+    producto('MO1', 'MPN-MO1', 'HP - Mouse - Wired - 265A9UT', 'HP', 'Perifericos'),
+    producto('MT1', 'MPN-MT1', 'HP - LED-backlit LCD monitor - 27"', 'HP', 'Monitores'),
+  ];
+
+  it('con marca=HP, "notebook HP" solo trae el notebook', () => {
+    const skus = buscar(CATALOGO_HP, { q: 'notebook HP', marca: 'HP' }).map((r) => r.product.Sku);
+    expect(skus).toEqual(['NT1']);
+  });
+
+  it('con categoria, el nombre de la categoria tampoco puntua', () => {
+    const skus = buscar(CATALOGO_HP, { q: 'mouse perifericos', categoria: 'Perifericos' }).map(
+      (r) => r.product.Sku,
+    );
+    expect(skus).toEqual(['MO1']);
+  });
+
+  it('si la consulta era solo la marca, sigue devolviendo todo lo de esa marca', () => {
+    const skus = buscar(CATALOGO_HP, { q: 'HP', marca: 'HP' }).map((r) => r.product.Sku);
+    expect(skus).toHaveLength(3);
+  });
+
+  it('sin filtro de marca, la marca sigue puntuando como antes', () => {
+    const resultados = buscar(CATALOGO_HP, { q: 'HP mouse' });
+    expect(resultados[0].product.Sku).toBe('MO1');
+    expect(resultados).toHaveLength(3);
+  });
+});

@@ -69,7 +69,15 @@ function puntuar(product: CatalogProduct, terminos: string[], consultaNormalizad
 export function buscar(catalogo: CatalogProduct[], filtros: SearchFilters): ScoredProduct[] {
   const marca = filtros.marca ? normalizar(filtros.marca) : undefined;
   const categoria = filtros.categoria ? normalizar(filtros.categoria) : undefined;
-  const terminos = [...new Set(tokenizar(filtros.q))];
+  // Lo que ya se filtro no debe volver a puntuar: si se pide marca=HP, la
+  // palabra "HP" de la consulta sumaria en los 800 productos de la marca y
+  // ahogaria al termino que de verdad discrimina ("notebook"), devolviendo
+  // mochilas y mouses HP a quien pidio un notebook.
+  const tokensDelFiltro = new Set([
+    ...tokenizar(filtros.marca ?? ''),
+    ...tokenizar(filtros.categoria ?? ''),
+  ]);
+  const terminos = [...new Set(tokenizar(filtros.q))].filter((t) => !tokensDelFiltro.has(t));
   const consultaNormalizada = normalizar(filtros.q).trim();
 
   const resultados: ScoredProduct[] = [];
