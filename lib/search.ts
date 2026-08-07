@@ -41,19 +41,20 @@ export function tokenizar(texto: string): string[] {
     .filter(Boolean);
 }
 
-function puntuar(product: CatalogProduct, terminos: string[]): number {
-  const mpn = normalizar(product.Mpn ?? '');
+function puntuar(product: CatalogProduct, terminos: string[], consultaNormalizada: string): number {
+  const mpnNormalizado = normalizar(product.Mpn ?? '');
   const tokensMpn = new Set(tokenizar(product.Mpn ?? ''));
   const tokensMarca = new Set(tokenizar(product.Brand?.Description ?? ''));
   const tokensDescripcion = new Set(tokenizar(product.Description ?? ''));
 
+  // El MPN aporta a lo sumo PESO_MPN_EXACTO por producto, sin importar en
+  // cuantos tokens se parta: un MPN de dos tokens no vale mas que uno de uno.
   let score = 0;
+  const calzaMpnCompleto = Boolean(mpnNormalizado) && consultaNormalizada === mpnNormalizado;
+  const calzaAlgunTokenMpn = terminos.some((t) => tokensMpn.has(t));
+  if (calzaMpnCompleto || calzaAlgunTokenMpn) score += PESO_MPN_EXACTO;
+
   for (const termino of terminos) {
-    if (mpn && termino === mpn) {
-      score += PESO_MPN_EXACTO;
-    } else if (tokensMpn.has(termino)) {
-      score += PESO_MPN_EXACTO;
-    }
     if (tokensMarca.has(termino)) score += PESO_MARCA;
     if (tokensDescripcion.has(termino)) score += PESO_DESCRIPCION;
   }
@@ -64,20 +65,14 @@ export function buscar(catalogo: CatalogProduct[], filtros: SearchFilters): Scor
   const marca = filtros.marca ? normalizar(filtros.marca) : undefined;
   const categoria = filtros.categoria ? normalizar(filtros.categoria) : undefined;
   const terminos = [...new Set(tokenizar(filtros.q))];
-  const queryNormalizado = normalizar(filtros.q).trim();
+  const consultaNormalizada = normalizar(filtros.q).trim();
 
   const resultados: ScoredProduct[] = [];
   for (const product of catalogo) {
     if (marca && normalizar(product.Brand?.Description ?? '') !== marca) continue;
     if (categoria && normalizar(product.Category?.Description ?? '') !== categoria) continue;
 
-    let score = terminos.length === 0 ? 1 : puntuar(product, terminos);
-
-    // Bonus si la búsqueda completa normalizada coincide exactamente con el MPN
-    if (queryNormalizado && queryNormalizado === normalizar(product.Mpn ?? '')) {
-      score = Math.max(score, PESO_MPN_EXACTO);
-    }
-
+    const score = terminos.length === 0 ? 1 : puntuar(product, terminos, consultaNormalizada);
     if (score > 0) resultados.push({ product, score });
   }
 

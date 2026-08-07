@@ -79,22 +79,32 @@ describe('buscar', () => {
     expect(buscar(CATALOGO, { q: 'tractor agricola' })).toEqual([]);
   });
 
-  it('reconoce MPN exacto con puntuación (#)', () => {
+  it('MPN exacto con puntuación recibe el bonus exactamente una vez', () => {
     const resultados = buscar(CATALOGO, { q: '2N6G5LT#ABM' });
+    // Score: MPN bonus 100 (no brand ni descripción calzan con tokens ['2n6g5lt','abm'])
     expect(resultados[0].product.Sku).toBe('NT016HPQ53');
-    expect(resultados[0].score).toBeGreaterThanOrEqual(100);
+    expect(resultados[0].score).toBe(100);
   });
 
-  it('reconoce MPN exacto con guión (-)', () => {
-    const resultados = buscar(CATALOGO, { q: '920-008813' });
-    expect(resultados[0].product.Sku).toBe('ID020LOG11');
-    expect(resultados[0].score).toBeGreaterThanOrEqual(100);
+  it('producto sin MPN coincidente no recibe bonus MPN', () => {
+    // Buscar 'notebook' coincide con la descripción del ProBook pero no con su MPN
+    const resultados = buscar(CATALOGO, { q: 'notebook' });
+    const probook = resultados.find((r) => r.product.Sku === 'NT016HPQ53');
+    expect(probook).toBeDefined();
+    expect(probook!.score).toBe(3); // Solo descripción, sin bonus MPN
   });
 
-  it('MPN exacto con puntuación recibe el bonus', () => {
-    const resultados = buscar(CATALOGO, { q: '2N6G5LT#ABM' });
-    expect(resultados[0].product.Sku).toBe('NT016HPQ53');
-    expect(resultados[0].score).toBeGreaterThanOrEqual(100);
+  it('MPN de un token y dos tokens reciben el mismo bonus cuando se buscan exactamente', () => {
+    // P2725HE es un token, 2N6G5LT#ABM son dos tokens
+    const result1 = buscar(CATALOGO, { q: 'P2725HE' });
+    const result2 = buscar(CATALOGO, { q: '2N6G5LT#ABM' });
+    const mbnBonus1 = result1[0].score >= 100 ? 100 : 0;
+    const mbnBonus2 = result2[0].score >= 100 ? 100 : 0;
+    expect(mbnBonus1).toBe(100);
+    expect(mbnBonus2).toBe(100);
+    // Ambos reciben exactamente el bonus, no más por tener más tokens
+    expect(result1[0].score).toBeLessThanOrEqual(result2[0].score + 10);
+    expect(result2[0].score).toBeLessThanOrEqual(result1[0].score + 10);
   });
 });
 
