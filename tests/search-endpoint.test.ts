@@ -161,4 +161,30 @@ describe('GET /search', () => {
     expect(res.statusCode).toBe(503);
     expect(res.body).toMatchObject({ error: 'catalogo_no_disponible' });
   });
+
+  it('accepts limite=0 and returns empty productos with total count', async () => {
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', limite: '0' }, AUTH), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.productos).toHaveLength(0);
+    expect(res.body.total).toBe(3);
+  });
+
+  it('returns 400 for negative limite', async () => {
+    getPricesMock.mockClear();
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', limite: '-1' }, AUTH), res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toMatchObject({ error: 'bad_request' });
+    expect(getPricesMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 for non-integer limite', async () => {
+    getPricesMock.mockClear();
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', limite: 'abc' }, AUTH), res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toMatchObject({ error: 'bad_request' });
+    expect(getPricesMock).not.toHaveBeenCalled();
+  });
 });

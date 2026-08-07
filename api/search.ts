@@ -33,7 +33,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const categoria = firstString(req.query.categoria);
   const precioMax = Number(firstString(req.query.precio_max) ?? NaN);
   const soloConStock = firstString(req.query.solo_con_stock) === 'true';
-  const limite = Number(firstString(req.query.limite) ?? LIMITE_POR_DEFECTO) || LIMITE_POR_DEFECTO;
+
+  const limiteCrudo = firstString(req.query.limite);
+  let limite = LIMITE_POR_DEFECTO;
+  if (limiteCrudo !== undefined) {
+    const n = Number(limiteCrudo);
+    if (!Number.isInteger(n) || n < 0) {
+      res.status(400).json({
+        error: 'bad_request',
+        detail: 'limite debe ser un entero mayor o igual a 0',
+      });
+      return;
+    }
+    limite = n;
+  }
 
   let catalogo;
   try {
