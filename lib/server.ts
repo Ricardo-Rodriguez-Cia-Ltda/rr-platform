@@ -1,17 +1,28 @@
 import { createServer, type Server } from 'node:http';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import handler from '../api/price.js';
+import priceHandler from '../api/price.js';
+import searchHandler from '../api/search.js';
 
 // BASE_PATH lets the tunnel expose the API under a path prefix
 // (e.g. /rr/captador-precios/price) while /api/price keeps working, so the
 // local server and the Vercel deployment answer the same canonical route.
-function priceRoutes(): string[] {
+function rutas(): Record<string, string> {
   const basePath = (process.env.BASE_PATH ?? '').replace(/\/+$/, '');
-  return basePath ? ['/api/price', `${basePath}/price`] : ['/api/price'];
+  const tabla: Record<string, string> = {
+    '/api/price': 'price',
+    '/api/search': 'search',
+  };
+  if (basePath) {
+    tabla[`${basePath}/price`] = 'price';
+    tabla[`${basePath}/search`] = 'search';
+  }
+  return tabla;
 }
 
+const handlers = { price: priceHandler, search: searchHandler };
+
 export function createApp(): Server {
-  const routes = priceRoutes();
+  const tabla = rutas();
 
   return createServer(async (req, res) => {
     const vres = res as unknown as VercelResponse;
@@ -27,7 +38,8 @@ export function createApp(): Server {
 
     try {
       const url = new URL(req.url ?? '/', `http://${req.headers.host || 'localhost'}`);
-      if (!routes.includes(url.pathname)) {
+      const nombre = tabla[url.pathname];
+      if (!nombre) {
         vres.status(404).json({ error: 'not_found', detail: 'Unknown route' });
         return;
       }
@@ -38,7 +50,7 @@ export function createApp(): Server {
       }
       (req as unknown as VercelRequest).query = query;
 
-      await handler(req as unknown as VercelRequest, vres);
+      await handlers[nombre as keyof typeof handlers](req as unknown as VercelRequest, vres);
     } catch (error) {
       console.error('[server] unhandled request error', error);
       if (!res.headersSent) {
