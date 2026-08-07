@@ -43,12 +43,17 @@ export function tokenizar(texto: string): string[] {
 
 function puntuar(product: CatalogProduct, terminos: string[]): number {
   const mpn = normalizar(product.Mpn ?? '');
+  const tokensMpn = new Set(tokenizar(product.Mpn ?? ''));
   const tokensMarca = new Set(tokenizar(product.Brand?.Description ?? ''));
   const tokensDescripcion = new Set(tokenizar(product.Description ?? ''));
 
   let score = 0;
   for (const termino of terminos) {
-    if (mpn && termino === mpn) score += PESO_MPN_EXACTO;
+    if (mpn && termino === mpn) {
+      score += PESO_MPN_EXACTO;
+    } else if (tokensMpn.has(termino)) {
+      score += PESO_MPN_EXACTO;
+    }
     if (tokensMarca.has(termino)) score += PESO_MARCA;
     if (tokensDescripcion.has(termino)) score += PESO_DESCRIPCION;
   }
@@ -59,13 +64,20 @@ export function buscar(catalogo: CatalogProduct[], filtros: SearchFilters): Scor
   const marca = filtros.marca ? normalizar(filtros.marca) : undefined;
   const categoria = filtros.categoria ? normalizar(filtros.categoria) : undefined;
   const terminos = [...new Set(tokenizar(filtros.q))];
+  const queryNormalizado = normalizar(filtros.q).trim();
 
   const resultados: ScoredProduct[] = [];
   for (const product of catalogo) {
     if (marca && normalizar(product.Brand?.Description ?? '') !== marca) continue;
     if (categoria && normalizar(product.Category?.Description ?? '') !== categoria) continue;
 
-    const score = terminos.length === 0 ? 1 : puntuar(product, terminos);
+    let score = terminos.length === 0 ? 1 : puntuar(product, terminos);
+
+    // Bonus si la búsqueda completa normalizada coincide exactamente con el MPN
+    if (queryNormalizado && queryNormalizado === normalizar(product.Mpn ?? '')) {
+      score = Math.max(score, PESO_MPN_EXACTO);
+    }
+
     if (score > 0) resultados.push({ product, score });
   }
 

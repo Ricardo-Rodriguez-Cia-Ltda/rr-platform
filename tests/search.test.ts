@@ -78,6 +78,24 @@ describe('buscar', () => {
   it('devuelve vacío cuando ningún término calza', () => {
     expect(buscar(CATALOGO, { q: 'tractor agricola' })).toEqual([]);
   });
+
+  it('reconoce MPN exacto con puntuación (#)', () => {
+    const resultados = buscar(CATALOGO, { q: '2N6G5LT#ABM' });
+    expect(resultados[0].product.Sku).toBe('NT016HPQ53');
+    expect(resultados[0].score).toBeGreaterThanOrEqual(100);
+  });
+
+  it('reconoce MPN exacto con guión (-)', () => {
+    const resultados = buscar(CATALOGO, { q: '920-008813' });
+    expect(resultados[0].product.Sku).toBe('ID020LOG11');
+    expect(resultados[0].score).toBeGreaterThanOrEqual(100);
+  });
+
+  it('MPN exacto con puntuación recibe el bonus', () => {
+    const resultados = buscar(CATALOGO, { q: '2N6G5LT#ABM' });
+    expect(resultados[0].product.Sku).toBe('NT016HPQ53');
+    expect(resultados[0].score).toBeGreaterThanOrEqual(100);
+  });
 });
 
 describe('calcularFacetas', () => {
