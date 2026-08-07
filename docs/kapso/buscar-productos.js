@@ -100,7 +100,7 @@ async function handler(request, env) {
     });
   }
 
-  const productos = (datos.productos ?? []).map((p) => ({
+  const aVenta = (p) => ({
     sku: p.sku,
     nombre: p.nombre,
     marca: p.marca,
@@ -108,7 +108,25 @@ async function handler(request, env) {
     precio: precioVenta(p.precio, margen),
     moneda: 'USD',
     disponible: (p.stock ?? 0) > 0,
-  }));
+  });
+
+  const productos = (datos.productos ?? []).map(aVenta);
+
+  // Nada paso los filtros, pero si habia productos: hay que decir por que y
+  // ofrecer lo mas cercano. Si no, el agente cree que fue un error tecnico y
+  // reintenta la misma busqueda con otras palabras.
+  if (productos.length === 0 && datos.sin_resultados) {
+    const motivo = datos.sin_resultados.motivo;
+    return json({
+      estado: 'sin_resultados_con_filtros',
+      motivo,
+      mensaje:
+        motivo === 'sin_stock'
+          ? 'No hay stock inmediato de nada que calce con esa busqueda. NO reintentes la misma busqueda: cuentale al cliente y ofrecele la alternativa.'
+          : 'Ningun producto cabe en ese presupuesto. NO reintentes la misma busqueda: cuentale al cliente y ofrecele la alternativa.',
+      alternativa: aVenta(datos.sin_resultados.alternativa),
+    });
+  }
 
   // La faceta de precio viene en COSTO: se convierte o no se entrega.
   const rango = datos.facetas?.precio
