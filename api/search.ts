@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { isAuthorized } from '../lib/auth.js';
 import { CatalogUnavailableError, obtenerCatalogo } from '../lib/catalog.js';
 import { getPrices } from '../lib/providers/intcomex.js';
-import { buscar, calcularFacetas } from '../lib/search.js';
+import { buscar, calcularFacetas, tokenizar } from '../lib/search.js';
 import { ProviderError } from '../lib/types.js';
 
 const UMBRAL_AMBIGUEDAD = 25;
@@ -28,11 +28,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     res.status(400).json({ error: 'bad_request', detail: 'El parametro q es obligatorio' });
     return;
   }
+  if (tokenizar(q).length === 0) {
+    res.status(400).json({ error: 'bad_request', detail: 'q no contiene terminos buscables' });
+    return;
+  }
 
   const marca = firstString(req.query.marca);
   const categoria = firstString(req.query.categoria);
-  const precioMax = Number(firstString(req.query.precio_max) ?? NaN);
   const soloConStock = firstString(req.query.solo_con_stock) === 'true';
+
+  const precioMaxCrudo = firstString(req.query.precio_max);
+  let precioMax = Number.POSITIVE_INFINITY;
+  if (precioMaxCrudo !== undefined && precioMaxCrudo.trim() !== '') {
+    const n = Number(precioMaxCrudo);
+    if (!Number.isFinite(n) || n <= 0) {
+      res.status(400).json({
+        error: 'bad_request',
+        detail: 'precio_max debe ser un numero mayor a 0',
+      });
+      return;
+    }
+    precioMax = n;
+  }
 
   const limiteCrudo = firstString(req.query.limite);
   let limite = LIMITE_POR_DEFECTO;
@@ -55,7 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     if (error instanceof CatalogUnavailableError) {
       res.status(503).json({
         error: 'catalogo_no_disponible',
-        detail: 'El catalogo aun no se ha descargado. Reintenta en unos segundos.',
+        detail: 'El catalogo aun no esta disponible. Reintenta mas tarde.',
       });
       return;
     }
@@ -83,9 +100,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     precios = await getPrices(candidatos.map((p) => p.Sku));
   } catch (error) {
     if (error instanceof ProviderError) {
-      res.status(502).json({ error: 'upstream', detail: error.detail ?? error.message });
+      console.error('[search] fallo getPrices', { candidatos: candidatos.length, error });
+      res.status(502).json({ error: 'upstream', detail: error.message, upstream: error.detail });
       return;
     }
+    console.error('[search] fallo getPrices', { candidatos: candidatos.length, error });
     res.status(502).json({ error: 'upstream', detail: 'Unexpected error calling provider' });
     return;
   }
@@ -106,9 +125,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
       };
     })
     .filter((p): p is NonNullable<typeof p> => p !== null)
-    .filter((p) => (Number.isFinite(precioMax) ? p.precio <= precioMax : true))
+    .filter((p) => p.precio <= precioMax)
     .filter((p) => (soloConStock ? (p.stock ?? 0) > 0 : true))
     .slice(0, limite);
 
-  res.status(200).json({ total: coincidencias.length, productos, facetas });
+  const preciosDevueltos = productos.map((p) => p.precio);
+  const facetasConPrecio =
+    preciosDevueltos.length > 0
+      ? { ...facetas, precio: { min: Math.min(...preciosDevueltos), max: Math.max(...preciosDevueltos) } }
+      : facetas;
+
+  res.status(200).json({ total: coincidencias.length, productos, facetas: facetasConPrecio });
 }

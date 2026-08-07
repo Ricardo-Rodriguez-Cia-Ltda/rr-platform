@@ -52,9 +52,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   } catch (error) {
     if (error instanceof ProviderError) {
       const status = error.kind === 'not_found' ? 404 : 502;
+      if (status === 502) console.error('[price] fallo getPrice', { sku, mpn, upc, error });
       res.status(status).json({ error: error.kind, detail: error.detail ?? error.message });
       return;
     }
+    console.error('[price] fallo getPrice', { sku, mpn, upc, error });
     res.status(502).json({ error: 'upstream', detail: 'Unexpected error calling provider' });
   }
 }

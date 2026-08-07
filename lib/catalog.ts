@@ -50,7 +50,11 @@ async function descargar(): Promise<CatalogProduct[]> {
   if (!response.ok) {
     throw new Error(`Intcomex respondió HTTP ${response.status} al pedir el catálogo`);
   }
-  return (await response.json()) as CatalogProduct[];
+  const datos = await response.json();
+  if (!Array.isArray(datos) || datos.length === 0) {
+    throw new Error('getcatalog no devolvio un arreglo de productos');
+  }
+  return datos as CatalogProduct[];
 }
 
 export async function cargarCatalogo(): Promise<CatalogProduct[]> {

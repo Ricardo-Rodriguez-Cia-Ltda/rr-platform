@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { CatalogUnavailableError } from '../lib/catalog.js';
 import type { CatalogProduct } from '../lib/search.js';
+import { ProviderError } from '../lib/types.js';
 
 const obtenerCatalogoMock = vi.fn();
 const getPricesMock = vi.fn();
@@ -186,5 +187,130 @@ describe('GET /search', () => {
     expect(res.statusCode).toBe(400);
     expect(res.body).toMatchObject({ error: 'bad_request' });
     expect(getPricesMock).not.toHaveBeenCalled();
+  });
+
+  // C2: precio_max vacío (comun en clientes HTTP / serializadores de tools de LLM)
+  // no debe interpretarse como "precio_max=0" y filtrar todo.
+  it('treats an empty precio_max as "no filter" instead of collapsing all results', async () => {
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', precio_max: '' }, AUTH), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.productos.length).toBeGreaterThan(0);
+  });
+
+  it('treats a whitespace-only precio_max as "no filter"', async () => {
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', precio_max: '   ' }, AUTH), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.productos.length).toBeGreaterThan(0);
+  });
+
+  it('returns 400 for a non-numeric precio_max and does not call getPrices', async () => {
+    getPricesMock.mockClear();
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', precio_max: 'abc' }, AUTH), res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toMatchObject({ error: 'bad_request' });
+    expect(getPricesMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 for a negative precio_max and does not call getPrices', async () => {
+    getPricesMock.mockClear();
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', precio_max: '-5' }, AUTH), res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toMatchObject({ error: 'bad_request' });
+    expect(getPricesMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 for a zero precio_max and does not call getPrices', async () => {
+    getPricesMock.mockClear();
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', precio_max: '0' }, AUTH), res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toMatchObject({ error: 'bad_request' });
+    expect(getPricesMock).not.toHaveBeenCalled();
+  });
+
+  // I5: una consulta de solo puntuación tokeniza a [] y calzaría con todo el catálogo.
+  it('returns 400 for a query that tokenizes to nothing (pure punctuation) and does not call getPrices', async () => {
+    getPricesMock.mockClear();
+    const res = makeRes();
+    await handler(makeReq({ q: '---' }, AUTH), res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toMatchObject({ error: 'bad_request' });
+    expect(getPricesMock).not.toHaveBeenCalled();
+  });
+
+  // I4: la faceta de precio, prometida por el spec, debe viajar en el 200.
+  it('returns facetas.precio with the min/max of the returned products on a 200', async () => {
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook' }, AUTH), res);
+    expect(res.statusCode).toBe(200);
+    const precios = res.body.productos.map((p: any) => p.precio);
+    expect(res.body.facetas.precio).toEqual({
+      min: Math.min(...precios),
+      max: Math.max(...precios),
+    });
+  });
+
+  it('does not include facetas.precio on a 409 (no upstream calls happen on that path)', async () => {
+    const grande = Array.from({ length: 30 }, (_, i) =>
+      producto(`S${i}`, `Notebook generico ${i}`, i % 2 === 0 ? 'HP' : 'Dell', 'Computadores'),
+    );
+    obtenerCatalogoMock.mockReturnValue(grande);
+
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook' }, AUTH), res);
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body.facetas.precio).toBeUndefined();
+  });
+
+  // I3: fallas upstream deben quedar logueadas y el detail debe conservar el
+  // mensaje que trae el status (no solo el cuerpo crudo de Intcomex).
+  it('logs upstream failures and keeps the status-bearing message in detail on 502', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    getPricesMock.mockRejectedValue(
+      new ProviderError('upstream', 'Intcomex responded with HTTP 500', 'raw body'),
+    );
+
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook' }, AUTH), res);
+
+    expect(res.statusCode).toBe(502);
+    expect(res.body.detail).toContain('HTTP 500');
+    expect(res.body.upstream).toBe('raw body');
+    expect(consoleErrorSpy).toHaveBeenCalled();
+
+    consoleErrorSpy.mockRestore();
+  });
+
+  // Ledger: el umbral de ambigüedad (25) debe ser estrictamente ">", no ">=".
+  it('returns 200 (not 409) at exactly the ambiguity threshold (25 matches)', async () => {
+    const exacto = Array.from({ length: 25 }, (_, i) =>
+      producto(`T${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
+    );
+    obtenerCatalogoMock.mockReturnValue(exacto);
+    getPricesMock.mockResolvedValue(new Map());
+
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook' }, AUTH), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.total).toBe(25);
+  });
+
+  it('returns 409 just past the ambiguity threshold (26 matches)', async () => {
+    const pasado = Array.from({ length: 26 }, (_, i) =>
+      producto(`T${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
+    );
+    obtenerCatalogoMock.mockReturnValue(pasado);
+
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook' }, AUTH), res);
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body.total).toBe(26);
   });
 });

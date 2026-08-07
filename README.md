@@ -82,7 +82,7 @@ Lista las marcas y categorías reales con su conteo. No es una herramienta para 
 
 ### Catálogo
 
-El catálogo (unos 10.000 productos) se descarga al arrancar y se refresca cada 24 horas, con copia en `cache/catalog.json`. Mientras la primera descarga no termina, estos tres endpoints responden **503 `catalogo_no_disponible`**. Si el refresco falla pero hay copia en disco, se sigue usando la copia vencida: el precio siempre se consulta en vivo, así que lo único desactualizado sería el surtido.
+El catálogo (unos 10.000 productos) se descarga al arrancar y se refresca cada 24 horas, con copia en `cache/catalog.json`. Mientras la primera descarga no termina, estos tres endpoints responden **503 `catalogo_no_disponible`**. Si el refresco falla pero hay copia en disco, se sigue usando la copia vencida: el precio siempre se consulta en vivo, así que lo único desactualizado sería el surtido. Si la descarga inicial falla (por ejemplo, Intcomex caído en un arranque en frío) y no hay copia en disco, se reintenta cada 5 minutos en vez de esperar las 24 horas completas.
 
 > **Importante:** las respuestas de búsqueda traen el precio de **costo**. Si el consumidor es un LLM que habla con clientes finales, el margen debe aplicarse en un nodo determinista antes de que la respuesta entre al contexto del modelo.
 

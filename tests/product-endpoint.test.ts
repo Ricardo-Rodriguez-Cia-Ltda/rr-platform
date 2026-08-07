@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import type { CatalogProduct } from '../lib/search.js';
+import { ProviderError } from '../lib/types.js';
 
 const obtenerCatalogoMock = vi.fn();
 const getPricesMock = vi.fn();
@@ -100,6 +101,25 @@ describe('GET /product/{sku}', () => {
     const res = makeRes();
     await productHandler(makeReq({ sku: 'HP1' }, AUTH), res);
     expect(res.statusCode).toBe(404);
+  });
+
+  // I3: fallas upstream deben quedar logueadas y el detail debe conservar el
+  // mensaje que trae el status (no solo el cuerpo crudo de Intcomex).
+  it('logs upstream failures and keeps the status-bearing message in detail on 502', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    getPricesMock.mockRejectedValue(
+      new ProviderError('upstream', 'Intcomex responded with HTTP 500', 'raw body'),
+    );
+
+    const res = makeRes();
+    await productHandler(makeReq({ sku: 'HP1' }, AUTH), res);
+
+    expect(res.statusCode).toBe(502);
+    expect(res.body.detail).toContain('HTTP 500');
+    expect(res.body.upstream).toBe('raw body');
+    expect(consoleErrorSpy).toHaveBeenCalled();
+
+    consoleErrorSpy.mockRestore();
   });
 });
 

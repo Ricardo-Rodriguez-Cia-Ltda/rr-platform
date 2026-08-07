@@ -43,16 +43,21 @@ export function tokenizar(texto: string): string[] {
 
 function puntuar(product: CatalogProduct, terminos: string[], consultaNormalizada: string): number {
   const mpnNormalizado = normalizar(product.Mpn ?? '');
-  const tokensMpn = new Set(tokenizar(product.Mpn ?? ''));
+  const mpnCompacto = tokenizar(product.Mpn ?? '').join('');
   const tokensMarca = new Set(tokenizar(product.Brand?.Description ?? ''));
   const tokensDescripcion = new Set(tokenizar(product.Description ?? ''));
 
   // El MPN aporta a lo sumo PESO_MPN_EXACTO por producto, sin importar en
   // cuantos tokens se parta: un MPN de dos tokens no vale mas que uno de uno.
+  // Solo se otorga cuando el MPN completo calza (con o sin su puntuacion
+  // original), nunca por un fragmento suelto: un termino corto como "27" o
+  // "16" no debe hacer calzar cualquier MPN que lo contenga en algun lado.
   let score = 0;
-  const calzaMpnCompleto = Boolean(mpnNormalizado) && consultaNormalizada === mpnNormalizado;
-  const calzaAlgunTokenMpn = terminos.some((t) => tokensMpn.has(t));
-  if (calzaMpnCompleto || calzaAlgunTokenMpn) score += PESO_MPN_EXACTO;
+  const calzaMpnCompleto =
+    Boolean(mpnNormalizado) &&
+    (consultaNormalizada === mpnNormalizado ||
+      (Boolean(mpnCompacto) && terminos.includes(mpnCompacto)));
+  if (calzaMpnCompleto) score += PESO_MPN_EXACTO;
 
   for (const termino of terminos) {
     if (tokensMarca.has(termino)) score += PESO_MARCA;

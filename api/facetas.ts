@@ -24,7 +24,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     if (error instanceof CatalogUnavailableError) {
       res.status(503).json({
         error: 'catalogo_no_disponible',
-        detail: 'El catalogo aun no se ha descargado. Reintenta en unos segundos.',
+        detail: 'El catalogo aun no esta disponible. Reintenta mas tarde.',
       });
       return;
     }

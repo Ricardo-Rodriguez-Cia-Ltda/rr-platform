@@ -84,4 +84,46 @@ describe('cargarCatalogo', () => {
 
     expect(catalogo).toHaveLength(2);
   });
+
+  it('rechaza una respuesta 200 que no es un arreglo (p.ej. rate limit de apigee) y no pisa el caché vigente en disco', async () => {
+    const viejo = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+    writeFileSync(cachePath, JSON.stringify({ descargadoEn: viejo, productos: ITEMS }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ Message: 'Rate limit exceeded' }), { status: 200 }),
+      ),
+    );
+
+    const catalogo = await cargarCatalogo();
+
+    // Cae al fallback del caché vencido, no al objeto envenenado.
+    expect(catalogo).toEqual(ITEMS);
+    expect(obtenerCatalogo()).toEqual(ITEMS);
+
+    // El archivo en disco sigue siendo el caché viejo válido: no se sobrescribió
+    // con el objeto de error ni con una marca de tiempo fresca.
+    const enDisco = JSON.parse(readFileSync(cachePath, 'utf8'));
+    expect(enDisco.descargadoEn).toBe(viejo);
+    expect(enDisco.productos).toEqual(ITEMS);
+  });
+
+  it('rechaza un arreglo vacío como catálogo válido', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('[]', { status: 200 })));
+
+    await expect(cargarCatalogo()).rejects.toThrow();
+    expect(() => obtenerCatalogo()).toThrow(CatalogUnavailableError);
+  });
+
+  it('una respuesta no-arreglo sin caché de respaldo se propaga como error (no queda catálogo envenenado en memoria)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ Message: 'Rate limit exceeded' }), { status: 200 }),
+      ),
+    );
+
+    await expect(cargarCatalogo()).rejects.toThrow();
+    expect(() => obtenerCatalogo()).toThrow(CatalogUnavailableError);
+  });
 });

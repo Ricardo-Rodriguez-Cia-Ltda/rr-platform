@@ -83,14 +83,16 @@ Parámetros: `q` (requerido, texto libre), `marca`, `categoria`, `precio_max`, `
 }
 ```
 
-**409 `demasiado_amplio`** cuando las coincidencias superan el umbral (25) y no se envió `marca` ni `categoria`:
+La faceta `precio` solo se incluye en la respuesta **200**, calculada sobre los productos con precio efectivamente devueltos. Se omite cuando no hay productos con precio (por ejemplo, cero resultados).
+
+**409 `demasiado_amplio`** cuando las coincidencias superan el umbral (25) y no se envió `marca` ni `categoria`. Esta ruta no hace ninguna llamada a Intcomex (no hay cotización), así que no hay precios y `facetas` nunca trae la clave `precio`:
 
 ```json
 {
   "error": "demasiado_amplio",
   "detail": "212 coincidencias. Acota con marca o categoria.",
   "total": 212,
-  "facetas": { "marca": [...], "categoria": [...], "precio": {...} }
+  "facetas": { "marca": [...], "categoria": [...] }
 }
 ```
 

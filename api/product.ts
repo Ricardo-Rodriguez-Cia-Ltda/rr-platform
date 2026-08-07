@@ -31,7 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     if (error instanceof CatalogUnavailableError) {
       res.status(503).json({
         error: 'catalogo_no_disponible',
-        detail: 'El catalogo aun no se ha descargado. Reintenta en unos segundos.',
+        detail: 'El catalogo aun no esta disponible. Reintenta mas tarde.',
       });
       return;
     }
@@ -48,8 +48,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   try {
     precios = await getPrices([sku]);
   } catch (error) {
-    const detail = error instanceof ProviderError ? (error.detail ?? error.message) : 'Unexpected error calling provider';
-    res.status(502).json({ error: 'upstream', detail });
+    if (error instanceof ProviderError) {
+      console.error('[product] fallo getPrices', { sku, error });
+      res.status(502).json({ error: 'upstream', detail: error.message, upstream: error.detail });
+      return;
+    }
+    console.error('[product] fallo getPrices', { sku, error });
+    res.status(502).json({ error: 'upstream', detail: 'Unexpected error calling provider' });
     return;
   }
 

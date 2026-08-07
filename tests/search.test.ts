@@ -23,6 +23,9 @@ const CATALOGO: CatalogProduct[] = [
   producto('NT016HPQ53', '2N6G5LT#ABM', 'HP ProBook 640 G8 - Notebook - 14" - Intel Core i7', 'HP'),
   producto('100016385', '4P5H8AA', 'HyperX CloudX Gaming - Auricular - tamaño completo - cableado', 'HyperX', 'Audio'),
   producto('ID020LOG11', '920-008813', 'Logitech K380 - Teclado - inalámbrico - Bluetooth', 'Logitech', 'Accesorios'),
+  // Decoy: su MPN contiene "27" como fragmento, igual que un termino comun
+  // de consulta ("monitor dell 27"). No debe hijackear el ranking del monitor.
+  producto('CB027KIN01', '27-ABC12', 'Kingston USB-C Cable - 2m - Carga rapida', 'Kingston', 'Accesorios'),
 ];
 
 describe('normalizar', () => {
@@ -94,17 +97,38 @@ describe('buscar', () => {
     expect(probook!.score).toBe(3); // Solo descripción, sin bonus MPN
   });
 
-  it('MPN de un token y dos tokens reciben el mismo bonus cuando se buscan exactamente', () => {
+  it('MPN de un token y dos tokens reciben el mismo bonus base cuando se buscan exactamente', () => {
     // P2725HE es un token, 2N6G5LT#ABM son dos tokens
     const result1 = buscar(CATALOGO, { q: 'P2725HE' });
     const result2 = buscar(CATALOGO, { q: '2N6G5LT#ABM' });
-    const mbnBonus1 = result1[0].score >= 100 ? 100 : 0;
-    const mbnBonus2 = result2[0].score >= 100 ? 100 : 0;
-    expect(mbnBonus1).toBe(100);
-    expect(mbnBonus2).toBe(100);
-    // Ambos reciben exactamente el bonus, no más por tener más tokens
-    expect(result1[0].score).toBeLessThanOrEqual(result2[0].score + 10);
-    expect(result2[0].score).toBeLessThanOrEqual(result1[0].score + 10);
+    // result1: 100 (MPN exacto) + 3 (el termino "p2725he" tambien esta en la
+    // descripcion del propio producto). result2: 100 (MPN exacto), ninguno
+    // de sus dos tokens ("2n6g5lt", "abm") aparece en marca ni descripcion.
+    expect(result1[0].score).toBe(103);
+    expect(result2[0].score).toBe(100);
+  });
+
+  it('un fragmento de MPN que calza con un termino de la consulta no otorga el bonus (evita hijack de ranking)', () => {
+    const resultados = buscar(CATALOGO, { q: 'monitor dell 27' });
+    expect(resultados[0].product.Sku).toBe('MT027DEL20');
+    expect(resultados[0].score).toBe(16); // 10 marca + 3 "dell" + 3 "27" en descripcion, sin bonus MPN
+
+    const decoy = resultados.find((r) => r.product.Sku === 'CB027KIN01');
+    // El decoy (MPN "27-ABC12") no matchea ni marca ni descripcion con estos
+    // terminos, asi que ni siquiera aparece en los resultados (score 0).
+    expect(decoy).toBeUndefined();
+  });
+
+  it('MPN con guion calza completo cuando la consulta trae el mismo guion', () => {
+    const resultados = buscar(CATALOGO, { q: '920-008813' });
+    expect(resultados[0].product.Sku).toBe('ID020LOG11');
+    expect(resultados[0].score).toBe(100);
+  });
+
+  it('el mismo MPN escrito sin el guion tambien recibe el bonus', () => {
+    const resultados = buscar(CATALOGO, { q: '920008813' });
+    expect(resultados[0].product.Sku).toBe('ID020LOG11');
+    expect(resultados[0].score).toBe(100);
   });
 });
 
