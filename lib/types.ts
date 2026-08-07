@@ -14,6 +14,12 @@ export interface PriceResult {
   inStock: number | null;
 }
 
+export interface PriceInfo {
+  price: number;
+  currency: string;
+  inStock: number | null;
+}
+
 export interface Provider {
   name: string;
   getPrice(query: PriceQuery): Promise<PriceResult>;

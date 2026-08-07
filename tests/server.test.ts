@@ -161,4 +161,15 @@ describe('BASE_PATH routing', () => {
     expect(res.status).toBe(404);
     expect(await res.json()).toMatchObject({ error: 'not_found' });
   });
+
+  it('enruta /product/{sku} tomando el sku del path', async () => {
+    const res = await fetch(`${prefixedBase}/rr/captador-precios/product/HP1`);
+    // Sin x-api-key el handler responde 401: basta para probar que enrutó.
+    expect(res.status).toBe(401);
+  });
+
+  it('404 para /product sin sku en el path', async () => {
+    const res = await fetch(`${prefixedBase}/rr/captador-precios/product/`);
+    expect(res.status).toBe(404);
+  });
 });

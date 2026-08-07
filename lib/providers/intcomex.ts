@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import type { PriceQuery, PriceResult, Provider } from '../types.js';
+import type { PriceInfo, PriceQuery, PriceResult, Provider } from '../types.js';
 import { ProviderError } from '../types.js';
 
 export function formatUtcTimestamp(date: Date): string {
@@ -23,6 +23,32 @@ export function buildAuthToken(apiKey: string, accessKey: string, now: Date): st
   return `apiKey=${apiKey}&utcTimeStamp=${utcTimeStamp}&signature=${signature}`;
 }
 
+export async function fetchIws(
+  path: string,
+  params: Record<string, string> = {},
+): Promise<Response> {
+  const apiKey = process.env.INTCOMEX_API_KEY;
+  const accessKey = process.env.INTCOMEX_ACCESS_KEY;
+  const rawBaseUrl = process.env.INTCOMEX_BASE_URL;
+  if (!apiKey || !accessKey || !rawBaseUrl) {
+    throw new ProviderError('upstream', 'Intcomex credentials are not configured');
+  }
+  const baseUrl = rawBaseUrl.endsWith('/') ? rawBaseUrl : `${rawBaseUrl}/`;
+
+  const url = new URL(path, baseUrl);
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+
+  try {
+    return await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${buildAuthToken(apiKey, accessKey, new Date())}`,
+      },
+    });
+  } catch {
+    throw new ProviderError('upstream', 'Could not reach Intcomex');
+  }
+}
+
 interface IwsProduct {
   Sku?: string;
   Mpn?: string;
@@ -31,39 +57,19 @@ interface IwsProduct {
   InStock?: number;
 }
 
-function getConfig(): { apiKey: string; accessKey: string; baseUrl: string } {
-  const apiKey = process.env.INTCOMEX_API_KEY;
-  const accessKey = process.env.INTCOMEX_ACCESS_KEY;
-  const baseUrl = process.env.INTCOMEX_BASE_URL;
-  if (!apiKey || !accessKey || !baseUrl) {
-    throw new ProviderError('upstream', 'Intcomex credentials are not configured');
-  }
-  return { apiKey, accessKey, baseUrl: baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/` };
-}
-
 export const intcomex: Provider = {
   name: 'intcomex',
 
   async getPrice(query: PriceQuery): Promise<PriceResult> {
-    const { apiKey, accessKey, baseUrl } = getConfig();
+    const params: Record<string, string> = {
+      includePriceData: 'true',
+      includeInventoryData: 'true',
+    };
+    if (query.sku) params.sku = query.sku;
+    if (query.mpn) params.mpn = query.mpn;
+    if (query.upc) params.upc = query.upc;
 
-    const url = new URL('getproduct', baseUrl);
-    if (query.sku) url.searchParams.set('sku', query.sku);
-    if (query.mpn) url.searchParams.set('mpn', query.mpn);
-    if (query.upc) url.searchParams.set('upc', query.upc);
-    url.searchParams.set('includePriceData', 'true');
-    url.searchParams.set('includeInventoryData', 'true');
-
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${buildAuthToken(apiKey, accessKey, new Date())}`,
-        },
-      });
-    } catch {
-      throw new ProviderError('upstream', 'Could not reach Intcomex');
-    }
+    const response = await fetchIws('getproduct', params);
 
     if (response.status === 404) {
       throw new ProviderError('not_found', 'Product not found at Intcomex');
@@ -99,3 +105,49 @@ export const intcomex: Provider = {
     };
   },
 };
+
+const MAX_SKUS_POR_LLAMADA = 100;
+
+export async function getPrices(skus: string[]): Promise<Map<string, PriceInfo>> {
+  const prices = new Map<string, PriceInfo>();
+  if (skus.length === 0) return prices;
+  if (skus.length > MAX_SKUS_POR_LLAMADA) {
+    throw new ProviderError(
+      'upstream',
+      `Intcomex accepts at most ${MAX_SKUS_POR_LLAMADA} SKUs per request`,
+    );
+  }
+
+  const response = await fetchIws('getproducts', {
+    skusList: skus.join(','),
+    includePriceData: 'true',
+    includeInventoryData: 'true',
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new ProviderError(
+      'upstream',
+      `Intcomex responded with HTTP ${response.status}`,
+      body.slice(0, 500),
+    );
+  }
+
+  let items: IwsProduct[];
+  try {
+    items = (await response.json()) as IwsProduct[];
+  } catch {
+    throw new ProviderError('upstream', 'Intcomex returned an invalid JSON response');
+  }
+
+  for (const item of items ?? []) {
+    if (!item.Sku || item.Price?.UnitPrice == null) continue;
+    prices.set(item.Sku, {
+      price: item.Price.UnitPrice,
+      currency: item.Price.CurrencyId ?? 'USD',
+      inStock: item.InStock ?? null,
+    });
+  }
+
+  return prices;
+}

@@ -55,6 +55,37 @@ vercel            # deploy preview
 vercel --prod     # deploy a producción
 ```
 
+## Búsqueda de productos (para consumo por LLM)
+
+Además de cotizar un SKU conocido, la API permite descubrir productos a partir de una descripción vaga. Pensado para que un LLM lo use como herramienta.
+
+### `GET /search` — buscar productos
+
+Parámetros: `q` (obligatorio, texto libre), `marca`, `categoria`, `precio_max`, `solo_con_stock`, `limite` (default 10).
+
+```
+GET /search?q=probook&marca=HP
+Header: x-api-key: <API_SECRET_KEY>
+```
+
+Respuesta 200: `total`, `productos[]` (sku, mpn, nombre, marca, categoria, precio, moneda, stock) y `facetas`.
+
+Si la consulta calza más de 25 productos y no se envió `marca` ni `categoria`, responde **409** con el total y las facetas disponibles, para que el LLM repregunte con opciones concretas en vez de adivinar.
+
+### `GET /product/{sku}` — ficha completa
+
+Devuelve descripción íntegra, marca, categoría con subcategorías, tipo, precio, moneda y stock.
+
+### `GET /facetas` — vocabulario del catálogo
+
+Lista las marcas y categorías reales con su conteo. No es una herramienta para el LLM: sirve para construir el prompt del sistema con el vocabulario que Intcomex realmente usa.
+
+### Catálogo
+
+El catálogo (unos 10.000 productos) se descarga al arrancar y se refresca cada 24 horas, con copia en `cache/catalog.json`. Mientras la primera descarga no termina, estos tres endpoints responden **503 `catalogo_no_disponible`**. Si el refresco falla pero hay copia en disco, se sigue usando la copia vencida: el precio siempre se consulta en vivo, así que lo único desactualizado sería el surtido. Si la descarga inicial falla (por ejemplo, Intcomex caído en un arranque en frío) y no hay copia en disco, se reintenta cada 5 minutos en vez de esperar las 24 horas completas.
+
+> **Importante:** las respuestas de búsqueda traen el precio de **costo**. Si el consumidor es un LLM que habla con clientes finales, el margen debe aplicarse en un nodo determinista antes de que la respuesta entre al contexto del modelo.
+
 ## Hosting local (PC oficina) + Cloudflare Tunnel
 
 Intcomex valida IP de origen; las IPs de Vercel son dinámicas. Alternativa: servir la API desde un PC de la oficina (IP registrada) y exponerla con Cloudflare Tunnel.

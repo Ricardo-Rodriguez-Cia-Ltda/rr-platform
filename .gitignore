@@ -2,6 +2,7 @@ node_modules/
 .superpowers/
 .vercel/
 logs/
+cache/
 .env
 .env.*
 !.env.example
