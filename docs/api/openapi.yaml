@@ -1,0 +1,637 @@
+openapi: 3.1.0
+
+info:
+  title: API de precios de proveedores
+  version: 1.0.0
+  description: |
+    API de solo lectura sobre el catálogo del mayorista Intcomex: buscar
+    productos por texto libre, ver la ficha de un SKU y cotizar precios.
+
+    El surtido (SKU, nombre, marca, categoría) viene de un catálogo cacheado
+    con hasta 24 h de antigüedad. El precio y el stock se consultan en vivo al
+    proveedor en cada request.
+
+    IMPORTANTE: todos los precios son precio de COSTO. El margen debe aplicarse
+    en un nodo determinista antes de que la respuesta llegue a un cliente final
+    o al contexto de un LLM.
+
+    Referencia narrativa completa: docs/api/README.md
+
+servers:
+  - url: https://api.pyxis-latam.cl/rr/captador-precios
+    description: Producción (PC de oficina expuesto vía Cloudflare Tunnel)
+  - url: http://127.0.0.1:3000/api
+    description: Servidor local (npm run serve)
+
+security:
+  - ApiKeyAuth: []
+
+tags:
+  - name: busqueda
+    description: Descubrimiento de productos a partir de texto libre
+  - name: cotizacion
+    description: Precio y stock de identificadores conocidos
+  - name: metadatos
+    description: Vocabulario del catálogo, para build-time
+  - name: credito
+    description: Cupo de crédito del cliente. Hoy solo existe la versión mock.
+
+paths:
+  /search:
+    get:
+      operationId: buscarProductos
+      tags: [busqueda]
+      summary: Buscar productos por texto libre
+      description: |
+        Devuelve productos del catálogo que calzan con `q`, ya cotizados contra
+        el proveedor.
+
+        Si la consulta calza más de 25 productos y no se envió `marca` ni
+        `categoria`, responde 409 con las facetas disponibles para que el
+        consumidor desambigüe en vez de adivinar. Un 409 no es un fallo: es una
+        petición de acotar.
+
+        Una respuesta 200 con `productos: []` y campo `sin_resultados` significa
+        que sí hay productos que calzan pero ninguno cumple `precio_max` o
+        `solo_con_stock`; no hay que reintentar la búsqueda.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: |
+            Texto libre. Debe contener al menos un token alfanumérico. Funciona
+            mejor con pocas palabras clave del producto ("notebook 14") que con
+            la frase completa del usuario. La marca va en `marca`, no repetida
+            aquí.
+          schema:
+            type: string
+            minLength: 1
+          example: notebook 14
+        - name: marca
+          in: query
+          required: false
+          description: |
+            Filtro exacto, insensible a tildes y mayúsculas. Debe ser un valor
+            real del catálogo (ver /facetas).
+          schema:
+            type: string
+          example: HP
+        - name: categoria
+          in: query
+          required: false
+          description: Filtro exacto, mismas reglas que `marca`.
+          schema:
+            type: string
+          example: Computadores
+        - name: precio_max
+          in: query
+          required: false
+          description: Tope de precio de COSTO en USD. Debe ser mayor a 0.
+          schema:
+            type: number
+            exclusiveMinimum: 0
+        - name: solo_con_stock
+          in: query
+          required: false
+          description: |
+            Solo el literal `true` activa el filtro; cualquier otro valor lo
+            deja apagado.
+          schema:
+            type: string
+            enum: ['true', 'false']
+          example: 'true'
+        - name: limite
+          in: query
+          required: false
+          description: Cuántos productos devolver como máximo.
+          schema:
+            type: integer
+            minimum: 0
+            default: 10
+      responses:
+        '200':
+          description: Búsqueda resuelta (puede venir con lista vacía)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaBusqueda'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: |
+            Demasiadas coincidencias sin filtros. Repreguntar usando `facetas` y
+            volver a llamar con `marca` o `categoria`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDemasiadoAmplio'
+        '502':
+          $ref: '#/components/responses/Upstream'
+        '503':
+          $ref: '#/components/responses/CatalogoNoDisponible'
+
+  /product:
+    get:
+      operationId: detalleProducto
+      tags: [busqueda]
+      summary: Ficha completa de un SKU
+      description: |
+        Ficha íntegra de un SKU que ya apareció en una búsqueda. Agrega
+        `subcategorias` y `tipo` respecto de lo que devuelve /search.
+
+        El servidor local acepta además la forma `/product/{sku}` como segmento
+        de path; en Vercel solo funciona `?sku=`.
+      parameters:
+        - name: sku
+          in: query
+          required: true
+          description: SKU exacto, tal como lo devolvió /search.
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '200':
+          description: Producto encontrado y cotizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductoDetallado'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: |
+            El SKU no está en el catálogo, o está pero el proveedor no entregó
+            precio. Ambos casos son definitivos: no reintentar.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '502':
+          $ref: '#/components/responses/Upstream'
+        '503':
+          $ref: '#/components/responses/CatalogoNoDisponible'
+
+  /price:
+    get:
+      operationId: cotizarIdentificador
+      tags: [cotizacion]
+      summary: Cotizar un SKU, MPN o UPC conocido
+      description: |
+        Consulta directa al proveedor, sin pasar por el catálogo. Es el único
+        endpoint que funciona durante el 503 de arranque y el único que acepta
+        MPN y UPC.
+
+        Usa nombres de campo en inglés (description, price, currency, inStock),
+        a diferencia de /search y /product.
+      parameters:
+        - name: sku
+          in: query
+          required: false
+          schema: { type: string }
+        - name: mpn
+          in: query
+          required: false
+          schema: { type: string }
+        - name: upc
+          in: query
+          required: false
+          schema: { type: string }
+        - name: provider
+          in: query
+          required: false
+          description: Hoy `intcomex` es el único valor válido.
+          schema:
+            type: string
+            enum: [intcomex]
+            default: intcomex
+      responses:
+        '200':
+          description: Precio obtenido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PriceResult'
+        '400':
+          description: |
+            No se envió exactamente uno de sku/mpn/upc, o el provider no existe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: El proveedor no conoce el producto o no entrega precio.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '502':
+          $ref: '#/components/responses/Upstream'
+
+  /facetas:
+    get:
+      operationId: obtenerFacetas
+      tags: [metadatos]
+      summary: Vocabulario del catálogo (marcas y categorías con conteo)
+      description: |
+        Uso de build-time: generar el vocabulario que se inyecta en el system
+        prompt de un agente. No conviene exponerlo como tool de un LLM
+        conversacional: la respuesta es grande y no aporta durante el diálogo.
+      responses:
+        '200':
+          description: Vocabulario completo del catálogo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaFacetas'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '503':
+          $ref: '#/components/responses/CatalogoNoDisponible'
+
+  /credito/mock:
+    post:
+      operationId: consultarCreditoMock
+      tags: [credito]
+      summary: Consultar cupo de crédito disponible (MOCK)
+      description: |
+        MOCK: no consulta nada. Devuelve siempre la misma línea de crédito
+        (10.000.000 CLP con 4.000.000 utilizados, o sea 6.000.000 disponibles),
+        sin importar qué RUT se pase. Toda respuesta trae `mock: true`.
+
+        Ninguna decisión comercial real debe tomarse con esta respuesta. Cuando
+        exista la integración con RRS vivirá en /credito y esta ruta desaparece.
+
+        Es una consulta: no reserva, no descuenta y no registra nada. Único
+        endpoint que usa POST y el único que habla en pesos chilenos; el resto
+        de la API cotiza en USD.
+
+        Cupo insuficiente NO es un error: responde 200 con `aprobado: false`.
+        Los 4xx significan que la llamada estaba mal armada.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsultaCredito'
+      responses:
+        '200':
+          description: |
+            Consulta resuelta. Revisar `aprobado`, no el status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaCredito'
+        '400':
+          description: |
+            Falta `rut` o `total_clp`, vienen mal tipados, o el cuerpo no es
+            JSON válido.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          description: Solo se acepta POST en esta ruta.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: El cuerpo supera 1 MB.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: |
+        Requerido en todas las rutas. Comparación de tiempo constante contra
+        API_SECRET_KEY.
+
+  responses:
+    BadRequest:
+      description: Parámetros inválidos o faltantes. Definitivo, no reintentar.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Falta el header x-api-key o su valor es incorrecto.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    MethodNotAllowed:
+      description: Solo se acepta GET.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Upstream:
+      description: |
+        El proveedor falló o es inalcanzable. Transitorio: se admite un
+        reintento tras unos segundos.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorUpstream'
+    CatalogoNoDisponible:
+      description: |
+        El catálogo aún no terminó su primera carga. Transitorio, típicamente al
+        arrancar; reintentar en ~1 minuto.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      required: [error, detail]
+      properties:
+        error:
+          type: string
+          description: |
+            Código estable. Ramificar siempre por este campo, nunca por `detail`.
+          enum:
+            - bad_request
+            - unauthorized
+            - not_found
+            - method_not_allowed
+            - demasiado_amplio
+            - payload_too_large
+            - upstream
+            - catalogo_no_disponible
+            - internal
+        detail:
+          type: string
+          description: Explicación legible. No es contrato estable.
+
+    ErrorUpstream:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            upstream:
+              type: string
+              description: |
+                Cuerpo devuelto por el proveedor, truncado a 500 caracteres.
+                Para diagnóstico; no mostrar a un usuario final.
+
+    ErrorDemasiadoAmplio:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          required: [total, facetas]
+          properties:
+            total:
+              type: integer
+              description: Cuántos productos calzaron.
+            facetas:
+              $ref: '#/components/schemas/Facetas'
+
+    Facetas:
+      type: object
+      required: [marca, categoria]
+      properties:
+        marca:
+          type: array
+          items: { $ref: '#/components/schemas/ConteoFaceta' }
+        categoria:
+          type: array
+          items: { $ref: '#/components/schemas/ConteoFaceta' }
+
+    ConteoFaceta:
+      type: object
+      required: [valor, n]
+      properties:
+        valor:
+          type: string
+          description: Valor literal del catálogo. Copiarlo tal cual al filtrar.
+        n:
+          type: integer
+          description: Cuántos productos del conjunto tienen ese valor.
+
+    Producto:
+      type: object
+      required: [sku, mpn, nombre, marca, categoria, precio, moneda, stock]
+      properties:
+        sku:
+          type: string
+        mpn:
+          type: [string, 'null']
+        nombre:
+          type: [string, 'null']
+        marca:
+          type: [string, 'null']
+        categoria:
+          type: [string, 'null']
+        precio:
+          type: number
+          description: Precio de COSTO. Aplicar margen fuera de esta API.
+        moneda:
+          type: string
+          description: Identificador de moneda del proveedor, típicamente "US".
+        stock:
+          type: [integer, 'null']
+
+    ProductoDetallado:
+      allOf:
+        - $ref: '#/components/schemas/Producto'
+        - type: object
+          required: [subcategorias, tipo]
+          properties:
+            subcategorias:
+              type: array
+              description: Puede venir vacío.
+              items: { type: string }
+            tipo:
+              type: [string, 'null']
+
+    RespuestaBusqueda:
+      type: object
+      required: [total, evaluados, productos, facetas]
+      properties:
+        total:
+          type: integer
+          description: |
+            Productos del catálogo que calzan con q + filtros de marca/categoría.
+        evaluados:
+          type: integer
+          description: |
+            De esos, cuántos se alcanzaron a cotizar antes de juntar `limite`.
+            Siempre menor o igual a `total`.
+        productos:
+          type: array
+          description: |
+            Los que además pasaron precio_max y solo_con_stock. Como máximo
+            `limite`.
+          items: { $ref: '#/components/schemas/Producto' }
+        facetas:
+          allOf:
+            - $ref: '#/components/schemas/Facetas'
+            - type: object
+              properties:
+                precio:
+                  type: object
+                  description: |
+                    Solo presente si `productos` no está vacío. Describe los
+                    productos devueltos, no el universo completo.
+                  required: [min, max]
+                  properties:
+                    min: { type: number }
+                    max: { type: number }
+        sin_resultados:
+          type: object
+          description: |
+            Presente solo cuando `productos` está vacío pero sí se cotizaron
+            candidatos. Significa explicar y ofrecer la alternativa, no
+            reintentar la búsqueda.
+          required: [motivo, alternativa]
+          properties:
+            motivo:
+              type: string
+              enum: [sin_stock, sobre_presupuesto]
+              description: |
+                sin_stock: se pidió solo_con_stock y ninguno tiene existencias.
+                sobre_presupuesto: ninguno cae bajo precio_max.
+            alternativa:
+              allOf:
+                - $ref: '#/components/schemas/Producto'
+                - description: |
+                    El candidato más barato: con stock si lo hay, en general si
+                    no.
+
+    RespuestaFacetas:
+      allOf:
+        - type: object
+          required: [total_productos]
+          properties:
+            total_productos:
+              type: integer
+        - $ref: '#/components/schemas/Facetas'
+
+    ConsultaCredito:
+      type: object
+      required: [rut, total_clp]
+      properties:
+        rut:
+          type: string
+          minLength: 1
+          description: |
+            RUT del cliente, con o sin puntos y guion. Se normaliza a dígitos +
+            DV. El mock NO valida el dígito verificador; la implementación real
+            probablemente sí.
+          example: '111111111'
+        total_clp:
+          type: integer
+          exclusiveMinimum: 0
+          description: |
+            Monto a evaluar en PESOS CHILENOS. Debe ser un número JSON entero:
+            un string "1500", un decimal o un "1.500.000" con puntos se
+            rechazan con 400.
+
+            Cuidado: el resto de la API cotiza en USD. Pasar dólares aquí
+            evalúa contra un monto ~900 veces menor y aprueba cualquier cosa.
+          example: 123456
+
+    RespuestaCredito:
+      type: object
+      required:
+        - mock
+        - rut
+        - moneda
+        - habilitado
+        - linea_credito_clp
+        - utilizado_clp
+        - disponible_clp
+        - solicitado_clp
+        - aprobado
+        - motivo
+        - faltante_clp
+      properties:
+        mock:
+          type: boolean
+          description: |
+            Siempre true mientras esto sea un mock. Su ausencia indicará que la
+            respuesta viene del sistema real.
+        rut:
+          type: string
+          description: El RUT recibido, ya normalizado.
+        moneda:
+          type: string
+          const: CLP
+        habilitado:
+          type: boolean
+          description: |
+            Si el cliente tiene línea de crédito activa. El mock siempre
+            responde true.
+        linea_credito_clp:
+          type: integer
+          description: Cupo total aprobado. El mock siempre devuelve 10000000.
+        utilizado_clp:
+          type: integer
+          description: Cupo ya consumido. El mock siempre devuelve 4000000.
+        disponible_clp:
+          type: integer
+          description: linea_credito_clp - utilizado_clp. Es el número que decide.
+        solicitado_clp:
+          type: integer
+          description: Eco de total_clp.
+        aprobado:
+          type: boolean
+          description: |
+            true si solicitado_clp <= disponible_clp. El límite exacto sí se
+            aprueba.
+        motivo:
+          type: string
+          enum: [dentro_de_linea, excede_linea, sin_linea_habilitada]
+          description: |
+            sin_linea_habilitada es parte del contrato para la integración real
+            (cliente sin crédito); el mock nunca lo devuelve.
+        faltante_clp:
+          type: integer
+          description: |
+            Cuánto cupo falta. 0 cuando está aprobado; si no,
+            solicitado_clp - disponible_clp.
+
+    PriceResult:
+      type: object
+      required: [provider, sku, mpn, description, price, currency, inStock]
+      properties:
+        provider:
+          type: string
+          example: intcomex
+        sku:
+          type: [string, 'null']
+        mpn:
+          type: [string, 'null']
+        description:
+          type: [string, 'null']
+        price:
+          type: number
+          description: Precio de COSTO.
+        currency:
+          type: string
+        inStock:
+          type: [integer, 'null']

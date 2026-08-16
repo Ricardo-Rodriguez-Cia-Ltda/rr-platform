@@ -35,6 +35,7 @@ npm test            # tests unitarios
 npm run typecheck
 cp .env.example .env.local   # completar con credenciales reales
 npm run check -- <SKU>       # smoke test contra IWS test
+npm run docs:vocabulario     # regenera docs/api/vocabulario.md desde la API
 vercel dev                   # servidor local
 ```
 
@@ -55,30 +56,40 @@ vercel            # deploy preview
 vercel --prod     # deploy a producción
 ```
 
-## Búsqueda de productos (para consumo por LLM)
+## Documentación de la API
 
-Además de cotizar un SKU conocido, la API permite descubrir productos a partir de una descripción vaga. Pensado para que un LLM lo use como herramienta.
+La referencia completa vive en [`docs/api/`](docs/api/) y está escrita para ser leída por un LLM:
 
-### `GET /search` — buscar productos
+| Documento | Contenido |
+|---|---|
+| [`docs/api/README.md`](docs/api/README.md) | Referencia narrativa: cada endpoint, cada código de error, cómo funciona el ranking, cuándo reintentar y cuándo no. |
+| [`docs/api/openapi.yaml`](docs/api/openapi.yaml) | El mismo contrato, machine-readable (OpenAPI 3.1). |
+| [`docs/api/vocabulario.md`](docs/api/vocabulario.md) | Marcas y categorías reales del catálogo. Generado con `npm run docs:vocabulario`. |
+| [`docs/kapso/README.md`](docs/kapso/README.md) | Cómo conectar todo esto al agente de WhatsApp aplicando el margen fuera del modelo. |
 
-Parámetros: `q` (obligatorio, texto libre), `marca`, `categoria`, `precio_max`, `solo_con_stock`, `limite` (default 10).
+Resumen de endpoints (todos con `x-api-key`):
 
+- `GET /search?q=...` — buscar por texto libre; `marca`, `categoria`, `precio_max`, `solo_con_stock`, `limite`.
+- `GET /product?sku=...` — ficha completa de un SKU.
+- `GET /price?sku=|mpn=|upc=` — cotizar un identificador conocido, sin pasar por el catálogo.
+- `GET /facetas` — vocabulario del catálogo (uso de build-time, no como tool de un LLM).
+- `POST /credito/mock` — cupo de crédito disponible. **Mock**: siempre responde línea de 10.000.000 CLP con 4.000.000 utilizados, sin importar el RUT. Ver abajo.
+
+### Crédito (mock)
+
+```bash
+curl -X POST https://api.pyxis-latam.cl/rr/captador-precios/credito/mock \
+  -H "x-api-key: $API_SECRET_KEY" -H "content-type: application/json" \
+  -d '{"rut":"111111111","total_clp":12000000}'
 ```
-GET /search?q=probook&marca=HP
-Header: x-api-key: <API_SECRET_KEY>
-```
 
-Respuesta 200: `total`, `productos[]` (sku, mpn, nombre, marca, categoria, precio, moneda, stock) y `facetas`.
+Devuelve `aprobado`, `disponible_clp` y `faltante_clp`. Un cupo insuficiente es `200` con `aprobado: false`, no un error.
 
-Si la consulta calza más de 25 productos y no se envió `marca` ni `categoria`, responde **409** con el total y las facetas disponibles, para que el LLM repregunte con opciones concretas en vez de adivinar.
+Mientras sea un mock, la ruta lleva `/mock` y toda respuesta trae `"mock": true`: un mock de crédito que se pueda confundir con el real aprueba compras que nadie autorizó. Cuando exista la integración con RRS, vivirá en `/credito`.
 
-### `GET /product/{sku}` — ficha completa
+Es el único endpoint que usa `POST` y el único que habla en **pesos chilenos** — el resto de la API cotiza en USD.
 
-Devuelve descripción íntegra, marca, categoría con subcategorías, tipo, precio, moneda y stock.
-
-### `GET /facetas` — vocabulario del catálogo
-
-Lista las marcas y categorías reales con su conteo. No es una herramienta para el LLM: sirve para construir el prompt del sistema con el vocabulario que Intcomex realmente usa.
+`docs/api/` no se desactualiza en silencio: [`tests/docs.test.ts`](tests/docs.test.ts) falla si las rutas, los códigos de error, los status, los nombres de campo o las constantes citadas dejan de coincidir con el código.
 
 ### Catálogo
 
