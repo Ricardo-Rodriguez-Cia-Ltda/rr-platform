@@ -117,6 +117,64 @@ describe('local server adapter', () => {
   });
 });
 
+describe('cuerpo JSON en POST /credito/mock', () => {
+  beforeEach(() => {
+    vi.stubEnv('API_SECRET_KEY', 'test-secret');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('lee el cuerpo del socket y lo entrega parseado al handler', async () => {
+    const res = await fetch(`${base}/api/credito/mock`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'test-secret', 'content-type': 'application/json' },
+      body: JSON.stringify({ rut: '11.111.111-1', total_clp: 12_000_000 }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      rut: '111111111',
+      aprobado: false,
+      disponible_clp: 6_000_000,
+      faltante_clp: 6_000_000,
+      mock: true,
+    });
+  });
+
+  it('responde 400 a un cuerpo vacio en vez de colgarse', async () => {
+    const res = await fetch(`${base}/api/credito/mock`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'test-secret' },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('responde 405 a GET sobre la ruta de credito', async () => {
+    const res = await fetch(`${base}/api/credito/mock`, { headers: { 'x-api-key': 'test-secret' } });
+    expect(res.status).toBe(405);
+  });
+
+  it('rechaza un cuerpo sobre el tope antes de llegar al handler', async () => {
+    const res = await fetch(`${base}/api/credito/mock`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'test-secret', 'content-type': 'application/json' },
+      body: 'x'.repeat(1_000_001),
+    });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: 'payload_too_large' });
+  });
+
+  it('no rompe el 405 de los endpoints GET cuando llega un POST con cuerpo', async () => {
+    const res = await fetch(`${base}/api/price?sku=X`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'test-secret' },
+      body: JSON.stringify({ algo: true }),
+    });
+    expect(res.status).toBe(405);
+  });
+});
+
 describe('BASE_PATH routing', () => {
   let prefixed: Server;
   let prefixedBase: string;
@@ -171,5 +229,15 @@ describe('BASE_PATH routing', () => {
   it('404 para /product sin sku en el path', async () => {
     const res = await fetch(`${prefixedBase}/rr/captador-precios/product/`);
     expect(res.status).toBe(404);
+  });
+
+  it('sirve /credito/mock bajo el prefijo configurado', async () => {
+    const res = await fetch(`${prefixedBase}/rr/captador-precios/credito/mock`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'test-secret', 'content-type': 'application/json' },
+      body: JSON.stringify({ rut: '111111111', total_clp: 1000 }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ aprobado: true, mock: true });
   });
 });
