@@ -91,6 +91,12 @@ En el **Agent node** → Function tools, agregar las dos funciones con estos esq
 
 ## Paso 5 — Instrucciones en el system prompt
 
+> Este paso quedó desactualizado cuando el flujo se dividió en seis nodos
+> `agent`. Los prompts vigentes de cada nodo están en
+> [`prompts/`](prompts/) — uno por agente, versionados. Lo que sigue es el
+> prompt del agente único original, que se conserva porque explica de dónde
+> salen las reglas de catálogo.
+
 Agregar al prompt del agente:
 
 ```
@@ -144,17 +150,20 @@ Reglas:
 
 ## Paso 6 — Vocabulario del catálogo para el prompt
 
-Para que el agente traduzca lo que pide el cliente a filtros reales, incluir esta lista en el prompt (obtenida de `GET /facetas`, actualizada al 2026-08-07):
+Para que el agente traduzca lo que pide el cliente a filtros reales, hay que
+incluir en el prompt las marcas y categorías que Intcomex realmente usa: el
+filtro es exacto, y "Hewlett-Packard" no existe en el catálogo (es "HP").
 
-**Categorías (32):** Computadores, Redes, Consumibles y Media, Celulares, Audio y Video, Periféricos, Vigilancia de Video, Accesorios para Computadores, Monitores, Almacenamiento, Componentes Informáticos, Protección de Poder, Memorias, Impresoras y Escáneres, Puntos de Venta, Maletines, Incendio, Control de Acceso, Electrodomésticos, Proyectores, Videojuegos, Seguridad y Automatización, Tecnología Portátil, Intrusión, Comunicaciones, Muebles, Cámaras & Videocámaras, Software, Accesorios, Juguetes, Transportación, Monitores & Proyectores.
-
-**Marcas principales (144 en total):** Lenovo, HP, Hikvision, Xiaomi, Epson, Logitech, HPE, Brother, Klip Xtreme, StarTech.com, Xtech, Samsung, Panduit, ASUS, Ubiquiti, Kensington, TP-Link, Eaton, Nexxt Solutions Infrastructure, Motorola, APC, Viewsonic, Notifier, MSI, JBL.
-
-Para regenerar la lista completa:
+La lista vive en [`../api/vocabulario.md`](../api/vocabulario.md), con los
+conteos de cada valor para decidir qué incluir. Se regenera desde la API:
 
 ```bash
-curl -H "x-api-key: <API_SECRET_KEY>" https://api.pyxis-latam.cl/rr/captador-precios/facetas
+npm run docs:vocabulario
 ```
+
+Conviene rehacerla cada cierto tiempo: el surtido de Intcomex cambia, y una
+marca nueva que no esté en el prompt es una marca por la que el agente nunca va
+a filtrar.
 
 ## Paso 7 — Probar antes de soltarlo a clientes
 

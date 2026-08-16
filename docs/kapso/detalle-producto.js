@@ -73,6 +73,7 @@ async function handler(request, env) {
     estado: 'ok',
     producto: {
       sku: datos.sku,
+      mpn: datos.mpn ?? null,
       nombre: datos.nombre,
       marca: datos.marca,
       categoria: datos.categoria,
