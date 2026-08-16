@@ -73,6 +73,20 @@ describe('GET /search', () => {
     expect(res.statusCode).toBe(401);
   });
 
+  it('returns 401 with a wrong x-api-key and does not touch the catalog', async () => {
+    const res = makeRes();
+    await handler(makeReq({ q: 'hp' }, { 'x-api-key': 'nope' }), res);
+    expect(res.statusCode).toBe(401);
+    expect(obtenerCatalogoMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 405 for non-GET methods', async () => {
+    const res = makeRes();
+    await handler({ ...makeReq({ q: 'hp' }, AUTH), method: 'POST' } as VercelRequest, res);
+    expect(res.statusCode).toBe(405);
+    expect(res.body).toMatchObject({ error: 'method_not_allowed' });
+  });
+
   it('returns 400 when q is missing', async () => {
     const res = makeRes();
     await handler(makeReq({}, AUTH), res);
@@ -415,5 +429,92 @@ describe('GET /search — paginado con filtros', () => {
     expect(res.body.sin_resultados.motivo).toBe('sobre_presupuesto');
     expect(res.body.sin_resultados.alternativa.precio).toBe(900);
     expect(res.body.sin_resultados.alternativa.stock).toBeGreaterThan(0);
+  });
+});
+
+// --- Topes de cotizacion ---
+//
+// Los tres numeros que acotan cuanto le pedimos a Intcomex (lote de 100,
+// 50 candidatos sin filtros, 300 con filtros) no se ven en la respuesta: solo
+// se notan en la cuenta de llamadas. Sin estos tests, subir TAMANO_LOTE a 101
+// pasa la suite entera y recien rompe en produccion, porque getPrices rechaza
+// mas de 100 SKUs por llamada.
+describe('GET /search — topes de cotizacion', () => {
+  function catalogoDe(n: number): CatalogProduct[] {
+    return Array.from({ length: n }, (_, i) =>
+      producto(`S${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
+    );
+  }
+
+  beforeEach(() => {
+    vi.stubEnv('API_SECRET_KEY', 'test-secret');
+    obtenerCatalogoMock.mockReset();
+    // Sin stock: nada pasa el filtro, asi que el handler recorre todos los
+    // candidatos que se permite y podemos contar las llamadas.
+    getPricesMock.mockReset().mockImplementation((skus: string[]) =>
+      Promise.resolve(new Map(skus.map((sku) => [sku, { price: 100, currency: 'us', inStock: 0 }]))),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function lotesPedidos(): string[][] {
+    return getPricesMock.mock.calls.map((call) => call[0] as string[]);
+  }
+
+  it('nunca pide mas de 100 SKUs por llamada, que es el maximo que acepta getPrices', async () => {
+    obtenerCatalogoMock.mockReturnValue(catalogoDe(500));
+
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true' }, AUTH), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(lotesPedidos().length).toBeGreaterThan(0);
+    for (const lote of lotesPedidos()) {
+      expect(lote.length).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it('sin filtros corta en 50 candidatos aunque haya 300 coincidencias', async () => {
+    obtenerCatalogoMock.mockReturnValue(catalogoDe(300));
+
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP' }, AUTH), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.total).toBe(300);
+    // Un solo lote de 50: el orden por relevancia ya dejo arriba lo que sirve.
+    expect(lotesPedidos()).toHaveLength(1);
+    expect(lotesPedidos()[0]).toHaveLength(50);
+    expect(res.body.evaluados).toBe(50);
+  });
+
+  it('con filtros llega hasta 300 candidatos y no mas, aunque haya 500 coincidencias', async () => {
+    obtenerCatalogoMock.mockReturnValue(catalogoDe(500));
+
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true' }, AUTH), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.total).toBe(500);
+    // 300 candidatos en lotes de 100.
+    expect(lotesPedidos()).toHaveLength(3);
+    expect(res.body.evaluados).toBe(300);
+  });
+
+  it('precio_max tambien habilita el tope alto de candidatos', async () => {
+    obtenerCatalogoMock.mockReturnValue(catalogoDe(500));
+    // Todos por sobre el tope: nada pasa el filtro, se recorren los 300.
+    getPricesMock.mockImplementation((skus: string[]) =>
+      Promise.resolve(new Map(skus.map((sku) => [sku, { price: 9000, currency: 'us', inStock: 5 }]))),
+    );
+
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', precio_max: '500' }, AUTH), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.evaluados).toBe(300);
   });
 });
