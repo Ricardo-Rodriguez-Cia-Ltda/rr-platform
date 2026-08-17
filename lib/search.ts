@@ -1,3 +1,7 @@
+import { normalizar, tokenizar } from './texto.js';
+
+export { normalizar, tokenizar };
+
 export interface CatalogProduct {
   Sku: string;
   Mpn: string | null;
@@ -30,16 +34,6 @@ const PESO_MPN_EXACTO = 100;
 const PESO_MARCA = 10;
 const PESO_DESCRIPCION = 3;
 
-export function normalizar(texto: string): string {
-  // U+0300-U+036F = marcas diacríticas combinantes que NFD separa de la letra.
-  return texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-}
-
-export function tokenizar(texto: string): string[] {
-  return normalizar(texto)
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter(Boolean);
-}
 
 function puntuar(product: CatalogProduct, terminos: string[], consultaNormalizada: string): number {
   const mpnNormalizado = normalizar(product.Mpn ?? '');
