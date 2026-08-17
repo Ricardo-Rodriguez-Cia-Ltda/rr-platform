@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import type { PriceInfo, PriceQuery, PriceResult, Provider } from '../types.js';
 import { ProviderError } from '../types.js';
+import type { ProductoNormalizado } from '../producto.js';
 
 export function formatUtcTimestamp(date: Date): string {
   return date.toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -150,4 +151,42 @@ export async function getPrices(skus: string[]): Promise<Map<string, PriceInfo>>
   }
 
   return prices;
+}
+
+export interface ProductoIntcomex {
+  Sku: string;
+  Mpn?: string | null;
+  Description?: string | null;
+  Type?: string | null;
+  Brand?: { Description?: string | null } | null;
+  Category?: {
+    Description?: string | null;
+    Subcategories?: { Description?: string | null }[];
+  } | null;
+}
+
+export function normalizarProducto(crudo: ProductoIntcomex): ProductoNormalizado {
+  return {
+    sku: crudo.Sku,
+    mpn: crudo.Mpn ?? null,
+    nombre: crudo.Description ?? null,
+    marca: crudo.Brand?.Description ?? null,
+    categoria: crudo.Category?.Description ?? null,
+    subcategorias: (crudo.Category?.Subcategories ?? [])
+      .map((s) => s.Description)
+      .filter((d): d is string => Boolean(d)),
+    tipo: crudo.Type ?? null,
+  };
+}
+
+export async function cargarCatalogoIntcomex(): Promise<ProductoNormalizado[]> {
+  const response = await fetchIws('getcatalog');
+  if (!response.ok) {
+    throw new Error(`Intcomex respondió HTTP ${response.status} al pedir el catálogo`);
+  }
+  const datos = await response.json();
+  if (!Array.isArray(datos) || datos.length === 0) {
+    throw new Error('getcatalog no devolvio un arreglo de productos');
+  }
+  return (datos as ProductoIntcomex[]).map(normalizarProducto);
 }
