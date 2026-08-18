@@ -1,0 +1,36 @@
+{
+  "recordsFound": 1180,
+  "pageSize": 25,
+  "pageNumber": 2,
+  "catalog": [
+    {
+      "description": " CLASS 10 100MB/S UHS-I CARD",
+      "category": "device storage",
+      "subCategory": "Flash Memory Devices",
+      "productType": "",
+      "ingramPartNumber": "1A8249",
+      "vendorPartNumber": "SDSQUNC-016G-AN6IA",
+      "upcCode": "0619659134587",
+      "vendorName": "Sandisk Mobile",
+      "endUserRequired": "false",
+      "hasDiscounts": "",
+      "type": "IM::Physical",
+      "discontinued": "false",
+      "newProduct": "false",
+      "directShip": "false",
+      "hasWarranty": "false",
+      "extraDescription": "IPAD AIR CELL 256GB SKY BLUE ",
+      "replacementSku": "",
+      "authorizedToPurchase": "true",
+      "links": [
+        {
+          "topic": "catalog",
+          "href": "/catalog/1A8249",
+          "type": "GET"
+        }
+      ]
+    }
+  ],
+  "nextPage": "/resellers/v6/catalog?keyword=mobilepageSize=25&pageNumber=3",
+  "previousPage": "/resellers/v6/catalog?keyword=mobilepageSize=25&pageNumber=1"
+}

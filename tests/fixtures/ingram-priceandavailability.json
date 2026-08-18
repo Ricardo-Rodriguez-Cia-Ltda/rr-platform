@@ -1,0 +1,108 @@
+[
+  {
+    "productStatusMessage": "ACOPS ARE AVAILABLE FOR THIS CUSTOMER AND SKU",
+    "ingramPartNumber": "4A0036",
+    "vendorPartNumber": "E2016HV",
+    "extendedVendorPartNumber": "E2016HV",
+    "upc": "0884116186519",
+    "vendorNumber": "802U",
+    "vendorName": "DELL",
+    "description": "20IN MONITOR E2016HV 210-AGLU  MNTR",
+    "productClass": "B",
+    "uom": "EA",
+    "acceptBackOrder": true,
+    "productAuthorized": true,
+    "returnableProduct": true,
+    "endUserInfoRequired": false,
+    "govtSpecialPriceAvailable": true,
+    "availability": {
+      "available": false,
+      "totalAvailability": 0,
+      "availabilityByWarehouse": [
+        {
+          "warehouseId": 20,
+          "location": "Fort Worth, TX",
+          "quantityBackordered": 0,
+          "backOrderInfo": [
+            {
+              "quantity": 1437,
+              "etaDate": "2025-01-01"
+            },
+            {
+              "quantity": 8163,
+              "etaDate": "2026-01-01"
+            }
+          ]
+        },
+        {
+          "quantityAvailable": 0,
+          "warehouseId": 40,
+          "location": "Carol Stream, IL",
+          "quantityBackordered": 156
+        },
+        {
+          "quantityAvailable": 0,
+          "warehouseId": 80,
+          "location": "Jonestown, PA",
+          "quantityBackordered": 70
+        },
+        {
+          "quantityAvailable": 0,
+          "warehouseId": 10,
+          "location": "Mira Loma, CA",
+          "quantityBackordered": 576
+        }
+      ]
+    },
+    "pricing": {
+      "mapPrice": 0,
+      "currencyCode": "USD",
+      "retailPrice": 189.99,
+      "customerPrice": 74.34
+    },
+    "discounts": [
+      {
+        "specialPricing": [
+          {
+            "specialPricingAvailableQuantity": 9999999,
+            "specialPricingExpirationDate": "2023-12-31",
+            "specialBidNumber": "TESTRKP1",
+            "specialPricingMinQuantity": 0,
+            "specialPricingEffectiveDate": "2022-03-24",
+            "discountType": "Special Bid",
+            "specialPricingDiscount": 6.74,
+            "governmentDiscountType": "Federal",
+            "governmentDiscountedCustomerPrice": 67.6
+          },
+          {
+            "specialPricingAvailableQuantity": 0,
+            "specialPricingExpirationDate": "2022-08-12",
+            "specialPricingMinQuantity": 0,
+            "specialPricingEffectiveDate": "2022-07-20",
+            "discountType": "Promo Discount",
+            "specialPricingDiscount": 135.56
+          }
+        ],
+        "quantityDiscounts": [
+          {
+            "currencyType": "string",
+            "amount": 0,
+            "quantity": 0,
+            "conditionType": "string",
+            "currencyCode": "string"
+          }
+        ]
+      }
+    ],
+    "bundlePartIndicator": "boolean",
+    "serviceFees": [
+      {
+        "conditionType": "string",
+        "description": "string",
+        "amount": "decimal",
+        "endDate": "2023-01-27",
+        "currencyCode": "string"
+      }
+    ]
+  }
+]

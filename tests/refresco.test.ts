@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { refrescarTodos } from '../lib/refresco.js';
+import { proveedoresConfigurados, refrescarTodos } from '../lib/refresco.js';
 
 beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -53,5 +53,23 @@ describe('refrescarTodos', () => {
     await refrescarTodos(['a', 'b', 'c'], cargar);
 
     expect(pico).toBeGreaterThan(1);
+  });
+});
+
+describe('proveedoresConfigurados', () => {
+  // Ingram y cualquier proveedor nuevo viven sin credenciales hasta que TI las
+  // entrega. Intentar refrescarlos igual llena el log de fallas esperadas y
+  // agenda un reintento cada 5 minutos que nunca va a funcionar.
+  it('deja fuera a los proveedores sin credenciales', () => {
+    const registro = {
+      listo: { estaConfigurado: () => true },
+      pendiente: { estaConfigurado: () => false },
+    };
+
+    expect(proveedoresConfigurados(registro)).toEqual(['listo']);
+  });
+
+  it('devuelve vacio si no hay ninguno configurado', () => {
+    expect(proveedoresConfigurados({ a: { estaConfigurado: () => false } })).toEqual([]);
   });
 });

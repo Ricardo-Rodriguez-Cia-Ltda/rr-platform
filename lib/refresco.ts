@@ -25,3 +25,18 @@ export async function refrescarTodos(
     }
   });
 }
+
+/**
+ * Nombres de los proveedores que tienen credenciales.
+ *
+ * Un proveedor sin configurar no es una falla que valga la pena reintentar:
+ * va a fallar igual dentro de 5 minutos. Se lo deja fuera del refresco y sus
+ * rutas responden `proveedor_no_configurado`, que dice exactamente que pasa.
+ */
+export function proveedoresConfigurados(
+  registro: Record<string, { estaConfigurado(): boolean }>,
+): string[] {
+  return Object.entries(registro)
+    .filter(([, proveedor]) => proveedor.estaConfigurado())
+    .map(([nombre]) => nombre);
+}

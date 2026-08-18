@@ -1,6 +1,6 @@
 import { cargarCatalogo } from './lib/catalog.js';
 import { PROVEEDORES } from './lib/providers/index.js';
-import { refrescarTodos } from './lib/refresco.js';
+import { proveedoresConfigurados, refrescarTodos } from './lib/refresco.js';
 import { createApp } from './lib/server.js';
 
 const port = Number(process.env.PORT ?? 3000);
@@ -28,7 +28,14 @@ function reintentar(proveedor: string): void {
   }, REINTENTO_MS).unref();
 }
 
-void refrescarTodos(Object.keys(PROVEEDORES), cargarCatalogo, reintentar);
-setInterval(() => {
-  void refrescarTodos(Object.keys(PROVEEDORES), cargarCatalogo, reintentar);
-}, REFRESCO_MS).unref();
+function refrescar(): void {
+  const nombres = proveedoresConfigurados(PROVEEDORES);
+  const pendientes = Object.keys(PROVEEDORES).filter((n) => !nombres.includes(n));
+  if (pendientes.length > 0) {
+    console.log(`[catalog] sin credenciales, no se refrescan: ${pendientes.join(', ')}`);
+  }
+  void refrescarTodos(nombres, cargarCatalogo, reintentar);
+}
+
+refrescar();
+setInterval(refrescar, REFRESCO_MS).unref();
