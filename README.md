@@ -46,7 +46,18 @@ vercel dev                   # servidor local
 | `INTCOMEX_API_KEY` | clave pública de desarrollo | clave pública de producción |
 | `INTCOMEX_ACCESS_KEY` | access key de desarrollo | access key de producción |
 | `INTCOMEX_BASE_URL` | `https://intcomex-test.apigee.net/v1/` | `https://intcomex-prod.apigee.net/v1/` |
+| `TECNOGLOBAL_USER` | usuario entregado por su área TI | íd. |
+| `TECNOGLOBAL_PASSWORD` | clave **ya hasheada en MD5** por su área TI | íd. |
+| `INGRAM_CLIENT_ID` | *(pendiente)* | *(pendiente)* |
+| `INGRAM_CLIENT_SECRET` | *(pendiente)* | *(pendiente)* |
+| `INGRAM_CUSTOMER_NUMBER` | *(pendiente)* | *(pendiente)* |
 | `API_SECRET_KEY` | clave propia para `x-api-key` | clave propia para `x-api-key` |
+| `CATALOG_CACHE_DIR` | carpeta del caché de catálogos (opcional; default `cache/`) | íd. |
+
+Las opcionales con default razonable (`TECNOGLOBAL_BASE_URL`,
+`INGRAM_BASE_URL`, `INGRAM_TOKEN_URL`, `INGRAM_COUNTRY_CODE`,
+`INGRAM_SENDER_ID`, `INGRAM_MAX_PAGINAS`, `TECNOGLOBAL_PRECIOS_TTL_MS`) están
+listadas en `.env.example`.
 
 ## Deploy
 
@@ -93,9 +104,66 @@ Es el único endpoint que usa `POST` y el único que habla en **pesos chilenos**
 
 ### Catálogo
 
-El catálogo (unos 10.000 productos) se descarga al arrancar y se refresca cada 24 horas, con copia en `cache/catalog.json`. Mientras la primera descarga no termina, estos tres endpoints responden **503 `catalogo_no_disponible`**. Si el refresco falla pero hay copia en disco, se sigue usando la copia vencida: el precio siempre se consulta en vivo, así que lo único desactualizado sería el surtido. Si la descarga inicial falla (por ejemplo, Intcomex caído en un arranque en frío) y no hay copia en disco, se reintenta cada 5 minutos en vez de esperar las 24 horas completas.
+El catálogo de **cada proveedor** se descarga al arrancar y se refresca cada 24 horas, con copia propia en `cache/catalog-<proveedor>.json` (la carpeta se configura con `CATALOG_CACHE_DIR`). Los tres se refrescan en paralelo: que un proveedor esté caído no deja sin catálogo a los demás, y el reintento se agenda solo para el que falló. Mientras la primera descarga no termina, estos tres endpoints responden **503 `catalogo_no_disponible`**. Si el refresco falla pero hay copia en disco, se sigue usando la copia vencida: el precio siempre se consulta en vivo, así que lo único desactualizado sería el surtido. Si la descarga inicial falla (por ejemplo, Intcomex caído en un arranque en frío) y no hay copia en disco, se reintenta cada 5 minutos en vez de esperar las 24 horas completas.
 
 > **Importante:** las respuestas de búsqueda traen el precio de **costo**. Si el consumidor es un LLM que habla con clientes finales, el margen debe aplicarse en un nodo determinista antes de que la respuesta entre al contexto del modelo.
+
+## Proveedores
+
+El negocio compra a tres distribuidores. Cada uno tiene su propio catálogo, sus
+propios SKU y su propio precio; lo único comparable entre ellos es el `mpn`
+(part number del fabricante).
+
+| Proveedor | Ruta | Estado |
+|---|---|---|
+| `intcomex` | `/api/intcomex/{search,product,facetas}` | En producción |
+| `tecnoglobal` | `/api/tecnoglobal/{search,product,facetas}` | Integrado y verificado contra su API real |
+| `ingram` | `/api/ingram/{search,product,facetas}` | Integrado; **falta que Ingram entregue client_id / client_secret** |
+
+`/api/search`, `/api/product` y `/api/facetas` sin proveedor **siguen siendo
+Intcomex** y responden exactamente lo mismo que antes: existen para que el
+agente Rayo no tenga que cambiar nada.
+
+Un proveedor sin credenciales responde `503 proveedor_no_configurado` en sus
+rutas y queda fuera del refresco de catálogos, en vez de reintentar cada 5
+minutos algo que no puede funcionar.
+
+**Todavía no existe el endpoint de "mejor precio"** entre los tres. Cada
+proveedor se consulta por separado. Comparar es el paso siguiente y tiene su
+propio diseño.
+
+### Notas por proveedor
+
+**Tecnoglobal.** Un solo servicio (`/stock/v1/price`) entrega catálogo, precio
+y stock juntos, todo en USD. No tiene consulta de precios por lote y **corta el
+acceso por cantidad de consultas en una ventana de 10 minutos**, así que los
+precios se sirven de una foto en memoria cuya vida útil
+(`TECNOGLOBAL_PRECIOS_TTL_MS`, default 9 min) queda por debajo de esa ventana.
+Cotizar bajando el catálogo en cada request agotaría la cuota en la primera
+búsqueda. La cuota exacta no está documentada: conviene confirmarla con su área
+TI antes de subir el tráfico.
+
+**Ingram Micro.** OAuth2 `client_credentials` con el token cacheado en memoria,
+catálogo paginado de a 100 y precios en lotes de 50 (el tope de su endpoint). El
+endpoint de token está verificado contra producción; las formas de catálogo y de
+precios salen de la OpenAPI que Ingram publica en
+`ingrammicro-xvantage/xi-sdk-openapispec` y **quedan sin verificar contra el
+tenant real hasta tener credenciales**.
+
+### Agregar un proveedor nuevo
+
+1. Escribir `lib/providers/<nombre>.ts` exportando un objeto que cumpla
+   `Proveedor` (`lib/types.ts`): `cargarCatalogo`, `getPrecios`, `getPrecio`,
+   `maxSkusPorLote` y `estaConfigurado`. La normalización a
+   `ProductoNormalizado` ocurre **dentro** del módulo; ni el catálogo ni el
+   buscador ven nunca una respuesta cruda.
+2. Sumarlo a `PROVEEDORES` en `lib/providers/index.ts`.
+3. Documentar sus variables en `.env.example`.
+
+Con eso quedan andando sus tres rutas, su catálogo con caché propio
+(`cache/catalog-<nombre>.json`) y su refresco en paralelo. No hay nada más que
+tocar: `tests/paridad-proveedores.test.ts` verifica que el proveedor nuevo
+responda el mismo contrato que los demás.
 
 ## Hosting local (PC oficina) + Cloudflare Tunnel
 

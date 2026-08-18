@@ -68,6 +68,30 @@ segmento de path **solo existe en el servidor local**: en Vercel hay que usar
 Una ruta desconocida en el servidor local responde `404 not_found` con
 `detail: "Unknown route"`.
 
+### Proveedores
+
+El negocio compra a tres distribuidores y cada uno tiene su propio catálogo,
+sus propios SKU y su propio precio:
+
+| Proveedor | Ruta | Estado |
+|---|---|---|
+| `intcomex` | `/api/intcomex/{search,product,facetas}` | En producción |
+| `tecnoglobal` | `/api/tecnoglobal/{search,product,facetas}` | Integrado y verificado contra su API real |
+| `ingram` | `/api/ingram/{search,product,facetas}` | Integrado; **a la espera de credenciales** |
+
+`/search`, `/product` y `/facetas` **sin proveedor en la ruta siguen siendo
+Intcomex** y responden exactamente lo mismo que antes. Existen para que los
+consumidores actuales no tengan que cambiar nada.
+
+`/price` elige proveedor por query param: `?provider=tecnoglobal`.
+
+Todavía **no hay un endpoint de "mejor precio"** entre los tres: cada proveedor
+se consulta por separado. Comparar es el paso siguiente y necesita que las tres
+integraciones estén verificadas contra sus APIs reales.
+
+El SKU **no es comparable entre proveedores**: cada distribuidor tiene el suyo.
+Lo único común es el `mpn` (part number del fabricante).
+
 ## Formato de error
 
 Todos los errores comparten esta forma:
@@ -87,12 +111,21 @@ Ramifica siempre por `error`, nunca por el texto de `detail`.
 | 409 | `demasiado_amplio` | La búsqueda calza demasiados productos | Acotar con `marca` o `categoria`. Ver abajo. |
 | 413 | `payload_too_large` | El cuerpo de un POST supera 1 MB | Corregir la llamada. No reintentar. |
 | 500 | `internal` | Error inesperado del servidor | No debería ocurrir. Transitorio; reintentar una vez. |
-| 502 | `upstream` | Intcomex falló o es inalcanzable | Fallo transitorio. Se puede reintentar una vez, tras unos segundos. |
+| 404 | `proveedor_desconocido` | El proveedor de la ruta no existe | Corregir la llamada. Los válidos son `intcomex`, `tecnoglobal`, `ingram`. |
+| 502 | `upstream` | El proveedor falló o es inalcanzable | Fallo transitorio. Se puede reintentar una vez, tras unos segundos. |
 | 503 | `catalogo_no_disponible` | El catálogo aún no terminó de cargar | Transitorio, típicamente al arrancar. Reintentar en ~1 min. |
+| 503 | `proveedor_no_configurado` | El proveedor existe pero no tiene credenciales | **No es transitorio.** No reintentar: falta configuración nuestra. |
 
-`502` puede traer un campo extra `upstream` con el cuerpo devuelto por Intcomex
-(truncado a 500 caracteres), útil para diagnosticar pero no para mostrar a un
-usuario final.
+`502` puede traer un campo extra `upstream` con el cuerpo devuelto por el
+proveedor (truncado a 500 caracteres), útil para diagnosticar pero no para
+mostrar a un usuario final.
+
+Los errores de las rutas `/api/{proveedor}/...` traen además el campo
+`proveedor`, para saber cuál de los tres falló sin tener que releer la URL.
+
+`proveedor_no_configurado` es distinto de `502` a propósito: nadie falló aguas
+arriba, falta una credencial de nuestro lado. La distinción es la diferencia
+entre investigar una caída y pedirle las llaves al área de TI del proveedor.
 
 ---
 
@@ -511,14 +544,20 @@ Relevante porque explica el `503` y el desfase del surtido.
 2. Mientras esa primera carga no termina, `/search`, `/product` y `/facetas`
    responden `503 catalogo_no_disponible`. `/price` funciona desde el segundo
    cero.
-3. Se refresca cada **24 horas**, con copia en disco (`cache/catalog.json`,
-   configurable con `CATALOG_CACHE_PATH`). Al arrancar, si la copia en disco
-   tiene menos de 24 h, se usa sin descargar nada.
+3. Se refresca cada **24 horas**, con copia en disco por proveedor
+   (`cache/catalog-<proveedor>.json`, carpeta configurable con
+   `CATALOG_CACHE_DIR`). Al arrancar, si la copia en disco tiene menos de 24 h,
+   se usa sin descargar nada.
 4. Si un refresco falla pero hay copia en disco, **se sigue usando la copia
    vencida**. Un surtido viejo sirve más que ninguno, y el precio igual se
    consulta en vivo.
 5. Si la carga inicial falla y no hay copia en disco, se reintenta cada
-   **5 minutos** en vez de esperar el ciclo completo de 24 h.
+   **5 minutos** en vez de esperar el ciclo completo de 24 h. El reintento es
+   solo para el proveedor que falló.
+6. Los tres proveedores se cargan **en paralelo** y de forma independiente: que
+   Tecnoglobal esté caído no deja sin catálogo a Intcomex. Un proveedor sin
+   credenciales ni siquiera se intenta; sus rutas responden
+   `proveedor_no_configurado`.
 
 Ninguna de estas transiciones es visible desde fuera salvo por el `503`.
 

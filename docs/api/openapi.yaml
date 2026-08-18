@@ -41,7 +41,7 @@ paths:
     get:
       operationId: buscarProductos
       tags: [busqueda]
-      summary: Buscar productos por texto libre
+      summary: Buscar productos por texto libre (Intcomex, compatibilidad)
       description: |
         Devuelve productos del catálogo que calzan con `q`, ya cotizados contra
         el proveedor.
@@ -243,7 +243,7 @@ paths:
     get:
       operationId: obtenerFacetas
       tags: [metadatos]
-      summary: Vocabulario del catálogo (marcas y categorías con conteo)
+      summary: Vocabulario del catálogo (marcas y categorías con conteo, Intcomex)
       description: |
         Uso de build-time: generar el vocabulario que se inyecta en el system
         prompt de un agente. No conviene exponerlo como tool de un LLM
@@ -261,6 +261,152 @@ paths:
           $ref: '#/components/responses/MethodNotAllowed'
         '503':
           $ref: '#/components/responses/CatalogoNoDisponible'
+
+  /{proveedor}/search:
+    get:
+      operationId: buscarProductosDeProveedor
+      tags: [busqueda]
+      summary: Buscar productos en el catálogo de un proveedor
+      description: |
+        Idéntico a /search, contra el catálogo del proveedor indicado en la
+        ruta. /search sin proveedor es un alias de intcomex y responde
+        exactamente lo mismo.
+
+        Cada distribuidor tiene su propio SKU: el sku de esta respuesta solo
+        sirve contra este mismo proveedor. Lo único comparable entre los tres
+        es el mpn.
+      parameters:
+        - $ref: '#/components/parameters/Proveedor'
+        - name: q
+          in: query
+          required: true
+          description: Texto libre de búsqueda.
+          schema:
+            type: string
+        - name: marca
+          in: query
+          required: false
+          description: Filtro exacto por marca del catálogo de ese proveedor.
+          schema:
+            type: string
+        - name: categoria
+          in: query
+          required: false
+          description: Filtro exacto por categoría del catálogo de ese proveedor.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Búsqueda resuelta (puede venir con lista vacía)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaBusqueda'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ProveedorDesconocido'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: |
+            Demasiadas coincidencias sin filtros. Repreguntar usando facetas y
+            volver a llamar con marca o categoria.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDemasiadoAmplio'
+        '502':
+          $ref: '#/components/responses/Upstream'
+        '503':
+          description: |
+            catalogo_no_disponible si el catálogo de ese proveedor todavía no
+            cargó, o proveedor_no_configurado si le faltan credenciales. El
+            segundo no es transitorio.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorProveedor'
+
+  /{proveedor}/product:
+    get:
+      operationId: detalleProductoDeProveedor
+      tags: [busqueda]
+      summary: Ficha completa de un SKU de un proveedor
+      description: |
+        Idéntico a /product, contra el catálogo del proveedor de la ruta. El
+        sku es el del proveedor: no sirve contra otro.
+      parameters:
+        - $ref: '#/components/parameters/Proveedor'
+        - name: sku
+          in: query
+          required: true
+          description: SKU del proveedor.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Ficha del producto con precio y stock
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaProducto'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: |
+            not_found si el SKU no está en el catálogo o el proveedor no
+            entregó precio; proveedor_desconocido si el proveedor de la ruta no
+            existe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorProveedor'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '502':
+          $ref: '#/components/responses/Upstream'
+        '503':
+          description: catalogo_no_disponible o proveedor_no_configurado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorProveedor'
+
+  /{proveedor}/facetas:
+    get:
+      operationId: obtenerFacetasDeProveedor
+      tags: [metadatos]
+      summary: Vocabulario del catálogo de un proveedor
+      description: |
+        Idéntico a /facetas, contra el catálogo del proveedor de la ruta. Las
+        marcas y categorías no están unificadas entre proveedores: cada uno
+        nombra las suyas a su manera.
+      parameters:
+        - $ref: '#/components/parameters/Proveedor'
+      responses:
+        '200':
+          description: Vocabulario completo del catálogo de ese proveedor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaFacetas'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/ProveedorDesconocido'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '503':
+          description: catalogo_no_disponible o proveedor_no_configurado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorProveedor'
 
   /credito/mock:
     post:
@@ -328,7 +474,35 @@ components:
         Requerido en todas las rutas. Comparación de tiempo constante contra
         API_SECRET_KEY.
 
+  parameters:
+    Proveedor:
+      name: proveedor
+      in: path
+      required: true
+      description: |
+        Distribuidor contra el que se consulta. Cada uno tiene su propio
+        catálogo, sus propios SKU y su propio precio.
+      schema:
+        type: string
+        enum: [intcomex, tecnoglobal, ingram]
+
   responses:
+    ProveedorDesconocido:
+      description: |
+        El segmento de proveedor de la ruta no corresponde a ninguno
+        registrado. Definitivo, no reintentar.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorProveedor'
+    ProveedorNoConfigurado:
+      description: |
+        El proveedor existe pero no tiene credenciales cargadas. No es
+        transitorio: falta configuración nuestra, no falló nadie aguas arriba.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorProveedor'
     BadRequest:
       description: Parámetros inválidos o faltantes. Definitivo, no reintentar.
       content:
@@ -382,10 +556,25 @@ components:
             - payload_too_large
             - upstream
             - catalogo_no_disponible
+            - proveedor_desconocido
+            - proveedor_no_configurado
             - internal
         detail:
           type: string
           description: Explicación legible. No es contrato estable.
+
+    ErrorProveedor:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            proveedor:
+              type: string
+              nullable: true
+              description: |
+                Proveedor al que apuntaba la ruta. Presente en los errores de
+                /{proveedor}/... para saber cuál de los tres falló sin releer
+                la URL.
 
     ErrorUpstream:
       allOf:
