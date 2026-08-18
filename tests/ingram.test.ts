@@ -44,6 +44,8 @@ beforeEach(() => {
   vi.stubEnv('INGRAM_COUNTRY_CODE', 'CL');
   vi.stubEnv('INGRAM_BASE_URL', 'https://ingram.test');
   vi.stubEnv('INGRAM_TOKEN_URL', 'https://ingram.test/oauth/oauth30/token');
+  // Sin pausa entre paginas: el ritmo real se verifica aparte.
+  vi.stubEnv('INGRAM_MS_ENTRE_PAGINAS', '0');
   _resetTokenParaTests();
 });
 
@@ -178,7 +180,7 @@ describe('normalizarProducto', () => {
 });
 
 describe('cargarCatalogoIngram', () => {
-  it('recorre las paginas hasta juntar recordsFound', async () => {
+  it('recorre las paginas hasta la primera vacia', async () => {
     const pagina = (n: number, items: ProductoIngram[]) =>
       json({ recordsFound: 3, pageSize: 100, pageNumber: n, catalog: items });
     const producto = (sku: string): ProductoIngram => ({
@@ -191,6 +193,7 @@ describe('cargarCatalogoIngram', () => {
     const fetchMock = conToken(
       pagina(1, [producto('A1'), producto('A2')]),
       pagina(2, [producto('A3')]),
+      pagina(3, []),
     );
     vi.stubGlobal('fetch', fetchMock);
 
@@ -198,10 +201,23 @@ describe('cargarCatalogoIngram', () => {
 
     expect(catalogo.map((p) => p.sku)).toEqual(['A1', 'A2', 'A3']);
     const paginas = fetchMock.mock.calls.slice(1).map((c) => (c[0] as URL).searchParams.get('pageNumber'));
-    expect(paginas).toEqual(['1', '2']);
+    expect(paginas).toEqual(['1', '2', '3']);
   });
 
-  // recordsFound puede venir desactualizado; la pagina vacia es el fin real.
+  // Medido contra la API real: Ingram devuelve ~la mitad de lo pedido y su
+  // recordsFound varia entre llamadas. Cortar con ese contador deja el
+  // catalogo a medias, y un catalogo incompleto se lee como "no existe".
+  it('no corta por recordsFound, que Ingram reporta de forma inestable', async () => {
+    const fetchMock = conToken(
+      json({ recordsFound: 2, catalog: [{ ingramPartNumber: 'A1' }, { ingramPartNumber: 'A2' }] }),
+      json({ recordsFound: 9999, catalog: [{ ingramPartNumber: 'A3' }] }),
+      json({ recordsFound: 2, catalog: [] }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect(await cargarCatalogoIngram()).toHaveLength(3);
+  });
+
   it('corta en la primera pagina vacia aunque recordsFound prometa mas', async () => {
     const fetchMock = conToken(
       json({ recordsFound: 999, catalog: [{ ingramPartNumber: 'A1' }] }),
@@ -213,6 +229,40 @@ describe('cargarCatalogoIngram', () => {
 
     expect(catalogo).toHaveLength(1);
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  // Ingram permite 60 llamadas por minuto y por endpoint; el catalogo de Chile
+  // son ~60 paginas. Sin pausa el volcado real se corta a la mitad por cuota.
+  it('espera entre paginas para no pasarse de la cuota', async () => {
+    vi.stubEnv('INGRAM_MS_ENTRE_PAGINAS', '40');
+    const fetchMock = conToken(
+      json({ catalog: [{ ingramPartNumber: 'A1' }] }),
+      json({ catalog: [{ ingramPartNumber: 'A2' }] }),
+      json({ catalog: [] }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const t0 = Date.now();
+    await cargarCatalogoIngram();
+
+    // Tres paginas => dos pausas.
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(70);
+  });
+
+  // "esperar" no es lo mismo que "algo se rompio": quien lea el log tiene que
+  // saber que la cura es bajar el ritmo, no investigar una caida.
+  it('nombra la cuota cuando Ingram corta por exceso de llamadas', async () => {
+    vi.stubGlobal(
+      'fetch',
+      conToken(
+        new Response(
+          JSON.stringify({ errors: [{ message: 'The quota limit exceeds for calls on your API app.' }] }),
+          { status: 429 },
+        ),
+      ),
+    );
+
+    await expect(cargarCatalogoIngram()).rejects.toThrow(/corto por cuota/i);
   });
 
   it('descarta productos sin ingramPartNumber, que no se pueden cotizar', async () => {

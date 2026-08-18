@@ -77,7 +77,7 @@ sus propios SKU y su propio precio:
 |---|---|---|
 | `intcomex` | `/api/intcomex/{search,product,facetas}` | En producción |
 | `tecnoglobal` | `/api/tecnoglobal/{search,product,facetas}` | Integrado y verificado contra su API real |
-| `ingram` | `/api/ingram/{search,product,facetas}` | Integrado; **a la espera de credenciales** |
+| `ingram` | `/api/ingram/{search,product,facetas}` | Integrado y verificado contra su API real |
 
 `/search`, `/product` y `/facetas` **sin proveedor en la ruta siguen siendo
 Intcomex** y responden exactamente lo mismo que antes. Existen para que los

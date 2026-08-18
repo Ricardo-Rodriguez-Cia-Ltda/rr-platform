@@ -11,8 +11,22 @@ const PAIS_POR_DEFECTO = 'CL';
 /** Tope documentado del endpoint de price & availability. */
 const MAX_SKUS_POR_LOTE = 50;
 
-/** Maximo que acepta el catalogo por pagina. */
+/**
+ * Maximo que acepta el catalogo por pagina.
+ *
+ * Ojo: Ingram devuelve aproximadamente la mitad de lo que se le pide (pedir
+ * 100 trae ~50), y su `recordsFound` es inestable entre llamadas. Por eso el
+ * volcado no confia en ese numero para saber cuando termino: corta con la
+ * primera pagina vacia.
+ */
 const TAMANO_PAGINA = 100;
+
+/**
+ * Ingram permite 60 llamadas por minuto y por endpoint, y responde 429 al
+ * pasarse. El catalogo de Chile son ~60 paginas, o sea justo el limite: sin
+ * pausa entre paginas el volcado se corta a la mitad.
+ */
+const MS_ENTRE_PAGINAS_POR_DEFECTO = 1100;
 
 /**
  * Tope de paginas del volcado de catalogo. Existe para que un `recordsFound`
@@ -166,9 +180,15 @@ export async function fetchIngram(
 async function leerJson<T>(response: Response, contexto: string): Promise<T> {
   const texto = await response.text().catch(() => '');
   if (!response.ok) {
+    // 429 y el 4xx generico que Ingram usa al agotarse la cuota se nombran
+    // aparte: no es que fallara nada aguas arriba, es que pedimos demasiado
+    // rapido, y quien lea el log tiene que saber que la cura es esperar.
+    const porCuota = response.status === 429 || /quota limit exceeds/i.test(texto);
     throw new ProviderError(
       'upstream',
-      `Ingram responded with HTTP ${response.status} al pedir ${contexto}`,
+      porCuota
+        ? `Ingram corto por cuota al pedir ${contexto} (permite 60 llamadas por minuto y por endpoint)`
+        : `Ingram responded with HTTP ${response.status} al pedir ${contexto}`,
       texto.slice(0, 500),
     );
   }
@@ -214,6 +234,19 @@ export function normalizarProducto(crudo: ProductoIngram): ProductoNormalizado {
   };
 }
 
+function msEntrePaginas(): number {
+  const crudo = Number(process.env.INGRAM_MS_ENTRE_PAGINAS);
+  return Number.isFinite(crudo) && crudo >= 0 ? crudo : MS_ENTRE_PAGINAS_POR_DEFECTO;
+}
+
+// Sin unref: la pausa es parte de una descarga en curso, y un timer que no
+// sostiene el event loop deja el proceso terminando a mitad del volcado.
+function esperar(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 function maxPaginas(): number {
   const crudo = Number(process.env.INGRAM_MAX_PAGINAS);
   return Number.isInteger(crudo) && crudo > 0 ? crudo : MAX_PAGINAS_POR_DEFECTO;
@@ -225,7 +258,13 @@ export async function cargarCatalogoIngram(): Promise<ProductoNormalizado[]> {
   let pagina = 1;
   let encontrados: number | null = null;
 
+  const pausa = msEntrePaginas();
+
   for (; pagina <= tope; pagina += 1) {
+    // La pausa va antes de cada pagina menos la primera: sin ella el volcado
+    // dispara ~60 llamadas en pocos segundos y Ingram lo corta por cuota.
+    if (pagina > 1 && pausa > 0) await esperar(pausa);
+
     const respuesta = await leerJson<PaginaCatalogo>(
       await fetchIngram('resellers/v6/catalog', {
         params: { pageNumber: String(pagina), pageSize: String(TAMANO_PAGINA) },
@@ -238,16 +277,15 @@ export async function cargarCatalogoIngram(): Promise<ProductoNormalizado[]> {
     }
 
     const lote = respuesta.catalog ?? [];
-    // Una pagina vacia es el fin real del listado; `recordsFound` puede venir
-    // desactualizado y dejarnos pidiendo paginas que ya no existen.
+    // Una pagina vacia es el fin real del listado. No se usa `recordsFound`
+    // para cortar: Ingram devuelve menos items de los pedidos y ese contador
+    // varia entre llamadas, asi que confiar en el deja el catalogo incompleto.
     if (lote.length === 0) break;
 
     for (const crudo of lote) {
       // Sin ingramPartNumber no hay como cotizarlo ni referenciarlo despues.
       if (crudo.ingramPartNumber) productos.push(normalizarProducto(crudo));
     }
-
-    if (encontrados !== null && productos.length >= encontrados) break;
   }
 
   if (pagina > tope) {

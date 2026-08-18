@@ -50,9 +50,9 @@ vercel dev                   # servidor local
 | `INTCOMEX_BASE_URL` | `https://intcomex-test.apigee.net/v1/` | `https://intcomex-prod.apigee.net/v1/` |
 | `TECNOGLOBAL_USER` | usuario entregado por su área TI | íd. |
 | `TECNOGLOBAL_PASSWORD` | clave **ya hasheada en MD5** por su área TI | íd. |
-| `INGRAM_CLIENT_ID` | *(pendiente)* | *(pendiente)* |
-| `INGRAM_CLIENT_SECRET` | *(pendiente)* | *(pendiente)* |
-| `INGRAM_CUSTOMER_NUMBER` | *(pendiente)* | *(pendiente)* |
+| `INGRAM_CLIENT_ID` | generado en developer.ingrammicro.com | íd. |
+| `INGRAM_CLIENT_SECRET` | íd. | íd. |
+| `INGRAM_CUSTOMER_NUMBER` | número de cliente de Ingram (**sin** sufijo: `147645`, no `147645-RR`) | íd. |
 | `API_SECRET_KEY` | clave propia para `x-api-key` | clave propia para `x-api-key` |
 | `CATALOG_CACHE_DIR` | carpeta del caché de catálogos (opcional; default `cache/`) | íd. |
 
@@ -120,7 +120,7 @@ propios SKU y su propio precio; lo único comparable entre ellos es el `mpn`
 |---|---|---|
 | `intcomex` | `/api/intcomex/{search,product,facetas}` | En producción |
 | `tecnoglobal` | `/api/tecnoglobal/{search,product,facetas}` | Integrado y verificado contra su API real |
-| `ingram` | `/api/ingram/{search,product,facetas}` | Integrado; **falta que Ingram entregue client_id / client_secret** |
+| `ingram` | `/api/ingram/{search,product,facetas}` | Integrado y verificado contra su API real |
 
 `/api/search`, `/api/product` y `/api/facetas` sin proveedor **siguen siendo
 Intcomex** y responden exactamente lo mismo que antes: existen para que el
@@ -167,12 +167,28 @@ La foto se guarda en disco junto a los catálogos (`tecnoglobal-precios.json`), 
 La cuota exacta del volcado no está documentada: conviene confirmarla con su
 área TI antes de subir el tráfico.
 
-**Ingram Micro.** OAuth2 `client_credentials` con el token cacheado en memoria,
-catálogo paginado de a 100 y precios en lotes de 50 (el tope de su endpoint). El
-endpoint de token está verificado contra producción; las formas de catálogo y de
-precios salen de la OpenAPI que Ingram publica en
-`ingrammicro-xvantage/xi-sdk-openapispec` y **quedan sin verificar contra el
-tenant real hasta tener credenciales**.
+**Ingram Micro.** OAuth2 `client_credentials` con el token cacheado en memoria
+(dura 24 h), catálogo paginado y precios en lotes de 50, el tope de su endpoint.
+Cotiza en USD, igual que los otros dos.
+
+Tres cosas medidas contra su API real que no coinciden con lo que uno esperaría
+de su documentación:
+
+- **Devuelve alrededor de la mitad de lo que se le pide por página**: pedir
+  `pageSize=100` trae ~50. Al parecer pagina primero y después filtra lo que
+  esta cuenta puede comprar.
+- **`recordsFound` no es confiable**: la misma consulta devolvió 6.103 y 3.188
+  en llamadas seguidas, mientras el catálogo real de la cuenta son **2.915
+  productos**. Por eso el volcado **no corta por ese contador** sino con la
+  primera página vacía; cortar por `recordsFound` dejaba el catálogo a medias, y
+  un catálogo incompleto se lee como "ese producto no existe en Ingram".
+- **60 llamadas por minuto y por endpoint**, y el catálogo son ~60 páginas: sin
+  pausa entre páginas el volcado se corta por cuota justo por la mitad. De ahí
+  `INGRAM_MS_ENTRE_PAGINAS` (default 1.100 ms), que deja la descarga completa en
+  ~110 s.
+
+El número de cliente va **sin sufijo**: `147645`, no `147645-RR`. Con el sufijo
+Ingram responde `403 customer validation failed` aunque el token sea válido.
 
 ### Probar Ingram sin credenciales
 
