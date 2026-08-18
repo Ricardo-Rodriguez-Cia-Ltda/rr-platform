@@ -155,6 +155,8 @@ De ahí el reparto que hace el módulo:
   vencida**: es el ranking de una búsqueda, y el precio definitivo se confirma
   con `/product`.
 
+La foto se guarda en disco junto a los catálogos (`tecnoglobal-precios.json`), así que un reinicio no obliga a gastar una descarga del volcado.
+
 > **Para el consumidor:** el precio que trae `/search` de Tecnoglobal puede
 > tener hasta una hora. El de `/product` y `/price` es del momento. Si el
 > agente va a comprometer un precio con el cliente, que lo confirme con
