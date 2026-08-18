@@ -28,7 +28,7 @@ vi.mock('../lib/providers/intcomex.js', () => ({
     maxSkusPorLote: 100,
     estaConfigurado: () => true,
     cargarCatalogo: async () => [],
-    getPrecios: async () => new Map(),
+    getPrecios: (skus: string[]) => getPricesMock(skus),
     getPrecio: (query: unknown) => getPriceMock(query),
   },
   getPrices: (skus: string[]) => getPricesMock(skus),

@@ -19,9 +19,17 @@ const RUTAS = [
   ...(/const nombres = \[([^\]]+)\]/.exec(CODIGO_SERVIDOR)?.[1] ?? '').matchAll(/'([a-z/-]+)'/g),
 ].map((m) => m[1]);
 
+// Los archivos de api/ son envoltorios de pocas lineas; la logica que la doc
+// tiene que reflejar vive en las fabricas de lib/handlers/.
+const IMPLEMENTACION: Record<string, string> = {
+  search: 'lib/handlers/busqueda.ts',
+  product: 'lib/handlers/producto.ts',
+  facetas: 'lib/handlers/facetas.ts',
+};
+
 const FUENTES_API = RUTAS.map((n) => ({
   nombre: n,
-  codigo: readFileSync(`api/${n}.ts`, 'utf8'),
+  codigo: readFileSync(IMPLEMENTACION[n] ?? `api/${n}.ts`, 'utf8'),
 }));
 
 // Solo la seccion paths: components tiene sus propias claves 'responses' y
@@ -64,7 +72,11 @@ function clavesDelLiteral(codigo: string, marca: string): string[] {
     }
   }
   const cuerpo = codigo.slice(inicio, fin);
-  const sangria = ' '.repeat(4);
+  // La sangria no es fija: el mismo literal vive dos espacios mas adentro
+  // cuando el handler pasa a ser una fabrica. Hardcodearla hace que el test
+  // deje de cubrir campos sin que nadie se entere.
+  const sangria = /\n( +)\w+:/.exec(cuerpo)?.[1];
+  if (!sangria) throw new Error(`El literal que sigue a '${marca}' no tiene claves`);
   return [...cuerpo.matchAll(new RegExp(`^${sangria}(\\w+):`, 'gm'))].map((m) => m[1]);
 }
 
@@ -176,7 +188,6 @@ describe('docs/api sigue el codigo: constantes citadas', () => {
   const citadas: [string, string][] = [
     ['UMBRAL_AMBIGUEDAD', constante(codigoSearch, 'UMBRAL_AMBIGUEDAD')],
     ['LIMITE_POR_DEFECTO', constante(codigoSearch, 'LIMITE_POR_DEFECTO')],
-    ['TAMANO_LOTE', constante(codigoSearch, 'TAMANO_LOTE')],
     ['MAX_CANDIDATOS_SIN_FILTROS', constante(codigoSearch, 'MAX_CANDIDATOS_SIN_FILTROS')],
     ['MAX_CANDIDATOS_CON_FILTROS', constante(codigoSearch, 'MAX_CANDIDATOS_CON_FILTROS')],
     ['MAX_SKUS_POR_LLAMADA', constante(codigoIntcomex, 'MAX_SKUS_POR_LLAMADA')],
