@@ -38,7 +38,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     throw error;
   }
 
-  const producto = catalogo.find((p) => p.Sku === sku);
+  const producto = catalogo.find((p) => p.sku === sku);
   if (!producto) {
     res.status(404).json({ error: 'not_found', detail: 'SKU no encontrado en el catalogo' });
     return;
@@ -65,15 +65,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   res.status(200).json({
-    sku: producto.Sku,
-    mpn: producto.Mpn ?? null,
-    nombre: producto.Description ?? null,
-    marca: producto.Brand?.Description ?? null,
-    categoria: producto.Category?.Description ?? null,
-    subcategorias: (producto.Category?.Subcategories ?? [])
-      .map((s) => s.Description)
-      .filter((d): d is string => Boolean(d)),
-    tipo: producto.Type ?? null,
+    sku: producto.sku,
+    mpn: producto.mpn,
+    nombre: producto.nombre,
+    marca: producto.marca,
+    categoria: producto.categoria,
+    subcategorias: producto.subcategorias,
+    tipo: producto.tipo,
     precio: precio.price,
     moneda: precio.currency,
     stock: precio.inStock,

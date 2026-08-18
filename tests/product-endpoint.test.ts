@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { CatalogUnavailableError } from '../lib/catalog.js';
-import type { CatalogProduct } from '../lib/search.js';
+import type { ProductoNormalizado } from '../lib/producto.js';
 import { ProviderError } from '../lib/types.js';
 
 const obtenerCatalogoMock = vi.fn();
@@ -19,16 +19,14 @@ vi.mock('../lib/providers/intcomex.js', () => ({
 const { default: productHandler } = await import('../api/product.js');
 const { default: facetasHandler } = await import('../api/facetas.js');
 
-const PRODUCTO: CatalogProduct = {
-  Sku: 'HP1',
-  Mpn: '2N6G5LT',
-  Description: 'HP ProBook 640 G8 - Notebook - 14"',
-  Type: 'Physical',
-  Brand: { Description: 'HP' },
-  Category: {
-    Description: 'Computadores',
-    Subcategories: [{ Description: 'Notebooks' }],
-  },
+const PRODUCTO: ProductoNormalizado = {
+  sku: 'HP1',
+  mpn: '2N6G5LT',
+  nombre: 'HP ProBook 640 G8 - Notebook - 14"',
+  tipo: 'Physical',
+  marca: 'HP',
+  categoria: 'Computadores',
+  subcategorias: ['Notebooks'],
 };
 
 function makeReq(query: Record<string, string>, headers: Record<string, string> = {}): VercelRequest {

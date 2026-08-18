@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { CatalogUnavailableError } from '../lib/catalog.js';
-import type { CatalogProduct } from '../lib/search.js';
+import type { ProductoNormalizado } from '../lib/producto.js';
 import { ProviderError } from '../lib/types.js';
 
 const obtenerCatalogoMock = vi.fn();
@@ -18,14 +18,13 @@ vi.mock('../lib/providers/intcomex.js', () => ({
 
 const { default: handler } = await import('../api/search.js');
 
-function producto(Sku: string, Description: string, marca: string, categoria: string): CatalogProduct {
-  return {
-    Sku,
-    Mpn: `MPN-${Sku}`,
-    Description,
-    Brand: { Description: marca },
-    Category: { Description: categoria, Subcategories: [] },
-  };
+function producto(
+  sku: string,
+  nombre: string,
+  marca: string,
+  categoria: string,
+): ProductoNormalizado {
+  return { sku, mpn: `MPN-${sku}`, nombre, marca, categoria, subcategorias: [], tipo: null };
 }
 
 const CATALOGO = [
@@ -440,7 +439,7 @@ describe('GET /search — paginado con filtros', () => {
 // pasa la suite entera y recien rompe en produccion, porque getPrices rechaza
 // mas de 100 SKUs por llamada.
 describe('GET /search — topes de cotizacion', () => {
-  function catalogoDe(n: number): CatalogProduct[] {
+  function catalogoDe(n: number): ProductoNormalizado[] {
     return Array.from({ length: n }, (_, i) =>
       producto(`S${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
     );

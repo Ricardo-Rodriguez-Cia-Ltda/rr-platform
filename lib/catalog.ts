@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { fetchIws } from './providers/intcomex.js';
-import type { CatalogProduct } from './search.js';
+import type { ProductoNormalizado } from './producto.js';
+import { cargarCatalogoIntcomex } from './providers/intcomex.js';
 
 const VIGENCIA_MS = 24 * 60 * 60 * 1000;
 
@@ -14,10 +14,10 @@ export class CatalogUnavailableError extends Error {
 
 interface CacheEnDisco {
   descargadoEn: string;
-  productos: CatalogProduct[];
+  productos: ProductoNormalizado[];
 }
 
-let enMemoria: CatalogProduct[] | null = null;
+let enMemoria: ProductoNormalizado[] | null = null;
 
 function rutaCache(): string {
   return process.env.CATALOG_CACHE_PATH ?? 'cache/catalog.json';
@@ -31,7 +31,7 @@ function leerCache(): CacheEnDisco | null {
   }
 }
 
-function escribirCache(productos: CatalogProduct[]): void {
+function escribirCache(productos: ProductoNormalizado[]): void {
   const ruta = rutaCache();
   mkdirSync(dirname(ruta), { recursive: true });
   writeFileSync(
@@ -45,19 +45,7 @@ function estaVigente(cache: CacheEnDisco): boolean {
   return Number.isFinite(edad) && edad >= 0 && edad < VIGENCIA_MS;
 }
 
-async function descargar(): Promise<CatalogProduct[]> {
-  const response = await fetchIws('getcatalog');
-  if (!response.ok) {
-    throw new Error(`Intcomex respondió HTTP ${response.status} al pedir el catálogo`);
-  }
-  const datos = await response.json();
-  if (!Array.isArray(datos) || datos.length === 0) {
-    throw new Error('getcatalog no devolvio un arreglo de productos');
-  }
-  return datos as CatalogProduct[];
-}
-
-export async function cargarCatalogo(): Promise<CatalogProduct[]> {
+export async function cargarCatalogo(): Promise<ProductoNormalizado[]> {
   const cache = leerCache();
   if (cache && estaVigente(cache)) {
     enMemoria = cache.productos;
@@ -65,7 +53,7 @@ export async function cargarCatalogo(): Promise<CatalogProduct[]> {
   }
 
   try {
-    const productos = await descargar();
+    const productos = await cargarCatalogoIntcomex();
     escribirCache(productos);
     enMemoria = productos;
     return enMemoria;
@@ -81,7 +69,7 @@ export async function cargarCatalogo(): Promise<CatalogProduct[]> {
   }
 }
 
-export function obtenerCatalogo(): CatalogProduct[] {
+export function obtenerCatalogo(): ProductoNormalizado[] {
   if (!enMemoria) throw new CatalogUnavailableError();
   return enMemoria;
 }

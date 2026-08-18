@@ -142,7 +142,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
     let precios;
     try {
-      precios = await getPrices(lote.map((p) => p.Sku));
+      precios = await getPrices(lote.map((p) => p.sku));
     } catch (error) {
       if (error instanceof ProviderError) {
         console.error('[search] fallo getPrices', { candidatos: lote.length, error });
@@ -155,15 +155,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     }
 
     for (const p of lote) {
-      const precio = precios.get(p.Sku);
+      const precio = precios.get(p.sku);
       if (!precio) continue;
 
       const cotizado: Cotizado = {
-        sku: p.Sku,
-        mpn: p.Mpn ?? null,
-        nombre: p.Description ?? null,
-        marca: p.Brand?.Description ?? null,
-        categoria: p.Category?.Description ?? null,
+        sku: p.sku,
+        mpn: p.mpn,
+        nombre: p.nombre,
+        marca: p.marca,
+        categoria: p.categoria,
         precio: precio.price,
         moneda: precio.currency,
         stock: precio.inStock,

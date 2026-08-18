@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { CatalogUnavailableError } from '../lib/catalog.js';
-import type { CatalogProduct } from '../lib/search.js';
+import type { ProductoNormalizado } from '../lib/producto.js';
 import { ProviderError } from '../lib/types.js';
 
 // Contrato transversal de errores.
@@ -41,13 +41,15 @@ type Handler = (req: VercelRequest, res: VercelResponse) => Promise<void>;
 const SECRETO = 'k3y-de-prueba-no-filtrar';
 const AUTH = { 'x-api-key': SECRETO };
 
-function producto(Sku: string, Description: string): CatalogProduct {
+function producto(sku: string, nombre: string): ProductoNormalizado {
   return {
-    Sku,
-    Mpn: `MPN-${Sku}`,
-    Description,
-    Brand: { Description: 'HP' },
-    Category: { Description: 'Computadores', Subcategories: [] },
+    sku,
+    mpn: `MPN-${sku}`,
+    nombre,
+    marca: 'HP',
+    categoria: 'Computadores',
+    subcategorias: [],
+    tipo: null,
   };
 }
 
