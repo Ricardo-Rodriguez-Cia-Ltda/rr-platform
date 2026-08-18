@@ -22,6 +22,7 @@ vi.mock('../lib/catalog.js', async () => {
 });
 
 vi.mock('../lib/providers/intcomex.js', () => ({
+  cargarCatalogoIntcomex: async () => [],
   intcomex: {
     name: 'intcomex',
     getPrice: (query: unknown) => getPriceMock(query),

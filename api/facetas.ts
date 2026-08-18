@@ -19,7 +19,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
 
   let catalogo;
   try {
-    catalogo = obtenerCatalogo();
+    catalogo = obtenerCatalogo('intcomex');
   } catch (error) {
     if (error instanceof CatalogUnavailableError) {
       res.status(503).json({

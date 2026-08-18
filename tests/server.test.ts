@@ -5,6 +5,7 @@ import type { Server } from 'node:http';
 const getPriceMock = vi.fn();
 
 vi.mock('../lib/providers/intcomex.js', () => ({
+  cargarCatalogoIntcomex: async () => [],
   intcomex: {
     name: 'intcomex',
     getPrice: (query: unknown) => getPriceMock(query),

@@ -14,6 +14,7 @@ vi.mock('../lib/catalog.js', async () => {
 
 vi.mock('../lib/providers/intcomex.js', () => ({
   getPrices: (skus: string[]) => getPricesMock(skus),
+  cargarCatalogoIntcomex: async () => [],
 }));
 
 const { default: handler } = await import('../api/search.js');

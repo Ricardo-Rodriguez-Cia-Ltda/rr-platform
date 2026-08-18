@@ -20,7 +20,7 @@ const REINTENTO_MS = 5 * 60 * 1000;
 
 async function refrescarCatalogo(): Promise<void> {
   try {
-    const productos = await cargarCatalogo();
+    const productos = await cargarCatalogo('intcomex');
     console.log(`[catalog] ${productos.length} productos disponibles`);
   } catch (error) {
     console.error('[catalog] no se pudo cargar, reintento en 5 min', error);
