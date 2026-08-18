@@ -26,7 +26,12 @@ vi.mock('../lib/providers/intcomex.js', () => ({
   intcomex: {
     nombre: 'intcomex',
     maxSkusPorLote: 100,
-    estaConfigurado: () => true,
+    estaConfigurado: () =>
+      Boolean(
+        process.env.INTCOMEX_API_KEY &&
+          process.env.INTCOMEX_ACCESS_KEY &&
+          process.env.INTCOMEX_BASE_URL,
+      ),
     cargarCatalogo: async () => [],
     getPrecios: (skus: string[]) => getPricesMock(skus),
     getPrecio: (query: unknown) => getPriceMock(query),
@@ -38,6 +43,7 @@ const { default: searchHandler } = await import('../api/search.js');
 const { default: productHandler } = await import('../api/product.js');
 const { default: facetasHandler } = await import('../api/facetas.js');
 const { default: priceHandler } = await import('../api/price.js');
+const { default: porRutaSearchHandler } = await import('../api/[proveedor]/search.js');
 
 type Handler = (req: VercelRequest, res: VercelResponse) => Promise<void>;
 
@@ -179,11 +185,33 @@ const CASOS: Caso[] = [
   { nombre: 'facetas sin x-api-key', handler: facetasHandler, req: makeReq({}), status: 401, error: 'unauthorized' },
   { nombre: 'facetas con el catalogo sin cargar', handler: facetasHandler, req: makeReq({}, AUTH), status: 503, error: 'catalogo_no_disponible', antes: catalogoSinCargar },
   { nombre: 'facetas con metodo POST', handler: facetasHandler, req: makeReq({}, AUTH, 'POST'), status: 405, error: 'method_not_allowed' },
+
+  // --- /api/{proveedor}/... ---
+  // El prefijo 'search' no es decorativo: el test de cobertura de abajo deriva
+  // el endpoint del primer token del nombre.
+  {
+    nombre: 'search proveedor desconocido en la ruta',
+    handler: porRutaSearchHandler,
+    req: makeReq({ proveedor: 'nadie', q: 'notebook' }, AUTH),
+    status: 404,
+    error: 'proveedor_desconocido',
+  },
+  {
+    nombre: 'search proveedor sin credenciales',
+    handler: porRutaSearchHandler,
+    req: makeReq({ proveedor: 'intcomex', q: 'notebook' }, AUTH),
+    status: 503,
+    error: 'proveedor_no_configurado',
+    antes: () => vi.stubEnv('INTCOMEX_API_KEY', ''),
+  },
 ];
 
 describe('contrato de errores de la API', () => {
   beforeEach(() => {
     vi.stubEnv('API_SECRET_KEY', SECRETO);
+    vi.stubEnv('INTCOMEX_API_KEY', 'pub');
+    vi.stubEnv('INTCOMEX_ACCESS_KEY', 'secret');
+    vi.stubEnv('INTCOMEX_BASE_URL', 'https://x/');
     // Silencia los console.error de los caminos 502, que son esperados aca.
     vi.spyOn(console, 'error').mockImplementation(() => {});
 

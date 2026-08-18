@@ -4,6 +4,23 @@ import type { Server } from 'node:http';
 
 const getPriceMock = vi.fn();
 
+const CATALOGO = [
+  {
+    sku: 'HP1',
+    mpn: 'MPN-HP1',
+    nombre: 'HP ProBook 640 Notebook 14"',
+    marca: 'HP',
+    categoria: 'Computadores',
+    subcategorias: [],
+    tipo: null,
+  },
+];
+
+vi.mock('../lib/catalog.js', async () => {
+  const actual = await vi.importActual<typeof import('../lib/catalog.js')>('../lib/catalog.js');
+  return { ...actual, obtenerCatalogo: () => CATALOGO };
+});
+
 vi.mock('../lib/providers/intcomex.js', () => ({
   cargarCatalogoIntcomex: async () => [],
   intcomex: {
@@ -11,7 +28,7 @@ vi.mock('../lib/providers/intcomex.js', () => ({
     maxSkusPorLote: 100,
     estaConfigurado: () => true,
     cargarCatalogo: async () => [],
-    getPrecios: async () => new Map(),
+    getPrecios: async () => new Map([['HP1', { price: 1000, currency: 'us', inStock: 5 }]]),
     getPrecio: (query: unknown) => getPriceMock(query),
   },
 }));
@@ -63,6 +80,36 @@ describe('local server adapter', () => {
     expect(res.headers.get('content-type')).toContain('application/json');
     expect(await res.json()).toEqual(RESULT);
     expect(getPriceMock).toHaveBeenCalledWith({ sku: undefined, mpn: 'AAA-01148', upc: undefined });
+  });
+
+  it('sirve /api/intcomex/search bajo la ruta con proveedor', async () => {
+    const res = await fetch(`${base}/api/intcomex/search?q=probook`, {
+      headers: { 'x-api-key': 'test-secret' },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('404 para un proveedor que no existe en la ruta', async () => {
+    const res = await fetch(`${base}/api/nadie/search?q=x`, {
+      headers: { 'x-api-key': 'test-secret' },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('enruta /api/intcomex/product/{sku} tomando el sku del path', async () => {
+    const res = await fetch(`${base}/api/intcomex/product/HP1`, {
+      headers: { 'x-api-key': 'test-secret' },
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { sku: string }).sku).toBe('HP1');
+  });
+
+  it('sigue enrutando /api/product/{sku} sin prefijo de proveedor', async () => {
+    const res = await fetch(`${base}/api/product/HP1`, {
+      headers: { 'x-api-key': 'test-secret' },
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { sku: string }).sku).toBe('HP1');
   });
 
   it('returns 401 without x-api-key (handler auth reached)', async () => {

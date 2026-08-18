@@ -3,6 +3,7 @@ import { isAuthorized } from '../auth.js';
 import { CatalogUnavailableError, obtenerCatalogo } from '../catalog.js';
 import type { Proveedor } from '../types.js';
 import { ProviderError } from '../types.js';
+import { resolverOResponder } from './guardas.js';
 import { firstString, type Handler } from './tipos.js';
 
 export function crearHandlerProducto(proveedor: Proveedor): Handler {
@@ -76,5 +77,30 @@ export function crearHandlerProducto(proveedor: Proveedor): Handler {
       moneda: precio.currency,
       stock: precio.inStock,
     });
+  };
+}
+
+/**
+ * Variante para las rutas /api/{proveedor}/producto: el proveedor no se conoce al
+ * construir el handler, sale de la ruta en cada request.
+ *
+ * La api key se valida antes de resolver el proveedor: un cliente sin
+ * autenticar no debe poder enumerar que proveedores existen probando nombres.
+ */
+export function crearHandlerProductoPorRuta(): Handler {
+  return async function handler(req, res) {
+    if (req.method && req.method !== 'GET') {
+      res.status(405).json({ error: 'method_not_allowed', detail: 'Use GET' });
+      return;
+    }
+    if (!isAuthorized(firstString(req.headers['x-api-key']), process.env.API_SECRET_KEY)) {
+      res.status(401).json({ error: 'unauthorized', detail: 'Missing or invalid x-api-key header' });
+      return;
+    }
+
+    const proveedor = resolverOResponder(firstString(req.query.proveedor), res);
+    if (!proveedor) return;
+
+    await crearHandlerProducto(proveedor)(req, res);
   };
 }
