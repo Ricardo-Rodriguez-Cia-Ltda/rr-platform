@@ -127,6 +127,26 @@ perder un match antes que inventar uno.
 
 Este spec no implementa la comparación; define el dato para que sea posible.
 
+> **Corrección posterior (2026-08-18), con los tres catálogos reales a la vista.**
+> `marcaNormalizada` como cadena completa no funciona: cada distribuidor le pega
+> su unidad de negocio al nombre del fabricante (`BROTHER - SUMINISTROS`,
+> `SAMSUNG MONITORES Y TV`, `HPE SERVER STOCK SCSB`), así que separaba productos
+> idénticos. Medido: **37 productos presentes en los tres proveedores, contra
+> 482 posibles**.
+>
+> La marca se reduce ahora a su **primera palabra**, más una tabla corta de
+> alias para las marcas que no comparten ninguna (`AMERICAN POWER` = `APC`,
+> `Hewlett Packard Enterprise` = `HPE`) y para adquisiciones donde un
+> distribuidor lista la marca comprada y otro la dueña (`HyperX` y `Poly` →
+> `HP`, `Aruba` → `HPE`, `Meraki` → `Cisco`). Resultado: **1.459 cruces de los
+> 1.461 posibles**.
+>
+> La marca **sigue en la clave**. El temor original —dos fabricantes con el
+> mismo part number— es real pero raro: **una sola colisión en los 10.411
+> productos de Intcomex** (`98PT0G1299`, tres adaptadores de Trendnet, Eufy y
+> MSI). Es justo el caso que la marca evita cotizar cruzado, y quitarla del todo
+> solo habría sumado 2 cruces más.
+
 ### Interfaz del proveedor
 
 ```ts
