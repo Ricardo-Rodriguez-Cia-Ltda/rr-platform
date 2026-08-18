@@ -1,4 +1,6 @@
 import { cargarCatalogo } from './lib/catalog.js';
+import { PROVEEDORES } from './lib/providers/index.js';
+import { refrescarTodos } from './lib/refresco.js';
 import { createApp } from './lib/server.js';
 
 const port = Number(process.env.PORT ?? 3000);
@@ -18,15 +20,15 @@ const REFRESCO_MS = 24 * 60 * 60 * 1000;
 
 const REINTENTO_MS = 5 * 60 * 1000;
 
-async function refrescarCatalogo(): Promise<void> {
-  try {
-    const productos = await cargarCatalogo('intcomex');
-    console.log(`[catalog] ${productos.length} productos disponibles`);
-  } catch (error) {
-    console.error('[catalog] no se pudo cargar, reintento en 5 min', error);
-    setTimeout(() => void refrescarCatalogo(), REINTENTO_MS).unref();
-  }
+// El reintento se agenda solo para el proveedor que fallo: reintentar los tres
+// porque uno se cayo multiplica llamadas a proveedores que ya respondieron bien.
+function reintentar(proveedor: string): void {
+  setTimeout(() => {
+    void refrescarTodos([proveedor], cargarCatalogo, reintentar);
+  }, REINTENTO_MS).unref();
 }
 
-void refrescarCatalogo();
-setInterval(() => void refrescarCatalogo(), REFRESCO_MS).unref();
+void refrescarTodos(Object.keys(PROVEEDORES), cargarCatalogo, reintentar);
+setInterval(() => {
+  void refrescarTodos(Object.keys(PROVEEDORES), cargarCatalogo, reintentar);
+}, REFRESCO_MS).unref();
