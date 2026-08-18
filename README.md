@@ -170,6 +170,24 @@ precios salen de la OpenAPI que Ingram publica en
 `ingrammicro-xvantage/xi-sdk-openapispec` y **quedan sin verificar contra el
 tenant real hasta tener credenciales**.
 
+### Probar Ingram sin credenciales
+
+`scripts/mock-ingram.ts` levanta un servidor que imita el contrato publicado de
+Ingram, para ejercitar el módulo de punta a punta (ruta HTTP → handler →
+proveedor → red). Verifica el **cableado**, no que le hayamos acertado a la
+forma real del tenant:
+
+```bash
+npx tsx scripts/mock-ingram.ts    # queda escuchando en :4010
+```
+
+Y en otra terminal, `npm run serve` con `INGRAM_BASE_URL=http://127.0.0.1:4010`,
+`INGRAM_TOKEN_URL=http://127.0.0.1:4010/oauth/oauth30/token` y cualquier valor
+en `INGRAM_CLIENT_ID`, `INGRAM_CLIENT_SECRET` e `INGRAM_CUSTOMER_NUMBER`.
+
+Cuando lleguen las credenciales reales, sirve para comparar la respuesta
+simulada con la de verdad.
+
 ### Agregar un proveedor nuevo
 
 1. Escribir `lib/providers/<nombre>.ts` exportando un objeto que cumpla
