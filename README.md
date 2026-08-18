@@ -134,14 +134,34 @@ propio diseño.
 
 ### Notas por proveedor
 
-**Tecnoglobal.** Un solo servicio (`/stock/v1/price`) entrega catálogo, precio
-y stock juntos, todo en USD. No tiene consulta de precios por lote y **corta el
-acceso por cantidad de consultas en una ventana de 10 minutos**, así que los
-precios se sirven de una foto en memoria cuya vida útil
-(`TECNOGLOBAL_PRECIOS_TTL_MS`, default 9 min) queda por debajo de esa ventana.
-Cotizar bajando el catálogo en cada request agotaría la cuota en la primera
-búsqueda. La cuota exacta no está documentada: conviene confirmarla con su área
-TI antes de subir el tráfico.
+**Tecnoglobal.** Un solo servicio entrega catálogo, precio y stock juntos, todo
+en USD, y sus dos endpoints se comportan muy distinto — medido contra el
+servicio real, no documentado por ellos:
+
+| Endpoint | Costo | Cuota observada |
+|---|---|---|
+| `/price` (catálogo completo, ~500 KB, 1.488 productos) | ~3 s | Se agota en **pocas llamadas** y sigue rechazando (401, "Excede la cantidad máx. de consultas en el tiempo [10 min.]") **bastante más** que esos 10 minutos |
+| `/price/{sku}` | ~1,5 s cada una, **no mejora en paralelo** | Aguantó 12 llamadas seguidas sin quejarse |
+
+De ahí el reparto que hace el módulo:
+
+- **Pocos SKU** (≤ 5: una ficha de `/product`, una cotización de `/price`) se
+  piden en vivo por SKU. Es el precio del momento, y son las llamadas que de
+  verdad se cotizan a un cliente.
+- **Muchos SKU** (el ranking de un `/search`) salen de una foto en memoria del
+  último volcado, refrescable como mucho cada hora
+  (`TECNOGLOBAL_PRECIOS_TTL_MS`). Pedir 25 en vivo serían ~37 s de espera.
+- Si el refresco de la foto es rechazado por cuota, **se sigue usando la foto
+  vencida**: es el ranking de una búsqueda, y el precio definitivo se confirma
+  con `/product`.
+
+> **Para el consumidor:** el precio que trae `/search` de Tecnoglobal puede
+> tener hasta una hora. El de `/product` y `/price` es del momento. Si el
+> agente va a comprometer un precio con el cliente, que lo confirme con
+> `/product`.
+
+La cuota exacta del volcado no está documentada: conviene confirmarla con su
+área TI antes de subir el tráfico.
 
 **Ingram Micro.** OAuth2 `client_credentials` con el token cacheado en memoria,
 catálogo paginado de a 100 y precios en lotes de 50 (el tope de su endpoint). El

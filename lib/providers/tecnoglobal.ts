@@ -5,24 +5,43 @@ import { ProviderError } from '../types.js';
 const BASE_URL_POR_DEFECTO = 'http://200.6.78.34/stock/v1/';
 
 /**
- * El catalogo completo viene en una sola respuesta (~500 KB, ~1.500 productos),
- * asi que no hay un tope real de SKUs por lote: el handler nunca necesita
- * partir la consulta en dos descargas del mismo archivo.
+ * Como se cotiza contra Tecnoglobal.
+ *
+ * Sus dos endpoints se comportan de forma muy distinta, medido contra el
+ * servicio real:
+ *
+ * - `/price` (catalogo completo, ~500 KB) se agota en pocas llamadas y queda
+ *   respondiendo 401 "Excede la cantidad max. de consultas en el tiempo
+ *   [10 min.]" durante bastante mas que esos 10 minutos. Es rapido pero
+ *   practicamente irrepetible.
+ * - `/price/{sku}` aguanta decenas de llamadas seguidas sin quejarse, pero
+ *   tarda ~1,5 s cada una y no mejora al pedirlas en paralelo: el servicio las
+ *   atiende de a una.
+ *
+ * De ahi el reparto:
+ *
+ * - Pocos SKUs (una ficha, una cotizacion puntual) se piden en vivo por SKU:
+ *   es el precio del momento y son las llamadas que de verdad se cotizan.
+ * - Muchos SKUs (el ranking de una busqueda) salen de la foto del ultimo
+ *   volcado. Pedir 25 en vivo serian ~37 s de espera, inaceptable para una
+ *   busqueda, y el precio definitivo igual se confirma con /product.
  */
-const MAX_SKUS_POR_LOTE = 5000;
+const UMBRAL_CONSULTA_DIRECTA = 5;
 
 /**
- * Tecnoglobal corta el acceso por cantidad de consultas en una ventana de 10
- * minutos ("Acceso denegado. Excede la cantidad max. de consultas en el tiempo
- * [10 min.]", que ademas responde con HTTP 401). No hay endpoint de lote por
- * SKU: cada cotizacion tendria que bajar el catalogo entero, y una sola
- * busqueda nos dejaria sin cuota.
- *
- * Por eso los precios se sirven de una foto en memoria. Su vida util por
- * defecto queda por debajo de la ventana del proveedor, de modo que el peor
- * caso sea una descarga por ventana.
+ * Tope de SKUs por lote. Alto a proposito: sobre la foto no hay costo por SKU,
+ * y el handler ya limita cuantos candidatos vale la pena cotizar.
  */
-const TTL_PRECIOS_MS_POR_DEFECTO = 9 * 60 * 1000;
+const MAX_SKUS_POR_LOTE = 300;
+
+/** Consultas por SKU simultaneas. Acotado para no golpear el servicio. */
+const CONCURRENCIA = 8;
+
+/**
+ * Cada cuanto se puede refrescar la foto. Una hora deja el precio de las
+ * busquedas razonablemente fresco sin acercarse a la cuota del volcado.
+ */
+const TTL_FOTO_MS_POR_DEFECTO = 60 * 60 * 1000;
 
 export function estaConfigurado(): boolean {
   return Boolean(process.env.TECNOGLOBAL_USER && process.env.TECNOGLOBAL_PASSWORD);
@@ -157,9 +176,9 @@ let foto: Foto | null = null;
 // primera comparte su promesa con las que llegan mientras baja el catalogo.
 let descargaEnCurso: Promise<Foto> | null = null;
 
-function ttlPrecios(): number {
+function ttlFoto(): number {
   const crudo = Number(process.env.TECNOGLOBAL_PRECIOS_TTL_MS);
-  return Number.isFinite(crudo) && crudo >= 0 ? crudo : TTL_PRECIOS_MS_POR_DEFECTO;
+  return Number.isFinite(crudo) && crudo >= 0 ? crudo : TTL_FOTO_MS_POR_DEFECTO;
 }
 
 async function descargarCatalogo(): Promise<Foto> {
@@ -170,13 +189,26 @@ async function descargarCatalogo(): Promise<Foto> {
 }
 
 async function obtenerFoto(): Promise<Foto> {
-  if (foto && Date.now() - foto.obtenidaEn < ttlPrecios()) return foto;
+  const vigente = foto;
+  if (vigente && Date.now() - vigente.obtenidaEn < ttlFoto()) return vigente;
   if (!descargaEnCurso) {
     descargaEnCurso = descargarCatalogo().finally(() => {
       descargaEnCurso = null;
     });
   }
-  return descargaEnCurso;
+
+  try {
+    return await descargaEnCurso;
+  } catch (error) {
+    // La cuota del volcado es tan estrecha que un refresco rechazado es
+    // esperable. Una foto vieja sirve mucho mas que ninguna: es el ranking de
+    // una busqueda, y el precio definitivo se confirma por SKU en /product.
+    if (vigente) {
+      console.error('[tecnoglobal] no se pudo refrescar la foto, se usa la vencida', error);
+      return vigente;
+    }
+    throw error;
+  }
 }
 
 export function _resetFotoParaTests(): void {
@@ -194,12 +226,35 @@ export async function cargarCatalogoTecnoglobal(): Promise<ProductoNormalizado[]
   return productos.map(normalizarProducto);
 }
 
-export async function getPrices(skus: string[]): Promise<Map<string, PriceInfo>> {
-  const precios = new Map<string, PriceInfo>();
-  if (skus.length === 0) return precios;
+async function consultarPorSku(sku: string): Promise<ProductoTecnoglobal | null> {
+  const productos = await leerProductos(await fetchStock(`price/${encodeURIComponent(sku)}`));
+  return productos.find((p) => p.codigoTg === sku) ?? null;
+}
 
+async function preciosEnVivo(skus: string[]): Promise<Map<string, PriceInfo>> {
+  const precios = new Map<string, PriceInfo>();
+  const pendientes = [...skus];
+
+  async function trabajador(): Promise<void> {
+    for (let sku = pendientes.shift(); sku !== undefined; sku = pendientes.shift()) {
+      const crudo = await consultarPorSku(sku);
+      if (!crudo) continue;
+      const precio = aPrecio(crudo);
+      if (precio) precios.set(sku, precio);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCIA, skus.length) }, () => trabajador()),
+  );
+  return precios;
+}
+
+async function preciosDeLaFoto(skus: string[]): Promise<Map<string, PriceInfo>> {
+  const precios = new Map<string, PriceInfo>();
   const { productos } = await obtenerFoto();
   const pedidos = new Set(skus);
+
   for (const crudo of productos) {
     if (!pedidos.has(crudo.codigoTg)) continue;
     const precio = aPrecio(crudo);
@@ -208,17 +263,37 @@ export async function getPrices(skus: string[]): Promise<Map<string, PriceInfo>>
   return precios;
 }
 
-export async function getPrice(query: PriceQuery): Promise<PriceResult> {
-  // Tambien sale de la foto: el endpoint por SKU existe, pero gasta una
-  // consulta de la cuota para traer lo que ya tenemos en memoria.
-  const { productos } = await obtenerFoto();
+export async function getPrices(skus: string[]): Promise<Map<string, PriceInfo>> {
+  if (skus.length === 0) return new Map();
+  if (skus.length > MAX_SKUS_POR_LOTE) {
+    throw new ProviderError(
+      'upstream',
+      `Tecnoglobal se consulta de a ${MAX_SKUS_POR_LOTE} SKUs por lote`,
+    );
+  }
 
-  const encontrado = productos.find((c) => {
-    if (query.sku) return c.codigoTg === query.sku;
-    if (query.mpn) return (c.pnFabricante ?? '').trim() === query.mpn;
-    if (query.upc) return upcValido(c.upcEan13) === query.upc;
-    return false;
-  });
+  return skus.length <= UMBRAL_CONSULTA_DIRECTA
+    ? preciosEnVivo(skus)
+    : preciosDeLaFoto(skus);
+}
+
+export async function getPrice(query: PriceQuery): Promise<PriceResult> {
+  // Por SKU hay endpoint directo y da el precio del momento. Por MPN o UPC no
+  // hay busqueda, asi que se resuelve contra la foto del ultimo volcado y se
+  // vuelve a preguntar por el SKU encontrado, para no cotizar con un precio
+  // que puede tener horas.
+  let encontrado: ProductoTecnoglobal | null;
+  if (query.sku) {
+    encontrado = await consultarPorSku(query.sku);
+  } else {
+    const { productos } = await obtenerFoto();
+    const enFoto = productos.find((c) => {
+      if (query.mpn) return (c.pnFabricante ?? '').trim() === query.mpn;
+      if (query.upc) return upcValido(c.upcEan13) === query.upc;
+      return false;
+    });
+    encontrado = enFoto ? await consultarPorSku(enFoto.codigoTg) : null;
+  }
 
   if (!encontrado) {
     throw new ProviderError('not_found', 'Product not found at Tecnoglobal');

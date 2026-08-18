@@ -92,6 +92,19 @@ integraciones estén verificadas contra sus APIs reales.
 El SKU **no es comparable entre proveedores**: cada distribuidor tiene el suyo.
 Lo único común es el `mpn` (part number del fabricante).
 
+#### Frescura del precio por proveedor
+
+| Endpoint | Intcomex | Tecnoglobal | Ingram |
+|---|---|---|---|
+| `/search` | En vivo | Hasta **1 hora** de antigüedad | En vivo |
+| `/product`, `/price` | En vivo | En vivo | En vivo |
+
+Tecnoglobal limita muy fuerte las descargas de su catálogo completo y no tiene
+consulta de precios por lote, así que el ranking de una búsqueda se arma con
+una foto periódica. **Si vas a comprometer un precio de Tecnoglobal con un
+cliente, confírmalo con `/product`**, que sí consulta en vivo. Para los otros
+dos proveedores no hay diferencia.
+
 ## Formato de error
 
 Todos los errores comparten esta forma:

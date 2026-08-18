@@ -24,6 +24,18 @@ function respuesta(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status });
 }
 
+// El servicio no busca por MPN ni por UPC: hay que resolverlos contra la foto
+// del ultimo volcado y recotizar por el SKU encontrado, para no dar un precio
+// que puede tener horas.
+function fetchQueResuelvePorFoto(): ReturnType<typeof vi.fn> {
+  return vi.fn(async (url: URL) => {
+    const ultimo = url.pathname.split('/').pop()!;
+    if (ultimo === 'price') return respuesta(RESPUESTA);
+    const producto = PRODUCTOS.find((p) => p.codigoTg === ultimo);
+    return respuesta({ error: false, products: producto ? [producto] : [] });
+  });
+}
+
 beforeEach(() => {
   vi.stubEnv('TECNOGLOBAL_USER', 'usuario');
   vi.stubEnv('TECNOGLOBAL_PASSWORD', 'a6deb7170539fa7cf45c44b0d3505a8c');
@@ -131,31 +143,117 @@ describe('getPrices', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('pide el catalogo completo y filtra los SKUs pedidos', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(respuesta(RESPUESTA));
+  // Una ficha o una cotizacion puntual valen el precio del momento: el
+  // volcado se agota en pocas llamadas y ademas puede tener una hora.
+  it('un lote chico se consulta SKU por SKU, sin tocar el volcado completo', async () => {
+    const fetchMock = vi.fn(async (url: URL) => {
+      const sku = url.pathname.split('/').pop()!;
+      const producto = PRODUCTOS.find((p) => p.codigoTg === sku);
+      return respuesta({ error: false, products: producto ? [producto] : [] });
+    });
     vi.stubGlobal('fetch', fetchMock);
 
-    const precios = await getPrices(['KN3-661', 'TM0-943', 'NO-EXISTE']);
+    const precios = await getPrices(['KN3-661', 'TM0-943']);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect((fetchMock.mock.calls[0][0] as URL).href).toMatch(/\/price$/);
-    expect([...precios.keys()].sort()).toEqual(['KN3-661', 'TM0-943']);
+    const rutas = fetchMock.mock.calls.map((c) => (c[0] as URL).pathname);
+    expect(rutas.sort()).toEqual(['/stock/v1/price/KN3-661', '/stock/v1/price/TM0-943']);
+    expect(rutas.some((r) => r.endsWith('/v1/price'))).toBe(false);
+    expect(precios.get('KN3-661')).toEqual({ price: 21.18, currency: 'USD', inStock: 117 });
+  });
+
+  it('omite los SKUs que el proveedor no reconoce', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: URL) => {
+        const sku = url.pathname.split('/').pop()!;
+        const producto = PRODUCTOS.find((p) => p.codigoTg === sku);
+        return respuesta(
+          producto
+            ? { error: false, products: [producto] }
+            : { error: false, message: 'Articulos no fueron encontrados' },
+        );
+      }),
+    );
+
+    const precios = await getPrices(['KN3-661', 'NO-EXISTE']);
+
+    expect([...precios.keys()]).toEqual(['KN3-661']);
   });
 
   it('conserva el stock en cero en vez de descartar el producto', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respuesta(RESPUESTA)));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => respuesta({ error: false, products: [PRODUCTOS[1]] })),
+    );
 
-    const precios = await getPrices(['TM0-943', 'KN3-661']);
+    const precios = await getPrices(['TM0-943']);
 
     expect(precios.get('TM0-943')).toEqual({ price: 316.08, currency: 'USD', inStock: 0 });
+  });
+
+  it('rechaza un lote mayor al tope declarado', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+    const demasiados = Array.from({ length: 301 }, (_, i) => `S${i}`);
+
+    await expect(getPrices(demasiados)).rejects.toThrow(/de a 300/);
+  });
+
+  it('el tope declarado coincide con el que aplica getPrices', () => {
+    expect(tecnoglobal.maxSkusPorLote).toBe(300);
+  });
+
+  // Pedir 25 en vivo son ~37 s contra su servicio: el ranking de una busqueda
+  // sale de la foto, y el precio definitivo se confirma con /product.
+  it('un lote grande sale de la foto, con una sola llamada', async () => {
+    const fetchMock = fetchQueResuelvePorFoto();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const precios = await getPrices([...PRODUCTOS.map((p) => p.codigoTg), 'X1', 'X2', 'X3']);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0].pathname).toBe('/stock/v1/price');
+    expect(precios.size).toBe(PRODUCTOS.length);
+  });
+
+  // La cuota del volcado es tan estrecha que un refresco rechazado es
+  // esperable; quedarse sin precios por eso seria peor que darlos algo viejos.
+  it('si el refresco de la foto falla, sigue cotizando con la foto vencida', async () => {
+    vi.stubEnv('TECNOGLOBAL_PRECIOS_TTL_MS', '0');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let primera = true;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: URL) => {
+        if (primera) {
+          primera = false;
+          return respuesta(RESPUESTA);
+        }
+        return new Response(
+          JSON.stringify({ error: true, message: 'Excede la cantidad máx. de consultas' }),
+          { status: 401 },
+        );
+      }),
+    );
+
+    const grande = [...PRODUCTOS.map((p) => p.codigoTg), 'X1', 'X2', 'X3'];
+    expect((await getPrices(grande)).size).toBe(PRODUCTOS.length);
+    expect((await getPrices(grande)).size).toBe(PRODUCTOS.length);
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 });
 
 describe('getPrice', () => {
-  it('cotiza por SKU', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respuesta(RESPUESTA)));
+  it('cotiza por SKU contra el endpoint directo', async () => {
+    const fetchMock = vi.fn(async (_url: URL) =>
+      respuesta({ error: false, products: [PRODUCTOS[0]] }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
 
-    expect(await getPrice({ sku: 'KN3-661' })).toEqual({
+    const resultado = await getPrice({ sku: 'KN3-661' });
+
+    expect(fetchMock.mock.calls[0][0].pathname).toBe('/stock/v1/price/KN3-661');
+    expect(resultado).toEqual({
       provider: 'tecnoglobal',
       sku: 'KN3-661',
       mpn: 'SDS3/128GB',
@@ -166,15 +264,19 @@ describe('getPrice', () => {
     });
   });
 
-  it('cotiza por MPN recorriendo el catalogo', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respuesta(RESPUESTA)));
+  it('cotiza por MPN resolviendo contra la foto y recotizando por SKU', async () => {
+    const fetchMock = fetchQueResuelvePorFoto();
+    vi.stubGlobal('fetch', fetchMock);
 
     const resultado = await getPrice({ mpn: 'C31CJ57012' });
+
     expect(resultado.sku).toBe('TM0-943');
+    const rutas = fetchMock.mock.calls.map((c) => (c[0] as URL).pathname);
+    expect(rutas).toEqual(['/stock/v1/price', '/stock/v1/price/TM0-943']);
   });
 
   it('cotiza por UPC', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respuesta(RESPUESTA)));
+    vi.stubGlobal('fetch', fetchQueResuelvePorFoto());
 
     const resultado = await getPrice({ upc: '740617348286' });
     expect(resultado.sku).toBe('KN3-661');
@@ -183,72 +285,74 @@ describe('getPrice', () => {
   // El "0" del UPC no es un codigo: si contara como tal, cualquier consulta
   // por upc=0 emparejaria un producto al azar.
   it('no empareja por el UPC "0" que usan para los productos sin codigo', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respuesta(RESPUESTA)));
+    vi.stubGlobal('fetch', fetchQueResuelvePorFoto());
 
     await expect(getPrice({ upc: '0' })).rejects.toMatchObject({ kind: 'not_found' });
   });
 
   it('devuelve not_found cuando el SKU no existe', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respuesta(RESPUESTA)));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => respuesta({ error: false, message: 'Articulos no fueron encontrados' })),
+    );
 
     await expect(getPrice({ sku: 'NO-EXISTE' })).rejects.toMatchObject({ kind: 'not_found' });
   });
 });
 
-// Tecnoglobal corta el acceso por cantidad de consultas en 10 minutos y no
-// tiene endpoint de precios por lote: sin foto en memoria, una sola busqueda
-// nos deja sin cuota.
-describe('foto de precios en memoria', () => {
-  it('cotiza varias veces con una sola descarga mientras la foto esta vigente', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(respuesta(RESPUESTA));
+// El volcado completo (/price) se agota en pocas llamadas y sigue bloqueado
+// bastante mas que los 10 minutos que anuncia; el endpoint por SKU aguanta
+// decenas. La foto existe para lo que el servicio no sabe resolver -buscar por
+// MPN o UPC- y la deja lista el refresco diario del catalogo.
+describe('foto del volcado completo', () => {
+  it('el refresco del catalogo deja la foto lista, sin una segunda descarga', async () => {
+    const fetchMock = fetchQueResuelvePorFoto();
     vi.stubGlobal('fetch', fetchMock);
 
-    await getPrices(['KN3-661']);
-    await getPrices(['TM0-943']);
-    await getPrice({ sku: 'KN3-661' });
+    await cargarCatalogoTecnoglobal();
+    await getPrice({ mpn: 'C31CJ57012' });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const volcados = fetchMock.mock.calls.filter((c) => (c[0] as URL).pathname.endsWith('/v1/price'));
+    expect(volcados).toHaveLength(1);
   });
 
   it('vuelve a descargar cuando la foto vencio', async () => {
     vi.stubEnv('TECNOGLOBAL_PRECIOS_TTL_MS', '0');
-    const fetchMock = vi.fn(async () => respuesta(RESPUESTA));
+    const fetchMock = fetchQueResuelvePorFoto();
     vi.stubGlobal('fetch', fetchMock);
 
-    await getPrices(['KN3-661']);
-    await getPrices(['KN3-661']);
+    await getPrice({ mpn: 'C31CJ57012' });
+    await getPrice({ mpn: 'C31CJ57012' });
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const volcados = fetchMock.mock.calls.filter((c) => (c[0] as URL).pathname.endsWith('/v1/price'));
+    expect(volcados).toHaveLength(2);
   });
 
   it('no dispara descargas en paralelo ante peticiones simultaneas', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(respuesta(RESPUESTA));
+    const fetchMock = fetchQueResuelvePorFoto();
     vi.stubGlobal('fetch', fetchMock);
 
-    await Promise.all([getPrices(['KN3-661']), getPrices(['TM0-943']), getPrice({ sku: 'AUD-027' })]);
+    await Promise.all([getPrice({ mpn: 'C31CJ57012' }), getPrice({ upc: '740617348286' })]);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('el refresco del catalogo deja la foto lista, sin una segunda descarga', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(respuesta(RESPUESTA));
-    vi.stubGlobal('fetch', fetchMock);
-
-    await cargarCatalogoTecnoglobal();
-    await getPrices(['KN3-661']);
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const volcados = fetchMock.mock.calls.filter((c) => (c[0] as URL).pathname.endsWith('/v1/price'));
+    expect(volcados).toHaveLength(1);
   });
 
   it('una descarga fallida no deja la foto rota para la siguiente consulta', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response('boom', { status: 500 }))
-      .mockResolvedValue(respuesta(RESPUESTA));
-    vi.stubGlobal('fetch', fetchMock);
+    let primera = true;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: URL) => {
+        if (url.pathname.endsWith('/v1/price') && primera) {
+          primera = false;
+          return new Response('boom', { status: 500 });
+        }
+        return fetchQueResuelvePorFoto()(url);
+      }),
+    );
 
-    await expect(getPrices(['KN3-661'])).rejects.toThrow(ProviderError);
-    expect((await getPrices(['KN3-661'])).get('KN3-661')).toBeDefined();
+    await expect(getPrice({ mpn: 'C31CJ57012' })).rejects.toThrow(ProviderError);
+    expect((await getPrice({ mpn: 'C31CJ57012' })).sku).toBe('TM0-943');
   });
 
   // El limite de cuota llega como 401, igual que unas credenciales malas: si
@@ -256,14 +360,15 @@ describe('foto de precios en memoria', () => {
   it('nombra el limite de consultas en vez de reportar un 401 generico', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            error: true,
-            message: 'Acceso denegado. Excede la cantidad máx. de consultas en el tiempo [10 min.]',
-          }),
-          { status: 401 },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: true,
+              message: 'Acceso denegado. Excede la cantidad máx. de consultas en el tiempo [10 min.]',
+            }),
+            { status: 401 },
+          ),
       ),
     );
 
