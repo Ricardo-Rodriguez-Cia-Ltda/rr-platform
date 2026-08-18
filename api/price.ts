@@ -1,12 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { isAuthorized } from '../lib/auth.js';
-import { intcomex } from '../lib/providers/intcomex.js';
-import type { Provider } from '../lib/types.js';
+import { PROVEEDORES } from '../lib/providers/index.js';
 import { ProviderError } from '../lib/types.js';
-
-const providers: Record<string, Provider> = {
-  intcomex,
-};
 
 function firstString(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -37,17 +32,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   const providerName = firstString(req.query.provider) ?? 'intcomex';
-  const provider = providers[providerName];
+  const provider = PROVEEDORES[providerName];
   if (!provider) {
     res.status(400).json({
       error: 'bad_request',
-      detail: `Unknown provider '${providerName}'. Available: ${Object.keys(providers).join(', ')}`,
+      detail: `Unknown provider '${providerName}'. Available: ${Object.keys(PROVEEDORES).join(', ')}`,
     });
     return;
   }
 
   try {
-    const result = await provider.getPrice({ sku, mpn, upc });
+    const result = await provider.getPrecio({ sku, mpn, upc });
     res.status(200).json(result);
   } catch (error) {
     if (error instanceof ProviderError) {

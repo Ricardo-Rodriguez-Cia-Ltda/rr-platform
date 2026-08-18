@@ -7,8 +7,12 @@ const getPriceMock = vi.fn();
 vi.mock('../lib/providers/intcomex.js', () => ({
   cargarCatalogoIntcomex: async () => [],
   intcomex: {
-    name: 'intcomex',
-    getPrice: (query: unknown) => getPriceMock(query),
+    nombre: 'intcomex',
+    maxSkusPorLote: 100,
+    estaConfigurado: () => true,
+    cargarCatalogo: async () => [],
+    getPrecios: async () => new Map(),
+    getPrecio: (query: unknown) => getPriceMock(query),
   },
 }));
 

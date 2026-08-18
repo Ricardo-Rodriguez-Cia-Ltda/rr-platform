@@ -1,3 +1,5 @@
+import type { ProductoNormalizado } from './producto.js';
+
 export interface PriceQuery {
   sku?: string;
   mpn?: string;
@@ -20,9 +22,14 @@ export interface PriceInfo {
   inStock: number | null;
 }
 
-export interface Provider {
-  name: string;
-  getPrice(query: PriceQuery): Promise<PriceResult>;
+export interface Proveedor {
+  nombre: string;
+  cargarCatalogo(): Promise<ProductoNormalizado[]>;
+  getPrecios(skus: string[]): Promise<Map<string, PriceInfo>>;
+  getPrecio(query: PriceQuery): Promise<PriceResult>;
+  /** Tope de SKUs por llamada de precios. Es limite del proveedor, no politica nuestra. */
+  maxSkusPorLote: number;
+  estaConfigurado(): boolean;
 }
 
 export type ProviderErrorKind = 'not_found' | 'upstream';

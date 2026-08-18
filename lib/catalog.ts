@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ProductoNormalizado } from './producto.js';
-import { cargarCatalogoIntcomex } from './providers/intcomex.js';
+import { PROVEEDORES } from './providers/index.js';
 
 const VIGENCIA_MS = 24 * 60 * 60 * 1000;
 
@@ -18,12 +18,6 @@ interface CacheEnDisco {
 }
 
 const enMemoria = new Map<string, ProductoNormalizado[]>();
-
-// Provisorio: en cuanto exista el registro de proveedores, el cargador sale de
-// ahi y esta tabla desaparece.
-const CARGADORES: Record<string, () => Promise<ProductoNormalizado[]>> = {
-  intcomex: cargarCatalogoIntcomex,
-};
 
 function directorioCache(): string {
   return process.env.CATALOG_CACHE_DIR ?? 'cache';
@@ -56,8 +50,8 @@ function estaVigente(cache: CacheEnDisco): boolean {
 }
 
 export async function cargarCatalogo(proveedor: string): Promise<ProductoNormalizado[]> {
-  const cargador = CARGADORES[proveedor];
-  if (!cargador) throw new Error(`Proveedor desconocido: ${proveedor}`);
+  const registrado = PROVEEDORES[proveedor];
+  if (!registrado) throw new Error(`Proveedor desconocido: ${proveedor}`);
 
   const cache = leerCache(proveedor);
   if (cache && estaVigente(cache)) {
@@ -66,7 +60,7 @@ export async function cargarCatalogo(proveedor: string): Promise<ProductoNormali
   }
 
   try {
-    const productos = await cargador();
+    const productos = await registrado.cargarCatalogo();
     escribirCache(proveedor, productos);
     enMemoria.set(proveedor, productos);
     return productos;
