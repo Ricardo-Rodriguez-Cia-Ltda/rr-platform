@@ -1,6 +1,8 @@
 # scrapper-proveedores
 
-API de precios de proveedores (Intcomex vía IWS) desplegada en Vercel.
+API de precios de proveedores. Cotiza contra Intcomex (IWS), Tecnoglobal e
+Ingram Micro, cada uno con su propio catálogo y sus propias rutas. Ver
+[Proveedores](#proveedores).
 
 ## Uso
 
