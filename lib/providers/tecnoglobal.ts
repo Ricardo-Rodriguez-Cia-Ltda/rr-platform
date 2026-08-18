@@ -2,6 +2,14 @@ import type { ProductoNormalizado } from '../producto.js';
 import type { PriceInfo, PriceQuery, PriceResult, Proveedor } from '../types.js';
 import { ProviderError } from '../types.js';
 
+/**
+ * Marca del error que devuelve Tecnoglobal al agotarse la cuota. Reintentar
+ * pronto contra un servicio que ya nos rechazo por exceso de llamadas es la
+ * forma mas segura de seguir rechazados, asi que el reintento la reconoce y
+ * espera mucho mas.
+ */
+export const MENSAJE_CUOTA = 'exceso de llamadas';
+
 const BASE_URL_POR_DEFECTO = 'http://200.6.78.34/stock/v1/';
 
 /**
@@ -118,7 +126,7 @@ async function leerProductos(response: Response): Promise<ProductoTecnoglobal[]>
     throw new ProviderError(
       'upstream',
       esCuotaExcedida(datos)
-        ? 'Tecnoglobal rechazo la consulta por exceso de llamadas en su ventana de 10 minutos'
+        ? `Tecnoglobal rechazo la consulta por ${MENSAJE_CUOTA} en su ventana de 10 minutos`
         : `Tecnoglobal responded with HTTP ${response.status}`,
       texto.slice(0, 500),
     );

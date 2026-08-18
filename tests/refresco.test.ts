@@ -36,7 +36,18 @@ describe('refrescarTodos', () => {
     await refrescarTodos(['ingram', 'intcomex'], cargar, alFallar);
 
     expect(alFallar).toHaveBeenCalledTimes(1);
-    expect(alFallar).toHaveBeenCalledWith('ingram');
+    expect(alFallar).toHaveBeenCalledWith('ingram', expect.any(Error));
+  });
+
+  // Quien agenda el reintento necesita el error para decidir cuanto esperar:
+  // un rechazo por cuota no se reintenta al mismo ritmo que una caida.
+  it('entrega el error que provoco la falla, no solo el nombre', async () => {
+    const boom = new Error('exceso de llamadas');
+    const alFallar = vi.fn();
+
+    await refrescarTodos(['tecnoglobal'], vi.fn().mockRejectedValue(boom), alFallar);
+
+    expect(alFallar).toHaveBeenCalledWith('tecnoglobal', boom);
   });
 
   it('los carga en paralelo, no en cadena', async () => {

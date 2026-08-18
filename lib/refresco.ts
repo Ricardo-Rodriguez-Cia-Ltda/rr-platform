@@ -9,7 +9,7 @@
 export async function refrescarTodos(
   nombres: string[],
   cargar: (proveedor: string) => Promise<unknown[]>,
-  alFallar: (proveedor: string) => void = () => {},
+  alFallar: (proveedor: string, error: unknown) => void = () => {},
 ): Promise<void> {
   const resultados = await Promise.allSettled(
     nombres.map(async (nombre) => {
@@ -21,7 +21,7 @@ export async function refrescarTodos(
   resultados.forEach((resultado, i) => {
     if (resultado.status === 'rejected') {
       console.error(`[catalog] ${nombres[i]}: no se pudo cargar`, resultado.reason);
-      alFallar(nombres[i]);
+      alFallar(nombres[i], resultado.reason);
     }
   });
 }
