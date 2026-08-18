@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   _resetFotoParaTests,
   cargarCatalogoTecnoglobal,
@@ -37,6 +39,9 @@ function fetchQueResuelvePorFoto(): ReturnType<typeof vi.fn> {
 }
 
 beforeEach(() => {
+  // La foto se persiste en disco: sin un directorio propio por test, los
+  // precios reales que deja una corrida en vivo se cuelan en la suite.
+  vi.stubEnv('CATALOG_CACHE_DIR', mkdtempSync(join(tmpdir(), 'tg-')));
   vi.stubEnv('TECNOGLOBAL_USER', 'usuario');
   vi.stubEnv('TECNOGLOBAL_PASSWORD', 'a6deb7170539fa7cf45c44b0d3505a8c');
   vi.stubEnv('TECNOGLOBAL_BASE_URL', 'http://tecnoglobal.test/stock/v1/');
@@ -393,5 +398,67 @@ describe('una respuesta vacia no queda cacheada como foto', () => {
     // servir la foto vacia.
     const grande = [...PRODUCTOS.map((p) => p.codigoTg), 'X1', 'X2', 'X3'];
     await expect(getPrices(grande)).rejects.toThrow(ProviderError);
+  });
+});
+
+// Al reiniciar, el catalogo se recupera de su cache en disco sin gastar una
+// descarga, pero la foto arrancaba vacia: la primera busqueda tenia que bajar
+// el volcado completo y, con la cuota gastada, respondia 502.
+describe('la foto sobrevive a un reinicio', () => {
+  it('la persiste en disco al descargarla', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => respuesta(RESPUESTA)));
+    await cargarCatalogoTecnoglobal();
+
+    const ruta = join(process.env.CATALOG_CACHE_DIR!, 'tecnoglobal-precios.json');
+    const guardada = JSON.parse(readFileSync(ruta, 'utf8'));
+    expect(guardada.productos).toHaveLength(PRODUCTOS.length);
+    expect(typeof guardada.obtenidaEn).toBe('number');
+  });
+
+  it('cotiza desde la foto de disco tras reiniciar, sin volver a descargar', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => respuesta(RESPUESTA)));
+    await cargarCatalogoTecnoglobal();
+
+    // Reinicio: se pierde la memoria, queda el disco.
+    _resetFotoParaTests();
+
+    const fetchMock = vi.fn(async () => respuesta(RESPUESTA));
+    vi.stubGlobal('fetch', fetchMock);
+    const grande = [...PRODUCTOS.map((p) => p.codigoTg), 'X1', 'X2', 'X3'];
+
+    expect((await getPrices(grande)).size).toBe(PRODUCTOS.length);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // El caso que provoco el 502: foto de disco vencida y cuota agotada.
+  it('con la foto de disco vencida y la cuota agotada, cotiza igual', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => respuesta(RESPUESTA)));
+    await cargarCatalogoTecnoglobal();
+    _resetFotoParaTests();
+
+    vi.stubEnv('TECNOGLOBAL_PRECIOS_TTL_MS', '0');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ error: true, message: 'Excede la cantidad máx. de consultas' }),
+            { status: 401 },
+          ),
+      ),
+    );
+
+    const grande = [...PRODUCTOS.map((p) => p.codigoTg), 'X1', 'X2', 'X3'];
+    expect((await getPrices(grande)).size).toBe(PRODUCTOS.length);
+    errorSpy.mockRestore();
+  });
+
+  it('ignora una foto de disco corrupta en vez de arrastrar el error', async () => {
+    writeFileSync(join(process.env.CATALOG_CACHE_DIR!, 'tecnoglobal-precios.json'), 'no json');
+    vi.stubGlobal('fetch', vi.fn(async () => respuesta(RESPUESTA)));
+
+    const grande = [...PRODUCTOS.map((p) => p.codigoTg), 'X1', 'X2', 'X3'];
+    expect((await getPrices(grande)).size).toBe(PRODUCTOS.length);
   });
 });

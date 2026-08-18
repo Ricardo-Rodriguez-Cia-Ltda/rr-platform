@@ -1,3 +1,6 @@
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import type { ProductoNormalizado } from '../producto.js';
 import type { PriceInfo, PriceQuery, PriceResult, Proveedor } from '../types.js';
 import { ProviderError } from '../types.js';
@@ -184,6 +187,38 @@ let foto: Foto | null = null;
 // primera comparte su promesa con las que llegan mientras baja el catalogo.
 let descargaEnCurso: Promise<Foto> | null = null;
 
+/**
+ * La foto tambien vive en disco.
+ *
+ * Al reiniciar, el catalogo se recupera de su propio cache sin gastar una
+ * descarga, pero la foto arrancaba vacia: la primera busqueda tenia que bajar
+ * el volcado completo y, con la cuota gastada, respondia 502. Un precio viejo
+ * sirve mucho mas que un error, y el definitivo igual se confirma por SKU en
+ * /product.
+ */
+function rutaFoto(): string {
+  return join(process.env.CATALOG_CACHE_DIR ?? 'cache', 'tecnoglobal-precios.json');
+}
+
+function guardarFotoEnDisco(nueva: Foto): void {
+  try {
+    mkdirSync(process.env.CATALOG_CACHE_DIR ?? 'cache', { recursive: true });
+    writeFileSync(rutaFoto(), JSON.stringify(nueva));
+  } catch (error) {
+    // No poder cachear no es motivo para fallar la consulta que ya se resolvio.
+    console.error('[tecnoglobal] no se pudo guardar la foto en disco', error);
+  }
+}
+
+function leerFotoDeDisco(): Foto | null {
+  try {
+    const guardada = JSON.parse(readFileSync(rutaFoto(), 'utf8')) as Foto;
+    return Array.isArray(guardada.productos) && guardada.productos.length > 0 ? guardada : null;
+  } catch {
+    return null;
+  }
+}
+
 function ttlFoto(): number {
   const crudo = Number(process.env.TECNOGLOBAL_PRECIOS_TTL_MS);
   return Number.isFinite(crudo) && crudo >= 0 ? crudo : TTL_FOTO_MS_POR_DEFECTO;
@@ -199,11 +234,13 @@ async function descargarCatalogo(): Promise<Foto> {
   }
   const nueva: Foto = { productos, obtenidaEn: Date.now() };
   foto = nueva;
+  guardarFotoEnDisco(nueva);
   return nueva;
 }
 
 async function obtenerFoto(): Promise<Foto> {
-  const vigente = foto;
+  // Tras un reinicio la foto en memoria esta vacia pero la de disco sirve.
+  const vigente = foto ?? (foto = leerFotoDeDisco());
   if (vigente && Date.now() - vigente.obtenidaEn < ttlFoto()) return vigente;
   if (!descargaEnCurso) {
     descargaEnCurso = descargarCatalogo().finally(() => {
