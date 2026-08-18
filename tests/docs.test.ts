@@ -227,3 +227,31 @@ describe('docs/api sigue el codigo: constantes citadas', () => {
     expect(README).toContain('**5 minutos**');
   });
 });
+
+describe('openapi.yaml es internamente consistente', () => {
+  // Un $ref a un schema que no existe no rompe ningun test de texto, pero
+  // deja la especificacion sin poder generar cliente ni renderizarse.
+  it('todos los $ref apuntan a algo definido', () => {
+    const refs = [...OPENAPI.matchAll(/\$ref: '#\/([^']+)'/g)].map((m) => m[1]);
+    expect(refs.length).toBeGreaterThan(0);
+
+    const huerfanos = [...new Set(refs)].filter(
+      (ref) => !new RegExp(`^    ${ref.split('/').pop()}:`, 'm').test(OPENAPI),
+    );
+    expect(huerfanos).toEqual([]);
+  });
+
+  // Las rutas con proveedor comparten el parametro de path: si el enum se
+  // queda atras del registro, la doc promete proveedores que no existen (o
+  // esconde los que si).
+  it('el enum de proveedores del path coincide con el registro', async () => {
+    const { PROVEEDORES } = await import('../lib/providers/index.js');
+    const enumeracion = /enum: \[([^\]]+)\]\n/.exec(
+      OPENAPI.slice(OPENAPI.indexOf('    Proveedor:')),
+    )?.[1];
+
+    expect(enumeracion).toBeTruthy();
+    const documentados = enumeracion!.split(',').map((s) => s.trim());
+    expect(documentados.sort()).toEqual(Object.keys(PROVEEDORES).sort());
+  });
+});
