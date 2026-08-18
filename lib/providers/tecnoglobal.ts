@@ -191,6 +191,12 @@ function ttlFoto(): number {
 
 async function descargarCatalogo(): Promise<Foto> {
   const productos = await leerProductos(await fetchStock('price'));
+  // Una respuesta sin productos no se guarda: dejaria una foto vacia vigente
+  // durante toda su vida util, y cotizar contra ella devuelve "sin precio"
+  // para todo el catalogo sin que nada parezca haber fallado.
+  if (productos.length === 0) {
+    throw new ProviderError('upstream', 'Tecnoglobal no devolvio productos en /price');
+  }
   const nueva: Foto = { productos, obtenidaEn: Date.now() };
   foto = nueva;
   return nueva;
@@ -228,9 +234,6 @@ export async function cargarCatalogoTecnoglobal(): Promise<ProductoNormalizado[]
   // El refresco diario del catalogo trae exactamente el mismo cuerpo que usan
   // los precios, asi que deja la foto lista y evita una segunda descarga.
   const { productos } = await descargarCatalogo();
-  if (productos.length === 0) {
-    throw new Error('Tecnoglobal no devolvio productos en /price');
-  }
   return productos.map(normalizarProducto);
 }
 

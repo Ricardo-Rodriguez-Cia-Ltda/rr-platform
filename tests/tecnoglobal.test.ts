@@ -375,3 +375,23 @@ describe('foto del volcado completo', () => {
     await expect(getPrices(['KN3-661'])).rejects.toThrow(/exceso de llamadas/i);
   });
 });
+
+// Una foto vacia vigente devuelve "sin precio" para todo el catalogo sin que
+// nada parezca haber fallado; es peor que no tener foto.
+describe('una respuesta vacia no queda cacheada como foto', () => {
+  it('no deja vigente una foto sin productos', async () => {
+    const fetchMock = vi.fn(async (url: URL) =>
+      url.pathname.endsWith('/v1/price')
+        ? respuesta({ error: false, message: 'Articulos no fueron encontrados' })
+        : respuesta({ error: false, products: [] }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(cargarCatalogoTecnoglobal()).rejects.toThrow();
+
+    // La siguiente cotizacion masiva vuelve a intentar la descarga en vez de
+    // servir la foto vacia.
+    const grande = [...PRODUCTOS.map((p) => p.codigoTg), 'X1', 'X2', 'X3'];
+    await expect(getPrices(grande)).rejects.toThrow(ProviderError);
+  });
+});
