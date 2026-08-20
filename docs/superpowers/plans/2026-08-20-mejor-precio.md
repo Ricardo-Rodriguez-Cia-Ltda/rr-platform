@@ -341,6 +341,21 @@ export interface Comparacion {
 }
 
 /**
+ * Catalogo de un proveedor, o null si todavia no cargo.
+ *
+ * Envuelve el `throw` de `obtenerCatalogo` porque aca un catalogo sin cargar
+ * no es un error: es un proveedor que no puede participar de la comparacion.
+ */
+function catalogoDe(proveedor: string): ProductoNormalizado[] | null {
+  try {
+    return obtenerCatalogo(proveedor);
+  } catch (error) {
+    if (error instanceof CatalogUnavailableError) return null;
+    throw error;
+  }
+}
+
+/**
  * Gana el mas barato CON stock: cotizar el mas barato sin stock es cotizar algo
  * que no se puede entregar. Si ninguno tiene, gana el mas barato igual pero
  * marcado, para que el consumidor sepa que el ganador no sale hoy.
@@ -425,11 +440,8 @@ export async function compararPorClave(
       continue;
     }
 
-    let catalogo: ProductoNormalizado[];
-    try {
-      catalogo = obtenerCatalogo(proveedor.nombre);
-    } catch (error) {
-      if (!(error instanceof CatalogUnavailableError)) throw error;
+    const catalogo = catalogoDe(proveedor.nombre);
+    if (!catalogo) {
       incompleta.push({
         proveedor: proveedor.nombre,
         error: 'catalogo_no_disponible',
@@ -496,7 +508,7 @@ git commit -m "feat: comparador de precios agnostico de proveedores"
 - Test: `tests/comparador.test.ts`
 
 **Interfaces:**
-- Consumes: `compactarMpn`, `marcaCanonica` y `claveUnion` de `lib/producto.js`.
+- Consumes: `compactarMpn`, `marcaCanonica` y `claveUnion` de `lib/producto.js`; `catalogoDe()`, que ya existe en `lib/comparador.ts` desde la Task 1.
 - Produces, desde `lib/comparador.js`:
   - `resolverClaves(mpn: string, marca?: string, registro?: Record<string, Proveedor>): string[]`
   - `type ResolucionSku = { estado: 'ok'; clave: string } | { estado: 'catalogo_no_disponible' } | { estado: 'sku_desconocido' } | { estado: 'no_comparable' }`
@@ -645,18 +657,10 @@ import {
 } from './producto.js';
 ```
 
-Y agregar al final del archivo:
+Y agregar al final del archivo. `catalogoDe()` ya existe desde la Task 1: se
+reusa, no se vuelve a definir.
 
 ```ts
-function catalogoDe(proveedor: string): ProductoNormalizado[] | null {
-  try {
-    return obtenerCatalogo(proveedor);
-  } catch (error) {
-    if (error instanceof CatalogUnavailableError) return null;
-    throw error;
-  }
-}
-
 /**
  * Claves de union que un MPN produce en los catalogos cargados.
  *
