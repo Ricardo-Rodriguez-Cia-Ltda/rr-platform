@@ -1,5 +1,10 @@
 import { CatalogUnavailableError, obtenerCatalogo } from './catalog.js';
-import { claveUnion, type ProductoNormalizado } from './producto.js';
+import {
+  claveUnion,
+  compactarMpn,
+  marcaCanonica,
+  type ProductoNormalizado,
+} from './producto.js';
 import { PROVEEDORES } from './providers/index.js';
 import type { PriceInfo, Proveedor } from './types.js';
 
@@ -173,4 +178,62 @@ export async function compararPorClave(
     ofertas,
     incompleta,
   };
+}
+
+/**
+ * Claves de union que un MPN produce en los catalogos cargados.
+ *
+ * Devuelve mas de una cuando el mismo part number existe bajo marcas distintas
+ * —raro, una sola vez en los 10.411 productos de Intcomex, pero real—. El
+ * llamador tiene que pedir desambiguacion en vez de elegir por el consumidor.
+ */
+export function resolverClaves(
+  mpn: string,
+  marca?: string,
+  registro: Record<string, Proveedor> = PROVEEDORES,
+): string[] {
+  const compacto = compactarMpn(mpn);
+  if (!compacto) return [];
+
+  const filtro = marca ? marcaCanonica(marca) : null;
+  const claves = new Set<string>();
+
+  for (const nombre of Object.keys(registro)) {
+    for (const p of catalogoDe(nombre) ?? []) {
+      if (compactarMpn(p.mpn) !== compacto) continue;
+      if (filtro && marcaCanonica(p.marca) !== filtro) continue;
+      const clave = claveUnion(p);
+      if (clave) claves.add(clave);
+    }
+  }
+  return [...claves].sort();
+}
+
+export type ResolucionSku =
+  | { estado: 'ok'; clave: string }
+  | { estado: 'catalogo_no_disponible' }
+  | { estado: 'sku_desconocido' }
+  | { estado: 'no_comparable' };
+
+/**
+ * Clave de union del producto que un proveedor identifica con ese SKU.
+ *
+ * Devuelve un estado y no un string nulo porque los tres fracasos son tres
+ * respuestas HTTP distintas.
+ */
+export function claveDeSku(proveedor: string, sku: string): ResolucionSku {
+  const catalogo = catalogoDe(proveedor);
+  if (!catalogo) return { estado: 'catalogo_no_disponible' };
+
+  const producto = catalogo.find((p) => p.sku === sku);
+  if (!producto) return { estado: 'sku_desconocido' };
+
+  const clave = claveUnion(producto);
+  return clave ? { estado: 'ok', clave } : { estado: 'no_comparable' };
+}
+
+export function hayAlgunCatalogo(
+  registro: Record<string, Proveedor> = PROVEEDORES,
+): boolean {
+  return Object.keys(registro).some((nombre) => catalogoDe(nombre) !== null);
 }

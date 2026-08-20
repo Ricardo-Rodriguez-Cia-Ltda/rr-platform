@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { compararPorClave } from '../lib/comparador.js';
+import {
+  claveDeSku,
+  compararPorClave,
+  hayAlgunCatalogo,
+  resolverClaves,
+} from '../lib/comparador.js';
 import type { ProductoNormalizado } from '../lib/producto.js';
 import type { PriceInfo, Proveedor } from '../lib/types.js';
 import { ProviderError } from '../lib/types.js';
@@ -246,5 +251,110 @@ describe('compararPorClave', () => {
     await compararPorClave(CLAVE, { a: proveedor });
 
     expect(espia.mock.calls[0][0]).toHaveLength(10);
+  });
+});
+
+describe('resolverClaves', () => {
+  it('encuentra la clave de un MPN presente en los catalogos', () => {
+    catalogos.set('a', [producto({ sku: 'A1', mpn: '2N6G5LT#ABM', marca: 'HP' })]);
+
+    expect(resolverClaves('2n6g5lt-abm', undefined, { a: proveedorFalso('a', {}) })).toEqual([
+      '2n6g5ltabm|hp',
+    ]);
+  });
+
+  it('devuelve vacio si ningun proveedor lo tiene', () => {
+    catalogos.set('a', [producto({ sku: 'A1', mpn: 'OTRO', marca: 'HP' })]);
+
+    expect(resolverClaves('NOEXISTE', undefined, { a: proveedorFalso('a', {}) })).toEqual([]);
+  });
+
+  it('junta la misma clave aunque cada proveedor escriba la marca distinto', () => {
+    catalogos.set('a', [producto({ sku: 'A1', mpn: 'BVG700I-MSX', marca: 'APC' })]);
+    catalogos.set('b', [producto({ sku: 'B1', mpn: 'BVG700IMSX', marca: 'AMERICAN POWER' })]);
+
+    const claves = resolverClaves('BVG700I-MSX', undefined, {
+      a: proveedorFalso('a', {}),
+      b: proveedorFalso('b', {}),
+    });
+
+    expect(claves).toHaveLength(1);
+  });
+
+  // El caso 98PT0G1299: un MPN bajo tres marcas. Elegir por el consumidor
+  // seria cotizarle un producto que no pidio.
+  it('devuelve una clave por cada marca cuando el MPN colisiona', () => {
+    catalogos.set('a', [
+      producto({ sku: 'A1', mpn: '98PT0G1299', marca: 'Trendnet' }),
+      producto({ sku: 'A2', mpn: '98PT0G1299', marca: 'MSI' }),
+    ]);
+
+    expect(resolverClaves('98PT0G1299', undefined, { a: proveedorFalso('a', {}) })).toHaveLength(2);
+  });
+
+  it('la marca desambigua y deja una sola clave', () => {
+    catalogos.set('a', [
+      producto({ sku: 'A1', mpn: '98PT0G1299', marca: 'Trendnet' }),
+      producto({ sku: 'A2', mpn: '98PT0G1299', marca: 'MSI' }),
+    ]);
+
+    expect(resolverClaves('98PT0G1299', 'MSI', { a: proveedorFalso('a', {}) })).toEqual([
+      '98pt0g1299|msi',
+    ]);
+  });
+
+  it('ignora los catalogos que no estan cargados en vez de fallar', () => {
+    catalogos.set('a', [producto({ sku: 'A1', mpn: 'MPN1', marca: 'HP' })]);
+
+    const claves = resolverClaves('MPN1', undefined, {
+      a: proveedorFalso('a', {}),
+      b: proveedorFalso('b', {}),
+    });
+
+    expect(claves).toEqual(['mpn1|hp']);
+  });
+
+  it('devuelve vacio para un MPN sin caracteres utiles', () => {
+    catalogos.set('a', [producto({ sku: 'A1' })]);
+
+    expect(resolverClaves('---', undefined, { a: proveedorFalso('a', {}) })).toEqual([]);
+  });
+});
+
+describe('claveDeSku', () => {
+  it('devuelve la clave del producto que ese proveedor identifica con el SKU', () => {
+    catalogos.set('a', [producto({ sku: 'A1', mpn: 'MPN1', marca: 'HP' })]);
+
+    expect(claveDeSku('a', 'A1')).toEqual({ estado: 'ok', clave: 'mpn1|hp' });
+  });
+
+  it('distingue el catalogo sin cargar', () => {
+    expect(claveDeSku('a', 'A1')).toEqual({ estado: 'catalogo_no_disponible' });
+  });
+
+  it('distingue el SKU que ese proveedor no conoce', () => {
+    catalogos.set('a', [producto({ sku: 'A1' })]);
+
+    expect(claveDeSku('a', 'NOEXISTE')).toEqual({ estado: 'sku_desconocido' });
+  });
+
+  // Sin MPN o sin marca el producto no se puede comparar. Decirlo es mejor que
+  // un 404, que sugiere que el producto no existe.
+  it('distingue el producto que no tiene clave de union', () => {
+    catalogos.set('a', [producto({ sku: 'A1', mpn: null })]);
+
+    expect(claveDeSku('a', 'A1')).toEqual({ estado: 'no_comparable' });
+  });
+});
+
+describe('hayAlgunCatalogo', () => {
+  it('es false cuando ningun proveedor cargo su catalogo', () => {
+    expect(hayAlgunCatalogo({ a: proveedorFalso('a', {}) })).toBe(false);
+  });
+
+  it('es true con que uno lo tenga', () => {
+    catalogos.set('a', [producto({ sku: 'A1' })]);
+
+    expect(hayAlgunCatalogo({ a: proveedorFalso('a', {}), b: proveedorFalso('b', {}) })).toBe(true);
   });
 });
