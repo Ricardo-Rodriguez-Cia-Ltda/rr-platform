@@ -141,6 +141,22 @@ describe('local server adapter', () => {
     expect(getPriceMock).toHaveBeenCalledWith({ sku: 'PRIMERO', mpn: undefined, upc: undefined });
   });
 
+  it('sirve /api/mejor-precio', async () => {
+    const res = await fetch(`${base}/api/mejor-precio?mpn=MPN-HP1`, {
+      headers: { 'x-api-key': 'test-secret' },
+    });
+    // El catalogo del mock tiene HP1 con MPN-HP1, asi que la ruta resuelve y
+    // compara; lo que se verifica aca es que la ruta existe, no el resultado.
+    expect(res.status).not.toBe(404);
+  });
+
+  it('devuelve 400 en /api/mejor-precio sin identificador', async () => {
+    const res = await fetch(`${base}/api/mejor-precio`, {
+      headers: { 'x-api-key': 'test-secret' },
+    });
+    expect(res.status).toBe(400);
+  });
+
   it('responds 500 (not a crash) to a malformed Host header and stays alive', async () => {
     // An empty `Host:` header is now handled gracefully by the `||` fallback (falls back to
     // "localhost" and the request proceeds normally), so it no longer reproduces the crash.

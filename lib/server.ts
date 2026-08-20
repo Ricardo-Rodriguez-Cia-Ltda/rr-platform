@@ -5,6 +5,7 @@ import porRutaProductHandler from '../api/[proveedor]/product.js';
 import porRutaSearchHandler from '../api/[proveedor]/search.js';
 import creditoMockHandler from '../api/credito/mock.js';
 import facetasHandler from '../api/facetas.js';
+import mejorPrecioHandler from '../api/mejor-precio.js';
 import priceHandler from '../api/price.js';
 import productHandler from '../api/product.js';
 import searchHandler from '../api/search.js';
@@ -23,7 +24,7 @@ interface Ruta {
 
 function rutas(): Record<string, Ruta> {
   const basePath = (process.env.BASE_PATH ?? '').replace(/\/+$/, '');
-  const nombres = ['price', 'search', 'product', 'facetas', 'credito/mock'];
+  const nombres = ['price', 'search', 'product', 'facetas', 'mejor-precio', 'credito/mock'];
   const tabla: Record<string, Ruta> = {};
   for (const nombre of nombres) {
     tabla[`/api/${nombre}`] = { handler: nombre };
@@ -47,6 +48,7 @@ const handlers = {
   search: searchHandler,
   product: productHandler,
   facetas: facetasHandler,
+  'mejor-precio': mejorPrecioHandler,
   'credito/mock': creditoMockHandler,
   'proveedor:search': porRutaSearchHandler,
   'proveedor:product': porRutaProductHandler,

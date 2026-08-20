@@ -44,6 +44,7 @@ const { default: productHandler } = await import('../api/product.js');
 const { default: facetasHandler } = await import('../api/facetas.js');
 const { default: priceHandler } = await import('../api/price.js');
 const { default: porRutaSearchHandler } = await import('../api/[proveedor]/search.js');
+const { default: mejorPrecioHandler } = await import('../api/mejor-precio.js');
 
 type Handler = (req: VercelRequest, res: VercelResponse) => Promise<void>;
 
@@ -204,6 +205,11 @@ const CASOS: Caso[] = [
     error: 'proveedor_no_configurado',
     antes: () => vi.stubEnv('INTCOMEX_API_KEY', ''),
   },
+
+  // --- /api/mejor-precio ---
+  { nombre: 'mejor-precio sin x-api-key', handler: mejorPrecioHandler, req: makeReq({ mpn: 'X' }), status: 401, error: 'unauthorized' },
+  { nombre: 'mejor-precio sin identificador', handler: mejorPrecioHandler, req: makeReq({}, AUTH), status: 400, error: 'bad_request' },
+  { nombre: 'mejor-precio con metodo POST', handler: mejorPrecioHandler, req: makeReq({ mpn: 'X' }, AUTH, 'POST'), status: 405, error: 'method_not_allowed' },
 ];
 
 describe('contrato de errores de la API', () => {
@@ -256,8 +262,8 @@ describe('contrato de errores de la API', () => {
     expect(JSON.stringify(res.body)).not.toContain(SECRETO);
   });
 
-  it('cubre los cuatro endpoints GET', () => {
+  it('cubre los cinco endpoints GET', () => {
     const cubiertos = new Set(CASOS.map((c) => c.nombre.split(' ')[0]));
-    expect([...cubiertos].sort()).toEqual(['facetas', 'price', 'product', 'search']);
+    expect([...cubiertos].sort()).toEqual(['facetas', 'mejor-precio', 'price', 'product', 'search']);
   });
 });
