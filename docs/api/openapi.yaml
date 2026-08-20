@@ -317,24 +317,38 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           description: |
-            Ningun proveedor tiene el producto, el SKU no existe en el proveedor
-            indicado, o el proveedor de la consulta no existe.
+            Tres causas, distinguibles por `error` y por que campos extra trae:
+            `not_found` si el MPN o el SKU no estan en ningun catalogo, o si
+            ningun proveedor entrego precio (este ultimo caso agrega
+            `incompleta`, igual contenido que en el 200: quien no pudo
+            responder); `proveedor_desconocido` si el proveedor de `proveedor=`
+            no existe (agrega `proveedor` con el valor recibido).
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                $ref: '#/components/schemas/ErrorMejorPrecioNoEncontrado'
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
         '409':
           description: |
-            `ambiguo` si el MPN existe bajo varias marcas, o `no_comparable` si
-            el producto no tiene MPN y marca.
+            `ambiguo` si el MPN existe bajo varias marcas (agrega `marcas`,
+            las marcas encontradas, para repetir con &marca=), o
+            `no_comparable` si el producto no tiene MPN y marca.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                $ref: '#/components/schemas/ErrorAmbiguo'
         '503':
-          $ref: '#/components/responses/CatalogoNoDisponible'
+          description: |
+            `catalogo_no_disponible` (ningun catalogo listo aun, o el del
+            proveedor indicado si se uso proveedor+sku) es transitorio:
+            reintentar en ~1 minuto. `proveedor_no_configurado` (solo posible
+            en el camino proveedor+sku) no lo es: falta una credencial
+            nuestra, no reintentar.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorProveedor'
 
   /{proveedor}/search:
     get:
@@ -658,6 +672,18 @@ components:
           type: integer
           nullable: true
 
+    ProveedorIncompleto:
+      type: object
+      required: [proveedor, error, detail]
+      properties:
+        proveedor:
+          type: string
+        error:
+          type: string
+          enum: [catalogo_no_disponible, proveedor_no_configurado, sin_precio, upstream]
+        detail:
+          type: string
+
     MejorPrecio:
       type: object
       required: [clave, mpn, marca, nombre, mejor, ofertas, incompleta]
@@ -699,16 +725,41 @@ components:
             vacia. Si trae entradas, el mejor precio lo es solo entre los que
             respondieron.
           items:
-            type: object
-            required: [proveedor, error, detail]
-            properties:
-              proveedor:
+            $ref: '#/components/schemas/ProveedorIncompleto'
+
+    ErrorAmbiguo:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            marcas:
+              type: array
+              description: |
+                Presente solo cuando error es ambiguo: las marcas bajo las que
+                existe el MPN. Repetir la consulta con &marca= usando uno de
+                estos valores literalmente.
+              items:
                 type: string
-              error:
-                type: string
-                enum: [catalogo_no_disponible, proveedor_no_configurado, sin_precio, upstream]
-              detail:
-                type: string
+
+    ErrorMejorPrecioNoEncontrado:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          properties:
+            proveedor:
+              type: string
+              nullable: true
+              description: |
+                Presente solo cuando error es proveedor_desconocido: el valor
+                de proveedor= que se recibio y no existe.
+            incompleta:
+              type: array
+              description: |
+                Presente solo cuando el MPN o SKU se resolvieron pero ningun
+                proveedor entrego precio. Mismo contenido que el campo
+                incompleta de la respuesta 200.
+              items:
+                $ref: '#/components/schemas/ProveedorIncompleto'
 
     ErrorProveedor:
       allOf:
