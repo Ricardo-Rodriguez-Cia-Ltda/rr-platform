@@ -85,6 +85,7 @@ Resumen de endpoints (todos con `x-api-key`):
 - `GET /search?q=...` — buscar por texto libre; `marca`, `categoria`, `precio_max`, `solo_con_stock`, `limite`.
 - `GET /product?sku=...` — ficha completa de un SKU.
 - `GET /price?sku=|mpn=|upc=` — cotizar un identificador conocido, sin pasar por el catálogo.
+- `GET /mejor-precio?mpn=|proveedor=&sku=` — el precio más bajo entre todos los proveedores, con la lista completa de ofertas.
 - `GET /facetas` — vocabulario del catálogo (uso de build-time, no como tool de un LLM).
 - `POST /credito/mock` — cupo de crédito disponible. **Mock**: siempre responde línea de 10.000.000 CLP con 4.000.000 utilizados, sin importar el RUT. Ver abajo.
 
@@ -130,9 +131,9 @@ Un proveedor sin credenciales responde `503 proveedor_no_configurado` en sus
 rutas y queda fuera del refresco de catálogos, en vez de reintentar cada 5
 minutos algo que no puede funcionar.
 
-**Todavía no existe el endpoint de "mejor precio"** entre los tres. Cada
-proveedor se consulta por separado. Comparar es el paso siguiente y tiene su
-propio diseño.
+El endpoint `GET /api/mejor-precio` compara entre los tres. Alrededor de 1.400
+productos existen en más de un proveedor; para el resto devuelve una sola
+oferta. Ver [`docs/api/README.md`](docs/api/README.md).
 
 ### Notas por proveedor
 

@@ -57,6 +57,7 @@ El proyecto corre en dos sitios y las rutas no son idénticas:
 | Buscar | `/search`, `/api/search` | `/api/search` |
 | Ficha | `/product?sku=X`, `/product/X`, `/api/product/X` | `/api/product?sku=X` |
 | Facetas | `/facetas`, `/api/facetas` | `/api/facetas` |
+| Mejor precio | `/mejor-precio`, `/api/mejor-precio` | `/api/mejor-precio` |
 | Crédito (mock) | `/credito/mock`, `/api/credito/mock` | `/api/credito/mock` |
 
 El prefijo extra (`/rr/captador-precios`) lo define la variable `BASE_PATH` del
@@ -85,9 +86,9 @@ consumidores actuales no tengan que cambiar nada.
 
 `/price` elige proveedor por query param: `?provider=tecnoglobal`.
 
-Todavía **no hay un endpoint de "mejor precio"** entre los tres: cada proveedor
-se consulta por separado. Comparar es el paso siguiente y necesita que las tres
-integraciones estén verificadas contra sus APIs reales.
+`GET /mejor-precio` compara entre los tres (ver más abajo). Alrededor de 1.400
+productos existen en más de un proveedor; para el resto devuelve una sola
+oferta.
 
 El SKU **no es comparable entre proveedores**: cada distribuidor tiene el suyo.
 Lo único común es el `mpn` (part number del fabricante).
@@ -122,6 +123,8 @@ Ramifica siempre por `error`, nunca por el texto de `detail`.
 | 404 | `not_found` | El producto no existe o el proveedor no entregó precio | No reintentar. El SKU no sirve. |
 | 405 | `method_not_allowed` | Se usó un verbo distinto de GET | Usar GET. |
 | 409 | `demasiado_amplio` | La búsqueda calza demasiados productos | Acotar con `marca` o `categoria`. Ver abajo. |
+| 409 | `ambiguo` | El MPN existe bajo varias marcas | Repetir con `marca=`. Ver `/mejor-precio`. |
+| 409 | `no_comparable` | El producto no tiene MPN y marca, así que no se puede comparar | No reintentar. Ese producto queda fuera del mejor precio. |
 | 413 | `payload_too_large` | El cuerpo de un POST supera 1 MB | Corregir la llamada. No reintentar. |
 | 500 | `internal` | Error inesperado del servidor | No debería ocurrir. Transitorio; reintentar una vez. |
 | 404 | `proveedor_desconocido` | El proveedor de la ruta no existe | Corregir la llamada. Los válidos son `intcomex`, `tecnoglobal`, `ingram`. |
@@ -545,6 +548,109 @@ falte cupo.
 | Falta o es inválida `x-api-key` | `401` |
 | Se usó GET u otro verbo | `405` |
 | Cuerpo sobre 1 MB | `413` |
+
+---
+
+## `GET /mejor-precio` — el precio más bajo entre todos los proveedores
+
+Devuelve quién vende más barato un producto, consultando a todos los
+proveedores registrados. Es la respuesta que se le da al cliente.
+
+### Parámetros (query string)
+
+Exactamente uno de los dos caminos:
+
+| Parámetro | Cuándo | Ejemplo |
+|---|---|---|
+| `mpn` | Se conoce el part number del fabricante | `mpn=BVG700I-MSX` |
+| `proveedor` + `sku` | Se encontró el producto con `/search` y se quiere saber si otro lo tiene más barato | `proveedor=intcomex&sku=UP001APC42` |
+
+Opcional: `marca`, para desambiguar cuando un mismo MPN existe bajo varias.
+
+### Respuesta `200`
+
+```json
+{
+  "clave": "bvg700imsx|apc",
+  "mpn": "BVG700I-MSX",
+  "marca": "APC",
+  "nombre": "APC Easy UPS 700VA",
+  "mejor": {
+    "proveedor": "ingram",
+    "sku": "6823346",
+    "precio": 128.40,
+    "moneda": "USD",
+    "stock": 6,
+    "criterio": "mas_barato_con_stock"
+  },
+  "ofertas": [
+    { "proveedor": "ingram",      "sku": "6823346",    "precio": 128.40, "moneda": "USD", "stock": 6 },
+    { "proveedor": "intcomex",    "sku": "UP001APC42", "precio": 131.02, "moneda": "USD", "stock": 12 },
+    { "proveedor": "tecnoglobal", "sku": "UPS-284",    "precio": 139.90, "moneda": "USD", "stock": 0 }
+  ],
+  "incompleta": []
+}
+```
+
+`mejor` es la oferta ganadora: **la más barata con stock**. `criterio` dice por
+qué ganó — `mas_barato_con_stock` normalmente, o `mas_barato_sin_stock` cuando
+ningún proveedor tiene existencias y el ganador no se puede entregar hoy.
+
+`ofertas` viene completa y ordenada por precio, no solo la ganadora: sirve para
+explicar la decisión o para ofrecer el segundo lugar. Fíjate que la primera de
+la lista puede no ser `mejor`, justamente cuando la más barata no tiene stock.
+
+`clave` es el identificador interno con el que se emparejaron los productos
+entre proveedores (MPN compactado + marca). Sirve para diagnosticar por qué dos
+cosas se consideraron el mismo producto.
+
+### `incompleta`: la comparación puede ser parcial
+
+```json
+"incompleta": [
+  { "proveedor": "tecnoglobal", "error": "upstream",
+    "detail": "Tecnoglobal rechazo la consulta por exceso de llamadas..." }
+]
+```
+
+**Siempre está presente**, aunque venga vacía. Si trae entradas, el mejor precio
+lo es entre los que sí respondieron: alguno de los ausentes podría haber sido
+más barato.
+
+La regla de dónde aparece cada proveedor no tiene ambigüedad:
+
+| Dónde aparece | Qué significa |
+|---|---|
+| En `ofertas` | Lo vende, a ese precio |
+| En `incompleta` | Podría venderlo más barato, pero no se pudo averiguar |
+| En ninguna | Se revisó su catálogo y no lo vende |
+
+Los `error` posibles en `incompleta` son `catalogo_no_disponible`,
+`proveedor_no_configurado`, `sin_precio` y `upstream`.
+
+### Respuesta `409 ambiguo`
+
+Cuando el MPN existe bajo varias marcas, no se adivina:
+
+```json
+{
+  "error": "ambiguo",
+  "detail": "El MPN 98PT0G1299 existe bajo 3 marcas. Repite la consulta con &marca=",
+  "marcas": ["trendnet", "eufy", "msi"]
+}
+```
+
+Repetir con `&marca=msi`. Es raro —un caso cada diez mil productos— pero elegir
+mal aquí es cotizarle al cliente otro producto.
+
+### Qué NO hace
+
+- **No aplica margen.** El precio es de costo, igual que en el resto de la API.
+- **No compara por texto libre.** Hay que llegar con un `mpn` o con un
+  `proveedor`+`sku`, que es lo que devuelven `/search` y `/product`.
+- **No cubre todo el catálogo.** Solo alrededor de 1.400 productos existen en
+  más de un proveedor; el resto devuelve una sola oferta. Eso es correcto, pero
+  conviene que el agente no prometa "comparamos entre tres" en todos los casos.
 
 ---
 

@@ -25,6 +25,7 @@ const IMPLEMENTACION: Record<string, string> = {
   search: 'lib/handlers/busqueda.ts',
   product: 'lib/handlers/producto.ts',
   facetas: 'lib/handlers/facetas.ts',
+  'mejor-precio': 'lib/handlers/mejor-precio.ts',
 };
 
 const FUENTES_API = RUTAS.map((n) => ({
@@ -149,6 +150,15 @@ describe('docs/api sigue el codigo: nombres de campo de las respuestas', () => {
       expect(DOCS).toContain(campo);
     },
   );
+
+  it.each(
+    clavesDelLiteral(
+      FUENTES_API.find((f) => f.nombre === 'mejor-precio')!.codigo,
+      'res.status(200).json({',
+    ),
+  )("el campo '%s' de /mejor-precio esta documentado", (campo) => {
+    expect(DOCS).toContain(campo);
+  });
 
   it.each(camposDeInterfaz(readFileSync('lib/types.ts', 'utf8'), 'PriceResult'))(
     "el campo '%s' de /price esta documentado",

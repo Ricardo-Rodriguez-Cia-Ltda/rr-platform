@@ -262,6 +262,80 @@ paths:
         '503':
           $ref: '#/components/responses/CatalogoNoDisponible'
 
+  /mejor-precio:
+    get:
+      operationId: mejorPrecio
+      tags: [busqueda]
+      summary: El precio mas bajo entre todos los proveedores
+      description: |
+        Devuelve quien vende mas barato un producto, consultando a todos los
+        proveedores registrados.
+
+        Gana la oferta mas barata CON stock; si ninguno tiene existencias gana
+        la mas barata y `criterio` lo indica. `ofertas` viene completa y
+        ordenada por precio, asi que la primera de la lista puede no ser la
+        ganadora.
+
+        `incompleta` siempre esta presente. Si trae entradas, el mejor precio lo
+        es solo entre los proveedores que respondieron.
+      parameters:
+        - name: mpn
+          in: query
+          required: false
+          description: Part number del fabricante. Excluyente con proveedor+sku.
+          schema:
+            type: string
+        - name: proveedor
+          in: query
+          required: false
+          description: Proveedor que identifica el producto con `sku`. Va junto con `sku`.
+          schema:
+            type: string
+            enum: [intcomex, tecnoglobal, ingram]
+        - name: sku
+          in: query
+          required: false
+          description: SKU del proveedor indicado. Va junto con `proveedor`.
+          schema:
+            type: string
+        - name: marca
+          in: query
+          required: false
+          description: Desambigua cuando el mismo MPN existe bajo varias marcas.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Comparacion resuelta (puede ser parcial, ver incompleta)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MejorPrecio'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: |
+            Ningun proveedor tiene el producto, el SKU no existe en el proveedor
+            indicado, o el proveedor de la consulta no existe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '409':
+          description: |
+            `ambiguo` si el MPN existe bajo varias marcas, o `no_comparable` si
+            el producto no tiene MPN y marca.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/CatalogoNoDisponible'
+
   /{proveedor}/search:
     get:
       operationId: buscarProductosDeProveedor
@@ -558,10 +632,83 @@ components:
             - catalogo_no_disponible
             - proveedor_desconocido
             - proveedor_no_configurado
+            - ambiguo
+            - no_comparable
             - internal
         detail:
           type: string
           description: Explicación legible. No es contrato estable.
+
+    Oferta:
+      type: object
+      required: [proveedor, sku, precio, moneda, stock]
+      properties:
+        proveedor:
+          type: string
+          description: Proveedor que ofrece este precio.
+        sku:
+          type: string
+          description: SKU con el que ESE proveedor identifica el producto.
+        precio:
+          type: number
+          description: Precio de costo. No incluye margen.
+        moneda:
+          type: string
+        stock:
+          type: integer
+          nullable: true
+
+    MejorPrecio:
+      type: object
+      required: [clave, mpn, marca, nombre, mejor, ofertas, incompleta]
+      properties:
+        clave:
+          type: string
+          description: |
+            Identificador interno con el que se emparejaron los productos entre
+            proveedores (MPN compactado + marca). Para diagnostico.
+        mpn:
+          type: string
+          nullable: true
+        marca:
+          type: string
+          nullable: true
+        nombre:
+          type: string
+          nullable: true
+        mejor:
+          allOf:
+            - $ref: '#/components/schemas/Oferta'
+            - type: object
+              properties:
+                criterio:
+                  type: string
+                  enum: [mas_barato_con_stock, mas_barato_sin_stock]
+                  description: |
+                    Por que gano esta oferta. `mas_barato_sin_stock` significa
+                    que ningun proveedor tiene existencias.
+        ofertas:
+          type: array
+          description: Todas las ofertas, ordenadas por precio ascendente.
+          items:
+            $ref: '#/components/schemas/Oferta'
+        incompleta:
+          type: array
+          description: |
+            Proveedores que no pudieron participar. Siempre presente, puede venir
+            vacia. Si trae entradas, el mejor precio lo es solo entre los que
+            respondieron.
+          items:
+            type: object
+            required: [proveedor, error, detail]
+            properties:
+              proveedor:
+                type: string
+              error:
+                type: string
+                enum: [catalogo_no_disponible, proveedor_no_configurado, sin_precio, upstream]
+              detail:
+                type: string
 
     ErrorProveedor:
       allOf:
