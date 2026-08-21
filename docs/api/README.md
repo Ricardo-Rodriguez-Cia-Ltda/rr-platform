@@ -645,7 +645,7 @@ mal aquí es cotizarle al cliente otro producto.
 
 ### Respuesta `404 not_found`
 
-Tres causas posibles, todas con status `404` pero contenido distinto:
+Cuatro causas posibles, todas con status `404` pero contenido distinto:
 
 - **Por MPN, y se revisaron todos los catálogos:** ninguno lo vende.
   `incompleta` viene vacía. Definitivo, no reintentar.

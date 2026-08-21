@@ -6,6 +6,7 @@ import {
   compararPorClave,
   hayAlgunCatalogo,
   resolverClaves,
+  type ProveedorAusente,
 } from '../comparador.js';
 import { resolverOResponder } from './guardas.js';
 import { firstString, type Handler } from './tipos.js';
@@ -15,13 +16,21 @@ function marcaDeClave(clave: string): string {
   return clave.split('|')[1] ?? clave;
 }
 
-// catalogo_no_disponible y upstream son fallas de un momento: reintentar
-// puede darle una respuesta distinta. sin_precio y proveedor_no_configurado
-// son estados; reintentar no los cambia.
-const CAUSAS_TRANSITORIAS = new Set(['catalogo_no_disponible', 'upstream']);
+// Clasificacion exhaustiva: cada causa de ProveedorAusente['error'] tiene
+// que aparecer aca. Si se agrega una causa nueva sin clasificarla,
+// TypeScript rompe la compilacion en vez de dejarla caer en "permanente"
+// por defecto -el lado peligroso: una falla transitoria nueva quedaria
+// marcada como definitiva y el agente dejaria de reintentar algo que si
+// conviene.
+const ES_TRANSITORIA: Record<ProveedorAusente['error'], boolean> = {
+  catalogo_no_disponible: true,
+  upstream: true,
+  sin_precio: false,
+  proveedor_no_configurado: false,
+};
 
-function esTransitoria(p: { error: string }): boolean {
-  return CAUSAS_TRANSITORIAS.has(p.error);
+function esTransitoria(p: ProveedorAusente): boolean {
+  return ES_TRANSITORIA[p.error];
 }
 
 export function crearHandlerMejorPrecio(): Handler {

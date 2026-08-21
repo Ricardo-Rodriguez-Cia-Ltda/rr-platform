@@ -280,6 +280,27 @@ describe('GET /mejor-precio', () => {
     expect(res.body).toMatchObject({ error: 'upstream' });
   });
 
+  // Las dos causas transitorias son independientes: catalogo_no_disponible
+  // por si sola, sin upstream de por medio, tambien tiene que disparar 502.
+  it('devuelve 502 cuando la unica causa transitoria es catalogo_no_disponible', async () => {
+    compararMock.mockResolvedValue({
+      ...COMPARACION,
+      mejor: null,
+      ofertas: [],
+      incompleta: [
+        { proveedor: 'tecnoglobal', error: 'catalogo_no_disponible', detail: 'aun no carga' },
+      ],
+    });
+    const res = makeRes();
+    await handler(makeReq({ mpn: 'MPN1' }, AUTH), res);
+
+    expect(res.statusCode).toBe(502);
+    expect(res.body).toMatchObject({
+      error: 'upstream',
+      incompleta: [{ proveedor: 'tecnoglobal', error: 'catalogo_no_disponible' }],
+    });
+  });
+
   it('responde 200 aunque la comparacion sea parcial', async () => {
     compararMock.mockResolvedValue({
       ...COMPARACION,

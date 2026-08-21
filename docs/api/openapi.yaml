@@ -787,15 +787,18 @@ components:
             incompleta:
               type: array
               description: |
-                Ausente solo cuando error es proveedor_desconocido. Si no,
-                dos casos segun en que paso ocurrio el 404: al resolver el
-                MPN, son los proveedores cuyo catalogo no se pudo revisar
-                (catalogo_no_disponible o proveedor_no_configurado), vacio
-                cuando se revisaron todos y ninguno lo vende; al cotizar la
-                clave ya resuelta, son los proveedores que no entregaron
-                precio, todos con causa permanente (sin_precio o
-                proveedor_no_configurado) - si alguna fuera transitoria la
-                respuesta habria sido 502, no 404.
+                Ausente en dos casos: cuando error es proveedor_desconocido,
+                y cuando es not_found por SKU desconocido en el camino
+                proveedor+sku (se pregunto a ese unico proveedor y no lo
+                tiene, no hay a quien mas listar). Presente en los otros dos
+                casos de not_found: al resolver el MPN, son los proveedores
+                cuyo catalogo no se pudo revisar (catalogo_no_disponible o
+                proveedor_no_configurado), vacio cuando se revisaron todos y
+                ninguno lo vende; al cotizar la clave ya resuelta, son los
+                proveedores que no entregaron precio, todos con causa
+                permanente (sin_precio o proveedor_no_configurado) - si
+                alguna fuera transitoria la respuesta habria sido 502, no
+                404.
               items:
                 $ref: '#/components/schemas/ProveedorIncompleto'
 
