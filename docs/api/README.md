@@ -120,7 +120,7 @@ Ramifica siempre por `error`, nunca por el texto de `detail`.
 |---|---|---|---|
 | 400 | `bad_request` | Parámetros inválidos o faltantes | Corregir la llamada. No reintentar igual. |
 | 401 | `unauthorized` | Falta `x-api-key` o es incorrecta | Problema de configuración. No reintentar. |
-| 404 | `not_found` | El producto no existe o el proveedor no entregó precio | No reintentar. El SKU no sirve. |
+| 404 | `not_found` | El producto no existe, o (`/product`, `/price`) el proveedor no le tiene precio asignado | No reintentar en general. Excepción: en `/mejor-precio`, un 404 con `incompleta` no vacía significa que no se revisaron todos los catálogos — sí conviene reintentar. |
 | 405 | `method_not_allowed` | Se usó un verbo distinto de GET | Usar GET. |
 | 409 | `demasiado_amplio` | La búsqueda calza demasiados productos | Acotar con `marca` o `categoria`. Ver abajo. |
 | 409 | `ambiguo` | El MPN existe bajo varias marcas | Repetir con `marca=`. Ver `/mejor-precio`. |
@@ -643,6 +643,50 @@ Cuando el MPN existe bajo varias marcas, no se adivina:
 Repetir con `&marca=msi`. Es raro —un caso cada diez mil productos— pero elegir
 mal aquí es cotizarle al cliente otro producto.
 
+### Respuesta `404 not_found`
+
+Dos causas, ambas con status `404` pero contenido distinto:
+
+- **Se revisaron todos los catálogos y ninguno lo vende.** `incompleta` viene
+  vacía. Definitivo, no reintentar.
+- **No se revisaron todos los catálogos.** `incompleta` trae los proveedores
+  cuyo catálogo no cargó (`catalogo_no_disponible`). Esto **no** significa que
+  nadie lo venda: significa que no se pudo preguntar a todos. Conviene
+  reintentar.
+
+```json
+{
+  "error": "not_found",
+  "detail": "Ningun proveedor tiene el MPN BVG700I-MSX",
+  "incompleta": [
+    { "proveedor": "tecnoglobal", "error": "catalogo_no_disponible",
+      "detail": "El catalogo de 'tecnoglobal' aun no esta disponible" }
+  ]
+}
+```
+
+### Respuesta `502 upstream`
+
+La clave sí se resolvió —algún proveedor tiene el producto en catálogo— pero
+cotizar falló en **todos** los proveedores que lo tenían. Es la falla más
+común de las tres: los tres distribuidores cortan por cuota seguido.
+`incompleta` trae quién falló y por qué:
+
+```json
+{
+  "error": "upstream",
+  "detail": "No se pudo cotizar con ningun proveedor",
+  "incompleta": [
+    { "proveedor": "ingram", "error": "upstream",
+      "detail": "Ingram rechazo la consulta por exceso de llamadas..." }
+  ]
+}
+```
+
+Distinto del `404` de arriba: acá sí se sabe que alguien lo vende, solo que no
+se pudo cotizar en este momento. Es transitorio — reintentar tras unos
+segundos, igual que cualquier otro `502`.
+
 ### Qué NO hace
 
 - **No aplica margen.** El precio es de costo, igual que en el resto de la API.
@@ -701,8 +745,10 @@ Resumen operativo de lo anterior:
    la API. No los traduzcas ni los normalices.
 7. **Todos los montos son USD.** Si el usuario habla en otra moneda, pregunta el
    equivalente antes de mandar `precio_max`. No adivines el tipo de cambio.
-8. **`404` y `400` son definitivos; `502` y `503` son transitorios** (a lo más un
-   reintento tras unos segundos).
+8. **`404` y `400` son definitivos en general; `502` y `503` son transitorios**
+   (a lo más un reintento tras unos segundos). Excepción: en `/mejor-precio`,
+   un `404` con `incompleta` no vacía también es transitorio, no se
+   revisaron todos los catálogos.
 9. **Aplica el margen fuera del modelo.** Los precios de esta API son costo.
 
 La implementación de referencia de todo esto —tools, margen, esquemas y system

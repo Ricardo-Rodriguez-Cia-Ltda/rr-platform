@@ -290,8 +290,7 @@ paths:
           required: false
           description: Proveedor que identifica el producto con `sku`. Va junto con `sku`.
           schema:
-            type: string
-            enum: [intcomex, tecnoglobal, ingram]
+            $ref: '#/components/schemas/NombreProveedor'
         - name: sku
           in: query
           required: false
@@ -317,12 +316,14 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           description: |
-            Tres causas, distinguibles por `error` y por que campos extra trae:
-            `not_found` si el MPN o el SKU no estan en ningun catalogo, o si
-            ningun proveedor entrego precio (este ultimo caso agrega
-            `incompleta`, igual contenido que en el 200: quien no pudo
-            responder); `proveedor_desconocido` si el proveedor de `proveedor=`
-            no existe (agrega `proveedor` con el valor recibido).
+            Dos causas, distinguibles por `error` y por que campos extra
+            trae: `not_found` si el MPN o el SKU no aparecen en ningun
+            catalogo que se pudo revisar (agrega `incompleta`: los
+            proveedores cuyo catalogo no cargo y por lo tanto no se
+            descarta que lo vendan; vacio cuando se revisaron todos y
+            ninguno lo vende, ahi si es definitivo); `proveedor_desconocido`
+            si el proveedor de `proveedor=` no existe (agrega `proveedor`
+            con el valor recibido).
           content:
             application/json:
               schema:
@@ -338,6 +339,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorAmbiguo'
+        '502':
+          description: |
+            La clave se resolvio -al menos un proveedor tiene el producto en
+            catalogo- pero cotizar fallo en todos (cuota, un 500 puntual).
+            Distinto del 404: aca si se sabe que alguien lo vende. Es
+            transitorio, reintentar tras unos segundos. `incompleta` trae
+            quien fallo y por que.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMejorPrecioUpstream'
         '503':
           description: |
             `catalogo_no_disponible` (ningun catalogo listo aun, o el del
@@ -571,8 +583,7 @@ components:
         Distribuidor contra el que se consulta. Cada uno tiene su propio
         catálogo, sus propios SKU y su propio precio.
       schema:
-        type: string
-        enum: [intcomex, tecnoglobal, ingram]
+        $ref: '#/components/schemas/NombreProveedor'
 
   responses:
     ProveedorDesconocido:
@@ -652,6 +663,15 @@ components:
         detail:
           type: string
           description: Explicación legible. No es contrato estable.
+
+    NombreProveedor:
+      type: string
+      description: |
+        Fuente unica de los proveedores registrados. Referenciado desde el
+        parametro de path de las rutas /{proveedor}/... y desde el query
+        param proveedor de /mejor-precio, para que agregar un proveedor no
+        requiera tocar mas de un lugar.
+      enum: [intcomex, tecnoglobal, ingram]
 
     Oferta:
       type: object
@@ -755,9 +775,25 @@ components:
             incompleta:
               type: array
               description: |
-                Presente solo cuando el MPN o SKU se resolvieron pero ningun
-                proveedor entrego precio. Mismo contenido que el campo
-                incompleta de la respuesta 200.
+                Proveedores cuyo catalogo no se pudo revisar al resolver el
+                MPN o SKU (error catalogo_no_disponible). Vacio cuando se
+                revisaron todos los catalogos registrados y ninguno lo
+                vende: ahi el 404 es definitivo.
+              items:
+                $ref: '#/components/schemas/ProveedorIncompleto'
+
+    ErrorMejorPrecioUpstream:
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          required: [incompleta]
+          properties:
+            incompleta:
+              type: array
+              description: |
+                Quien fallo al cotizar. La clave ya se resolvio -algun
+                proveedor tiene el producto en catalogo-, asi que esta lista
+                nunca viene vacia en un 502.
               items:
                 $ref: '#/components/schemas/ProveedorIncompleto'
 

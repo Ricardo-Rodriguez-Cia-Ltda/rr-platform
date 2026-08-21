@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  catalogosNoDisponibles,
   claveDeSku,
   compararPorClave,
   hayAlgunCatalogo,
@@ -176,6 +177,35 @@ describe('compararPorClave', () => {
     ]);
   });
 
+  // Un precio no positivo no es un precio, es ausencia de precio. Intcomex
+  // devuelve 0 en ~4 de cada 300 SKUs; ese cero no puede ganar y salir
+  // cotizado a un cliente real.
+  it('un precio 0 no gana: el proveedor queda en incompleta como sin_precio', async () => {
+    catalogos.set('a', [producto({ sku: 'A1' })]);
+    const registro = { a: proveedorFalso('a', { A1: { price: 0, currency: 'USD', inStock: 0 } }) };
+
+    const r = await compararPorClave(CLAVE, registro);
+
+    expect(r.mejor).toBeNull();
+    expect(r.ofertas).toEqual([]);
+    expect(r.incompleta).toEqual([
+      { proveedor: 'a', error: 'sin_precio', detail: expect.any(String) },
+    ]);
+  });
+
+  it('un precio 0 no le gana a un precio valido aunque ninguno tenga stock', async () => {
+    catalogos.set('a', [producto({ sku: 'A1' })]);
+    catalogos.set('b', [producto({ sku: 'B1' })]);
+    const registro = {
+      a: proveedorFalso('a', { A1: { price: 0, currency: 'USD', inStock: 0 } }),
+      b: proveedorFalso('b', { B1: { price: 100, currency: 'USD', inStock: 0 } }),
+    };
+
+    const r = await compararPorClave(CLAVE, registro);
+
+    expect(r.mejor).toMatchObject({ proveedor: 'b', precio: 100 });
+  });
+
   // Que un proveedor no venda el producto es una respuesta definitiva, no un
   // hueco: su catalogo se reviso. Meterlo en incompleta seria mentir.
   it('un proveedor que no vende el producto no aparece en ningun lado', async () => {
@@ -318,6 +348,29 @@ describe('resolverClaves', () => {
     catalogos.set('a', [producto({ sku: 'A1' })]);
 
     expect(resolverClaves('---', undefined, { a: proveedorFalso('a', {}) })).toEqual([]);
+  });
+});
+
+describe('catalogosNoDisponibles', () => {
+  // resolverClaves salta en silencio los catalogos sin cargar; esta funcion
+  // es como el llamador se entera de a quien se salteo, para no afirmar
+  // "nadie lo vende" cuando en realidad no se pudo preguntar a todos.
+  it('lista los proveedores cuyo catalogo no cargo', () => {
+    catalogos.set('a', [producto({ sku: 'A1' })]);
+    const registro = { a: proveedorFalso('a', {}), b: proveedorFalso('b', {}) };
+
+    expect(catalogosNoDisponibles(registro)).toEqual([
+      { proveedor: 'b', error: 'catalogo_no_disponible', detail: expect.any(String) },
+    ]);
+  });
+
+  it('vacio cuando todos los catalogos cargaron', () => {
+    catalogos.set('a', [producto({ sku: 'A1' })]);
+    catalogos.set('b', [producto({ sku: 'B1' })]);
+
+    expect(
+      catalogosNoDisponibles({ a: proveedorFalso('a', {}), b: proveedorFalso('b', {}) }),
+    ).toEqual([]);
   });
 });
 

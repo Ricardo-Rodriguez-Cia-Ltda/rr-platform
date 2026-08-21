@@ -5,12 +5,14 @@ const compararMock = vi.fn();
 const resolverClavesMock = vi.fn();
 const claveDeSkuMock = vi.fn();
 const hayAlgunCatalogoMock = vi.fn();
+const catalogosNoDisponiblesMock = vi.fn();
 
 vi.mock('../lib/comparador.js', () => ({
   compararPorClave: (...a: unknown[]) => compararMock(...a),
   resolverClaves: (...a: unknown[]) => resolverClavesMock(...a),
   claveDeSku: (...a: unknown[]) => claveDeSkuMock(...a),
   hayAlgunCatalogo: () => hayAlgunCatalogoMock(),
+  catalogosNoDisponibles: () => catalogosNoDisponiblesMock(),
 }));
 
 const { default: handler } = await import('../api/mejor-precio.js');
@@ -57,6 +59,7 @@ beforeEach(() => {
   resolverClavesMock.mockReset().mockReturnValue(['mpn1|hp']);
   claveDeSkuMock.mockReset().mockReturnValue({ estado: 'ok', clave: 'mpn1|hp' });
   hayAlgunCatalogoMock.mockReset().mockReturnValue(true);
+  catalogosNoDisponiblesMock.mockReset().mockReturnValue([]);
 });
 
 afterEach(() => {
@@ -144,7 +147,24 @@ describe('GET /mejor-precio', () => {
     await handler(makeReq({ mpn: 'NOEXISTE' }, AUTH), res);
 
     expect(res.statusCode).toBe(404);
-    expect(res.body).toMatchObject({ error: 'not_found' });
+    expect(res.body).toMatchObject({ error: 'not_found', incompleta: [] });
+  });
+
+  // Un catalogo caido no puede afirmar "nadie lo vende": ese proveedor no se
+  // pudo consultar. El 404 tiene que decirlo, igual que ya lo hace el otro.
+  it('devuelve 404 con incompleta cuando un catalogo no se pudo consultar', async () => {
+    resolverClavesMock.mockReturnValue([]);
+    catalogosNoDisponiblesMock.mockReturnValue([
+      { proveedor: 'tecnoglobal', error: 'catalogo_no_disponible', detail: 'no cargo' },
+    ]);
+    const res = makeRes();
+    await handler(makeReq({ mpn: 'NOEXISTE' }, AUTH), res);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toMatchObject({
+      error: 'not_found',
+      incompleta: [{ proveedor: 'tecnoglobal', error: 'catalogo_no_disponible' }],
+    });
   });
 
   // Sin ningun catalogo la respuesta no es "no existe", es "todavia no se".
@@ -184,9 +204,11 @@ describe('GET /mejor-precio', () => {
     expect(res.body).toMatchObject({ error: 'no_comparable' });
   });
 
-  // El agente tiene que poder distinguir "nadie lo vende" de "no pudimos
-  // preguntarle a nadie".
-  it('devuelve 404 conservando incompleta cuando no hubo ninguna oferta', async () => {
+  // La clave se resolvio -algun proveedor tiene el producto en catalogo- pero
+  // cotizar fallo en todos: eso es transitorio (cuota, un 500), no "no
+  // existe". Devolver 404 aca le diria al cliente que no vendemos algo que si
+  // vendemos, y sin reintento que lo corrija.
+  it('devuelve 502 upstream conservando incompleta cuando fallaron todos los proveedores', async () => {
     compararMock.mockResolvedValue({
       ...COMPARACION,
       mejor: null,
@@ -196,11 +218,27 @@ describe('GET /mejor-precio', () => {
     const res = makeRes();
     await handler(makeReq({ mpn: 'MPN1' }, AUTH), res);
 
-    expect(res.statusCode).toBe(404);
+    expect(res.statusCode).toBe(502);
     expect(res.body).toMatchObject({
-      error: 'not_found',
+      error: 'upstream',
       incompleta: [{ proveedor: 'ingram', error: 'upstream' }],
     });
+  });
+
+  // Sin ofertas y sin nadie que fallara si es definitivo: se revisaron todos
+  // los catalogos y ninguno lo vende.
+  it('devuelve 404 not_found cuando nadie lo vende y nadie fallo', async () => {
+    compararMock.mockResolvedValue({
+      ...COMPARACION,
+      mejor: null,
+      ofertas: [],
+      incompleta: [],
+    });
+    const res = makeRes();
+    await handler(makeReq({ mpn: 'MPN1' }, AUTH), res);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toMatchObject({ error: 'not_found', incompleta: [] });
   });
 
   it('responde 200 aunque la comparacion sea parcial', async () => {

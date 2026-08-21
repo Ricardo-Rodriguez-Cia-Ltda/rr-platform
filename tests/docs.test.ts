@@ -253,15 +253,26 @@ describe('openapi.yaml es internamente consistente', () => {
 
   // Las rutas con proveedor comparten el parametro de path: si el enum se
   // queda atras del registro, la doc promete proveedores que no existen (o
-  // esconde los que si).
-  it('el enum de proveedores del path coincide con el registro', async () => {
+  // esconde los que si). No alcanza con mirar un solo lugar: /mejor-precio
+  // trae su propio enum de proveedor en query, y si se desincroniza del de
+  // path esta suite queda en verde con el agente sin poder usar el proveedor
+  // nuevo en el endpoint del precio oficial.
+  it('todos los enum inline de proveedores coinciden con el registro', async () => {
     const { PROVEEDORES } = await import('../lib/providers/index.js');
-    const enumeracion = /enum: \[([^\]]+)\]\n/.exec(
-      OPENAPI.slice(OPENAPI.indexOf('    Proveedor:')),
-    )?.[1];
+    const registro = Object.keys(PROVEEDORES).sort();
 
-    expect(enumeracion).toBeTruthy();
-    const documentados = enumeracion!.split(',').map((s) => s.trim());
-    expect(documentados.sort()).toEqual(Object.keys(PROVEEDORES).sort());
+    // Cualquier enum inline de 2+ valores que sean todos proveedores reales
+    // es, por definicion, una lista de "los proveedores": tiene que
+    // coincidir exacto con el registro. (Los enums de un solo proveedor,
+    // como el de /price, son una restriccion aparte, no un listado de
+    // proveedores, y quedan afuera.)
+    const listasDeProveedores = [...OPENAPI.matchAll(/enum: \[([^\]]+)\]/g)]
+      .map((m) => m[1].split(',').map((s) => s.trim()))
+      .filter((valores) => valores.length > 1 && valores.every((v) => registro.includes(v)));
+
+    expect(listasDeProveedores.length).toBeGreaterThan(0);
+    for (const lista of listasDeProveedores) {
+      expect([...lista].sort()).toEqual(registro);
+    }
   });
 });

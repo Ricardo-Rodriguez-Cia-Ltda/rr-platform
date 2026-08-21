@@ -73,6 +73,9 @@ function elegirMejor(ofertas: Oferta[]): OfertaGanadora | null {
 function masBarata(proveedor: string, precios: Map<string, PriceInfo>): Oferta | null {
   let mejor: Oferta | null = null;
   for (const [sku, precio] of precios) {
+    // Un precio no positivo no es un precio, es ausencia de precio: sale
+    // cotizado a un cliente real si se deja pasar. Tambien descarta NaN.
+    if (!(precio.price > 0)) continue;
     if (!mejor || precio.price < mejor.precio) {
       mejor = {
         proveedor,
@@ -236,4 +239,24 @@ export function hayAlgunCatalogo(
   registro: Record<string, Proveedor> = PROVEEDORES,
 ): boolean {
   return Object.keys(registro).some((nombre) => catalogoDe(nombre) !== null);
+}
+
+/**
+ * Proveedores cuyo catalogo no cargo, con la misma forma que `incompleta`.
+ *
+ * resolverClaves salta estos catalogos en silencio: no encontrar el MPN ahi
+ * no prueba que nadie lo venda. Separada para que el llamador pueda
+ * distinguir "se revisaron todos los catalogos y ninguno lo vende" de "no se
+ * pudo preguntarle a todos".
+ */
+export function catalogosNoDisponibles(
+  registro: Record<string, Proveedor> = PROVEEDORES,
+): ProveedorAusente[] {
+  return Object.keys(registro)
+    .filter((nombre) => catalogoDe(nombre) === null)
+    .map((nombre) => ({
+      proveedor: nombre,
+      error: 'catalogo_no_disponible' as const,
+      detail: `El catalogo de '${nombre}' aun no esta disponible`,
+    }));
 }

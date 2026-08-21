@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { isAuthorized } from '../auth.js';
 import {
+  catalogosNoDisponibles,
   claveDeSku,
   compararPorClave,
   hayAlgunCatalogo,
@@ -70,9 +71,13 @@ export function crearHandlerMejorPrecio(): Handler {
           });
           return;
         }
+        // resolverClaves salta en silencio los catalogos sin cargar: sin
+        // esto, un proveedor caido haria que la respuesta afirme "nadie lo
+        // vende" para un producto que ese proveedor si tiene.
         res.status(404).json({
           error: 'not_found',
           detail: `Ningun proveedor tiene el MPN ${mpn}`,
+          incompleta: catalogosNoDisponibles(),
         });
         return;
       }
@@ -110,9 +115,21 @@ export function crearHandlerMejorPrecio(): Handler {
 
     const comparacion = await compararPorClave(clave);
 
-    // Sin ofertas se responde 404, pero conservando incompleta: el agente tiene
-    // que poder distinguir "nadie lo vende" de "no pudimos preguntarle a nadie".
     if (!comparacion.mejor) {
+      // La clave se resolvio -algun proveedor tiene el producto en
+      // catalogo-, asi que si incompleta trae algo no es que nadie lo venda:
+      // es que no se pudo cotizar con nadie. Eso es transitorio (cuota, un
+      // 500 puntual) y hay que reintentar, no cerrar la puerta con un 404.
+      if (comparacion.incompleta.length > 0) {
+        res.status(502).json({
+          error: 'upstream',
+          detail: 'No se pudo cotizar con ningun proveedor',
+          incompleta: comparacion.incompleta,
+        });
+        return;
+      }
+      // Sin ofertas y sin nadie que fallara si es definitivo: se revisaron
+      // todos los catalogos y ninguno lo vende.
       res.status(404).json({
         error: 'not_found',
         detail: 'Ningun proveedor entrego precio para este producto',
