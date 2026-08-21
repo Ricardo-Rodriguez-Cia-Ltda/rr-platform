@@ -241,6 +241,45 @@ describe('GET /mejor-precio', () => {
     expect(res.body).toMatchObject({ error: 'not_found', incompleta: [] });
   });
 
+  // sin_precio es un estado determinista (precio 0, o directamente sin
+  // precio): reintentar no lo va a cambiar. Distinto de upstream, que si
+  // amerita reintento. Nadie "fallo" aca, simplemente no hay precio.
+  it('devuelve 404 (no 502) cuando la unica causa en incompleta es sin_precio', async () => {
+    compararMock.mockResolvedValue({
+      ...COMPARACION,
+      mejor: null,
+      ofertas: [],
+      incompleta: [{ proveedor: 'ingram', error: 'sin_precio', detail: 'precio 0' }],
+    });
+    const res = makeRes();
+    await handler(makeReq({ mpn: 'MPN1' }, AUTH), res);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toMatchObject({
+      error: 'not_found',
+      incompleta: [{ proveedor: 'ingram', error: 'sin_precio' }],
+    });
+  });
+
+  // Con una causa transitoria de por medio, todavia vale la pena reintentar
+  // aunque otra de las causas sea permanente.
+  it('devuelve 502 cuando incompleta mezcla una causa transitoria con una permanente', async () => {
+    compararMock.mockResolvedValue({
+      ...COMPARACION,
+      mejor: null,
+      ofertas: [],
+      incompleta: [
+        { proveedor: 'ingram', error: 'sin_precio', detail: 'precio 0' },
+        { proveedor: 'tecnoglobal', error: 'upstream', detail: 'cuota' },
+      ],
+    });
+    const res = makeRes();
+    await handler(makeReq({ mpn: 'MPN1' }, AUTH), res);
+
+    expect(res.statusCode).toBe(502);
+    expect(res.body).toMatchObject({ error: 'upstream' });
+  });
+
   it('responde 200 aunque la comparacion sea parcial', async () => {
     compararMock.mockResolvedValue({
       ...COMPARACION,

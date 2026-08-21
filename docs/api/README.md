@@ -120,7 +120,7 @@ Ramifica siempre por `error`, nunca por el texto de `detail`.
 |---|---|---|---|
 | 400 | `bad_request` | Parámetros inválidos o faltantes | Corregir la llamada. No reintentar igual. |
 | 401 | `unauthorized` | Falta `x-api-key` o es incorrecta | Problema de configuración. No reintentar. |
-| 404 | `not_found` | El producto no existe, o (`/product`, `/price`) el proveedor no le tiene precio asignado | No reintentar en general. Excepción: en `/mejor-precio`, un 404 con `incompleta` no vacía significa que no se revisaron todos los catálogos — sí conviene reintentar. |
+| 404 | `not_found` | El producto no existe, o (`/product`, `/price`) el proveedor no le tiene precio asignado | No reintentar en general. Excepción: en `/mejor-precio`, si `incompleta` trae `catalogo_no_disponible` (no se revisaron todos los catálogos), sí conviene reintentar. Ver `/mejor-precio`. |
 | 405 | `method_not_allowed` | Se usó un verbo distinto de GET | Usar GET. |
 | 409 | `demasiado_amplio` | La búsqueda calza demasiados productos | Acotar con `marca` o `categoria`. Ver abajo. |
 | 409 | `ambiguo` | El MPN existe bajo varias marcas | Repetir con `marca=`. Ver `/mejor-precio`. |
@@ -645,14 +645,27 @@ mal aquí es cotizarle al cliente otro producto.
 
 ### Respuesta `404 not_found`
 
-Dos causas, ambas con status `404` pero contenido distinto:
+Tres causas posibles, todas con status `404` pero contenido distinto:
 
-- **Se revisaron todos los catálogos y ninguno lo vende.** `incompleta` viene
-  vacía. Definitivo, no reintentar.
-- **No se revisaron todos los catálogos.** `incompleta` trae los proveedores
-  cuyo catálogo no cargó (`catalogo_no_disponible`). Esto **no** significa que
-  nadie lo venda: significa que no se pudo preguntar a todos. Conviene
-  reintentar.
+- **Por MPN, y se revisaron todos los catálogos:** ninguno lo vende.
+  `incompleta` viene vacía. Definitivo, no reintentar.
+- **Por MPN, pero no se revisaron todos los catálogos:** `incompleta` trae
+  los proveedores que no se pudieron consultar
+  (`catalogo_no_disponible` si el catálogo aún no cargó,
+  `proveedor_no_configurado` si le faltan credenciales). Esto **no**
+  significa que nadie lo venda: significa que no se pudo preguntar a todos.
+  Si la causa es `catalogo_no_disponible` conviene reintentar; si es
+  `proveedor_no_configurado`, no —falta configuración nuestra, no es
+  transitorio.
+- **Por `proveedor`+`sku`, SKU desconocido para ese proveedor.** No trae
+  `incompleta`: se preguntó a ese único proveedor y no lo tiene. Definitivo.
+- **La clave se resolvió pero ningún proveedor entregó precio, y ninguna
+  causa fue transitoria** (todas `sin_precio` —incluye el caso de un
+  proveedor que devuelve precio 0— o `proveedor_no_configurado`).
+  `incompleta` trae el detalle, igual que en el `200`. Definitivo: reintentar
+  no cambia un precio que no existe. Si en cambio alguna causa hubiera sido
+  transitoria (`catalogo_no_disponible` o `upstream`), la respuesta habría
+  sido `502`, no `404` — ver abajo.
 
 ```json
 {
@@ -667,10 +680,12 @@ Dos causas, ambas con status `404` pero contenido distinto:
 
 ### Respuesta `502 upstream`
 
-La clave sí se resolvió —algún proveedor tiene el producto en catálogo— pero
-cotizar falló en **todos** los proveedores que lo tenían. Es la falla más
-común de las tres: los tres distribuidores cortan por cuota seguido.
-`incompleta` trae quién falló y por qué:
+La clave sí se resolvió —algún proveedor tiene el producto en catálogo— y
+`incompleta` trae **al menos una causa transitoria** (`catalogo_no_disponible`
+o `upstream`: cuota, un 500 puntual). Es la falla más común de las tres: los
+tres distribuidores cortan por cuota seguido. Puede convivir con causas
+permanentes (`sin_precio`, `proveedor_no_configurado`) en la misma lista;
+alcanza con que una sea transitoria para que valga la pena reintentar:
 
 ```json
 {
@@ -747,8 +762,10 @@ Resumen operativo de lo anterior:
    equivalente antes de mandar `precio_max`. No adivines el tipo de cambio.
 8. **`404` y `400` son definitivos en general; `502` y `503` son transitorios**
    (a lo más un reintento tras unos segundos). Excepción: en `/mejor-precio`,
-   un `404` con `incompleta` no vacía también es transitorio, no se
-   revisaron todos los catálogos.
+   un `404` cuya `incompleta` trae `catalogo_no_disponible` también es
+   transitorio, no se revisaron todos los catálogos. Si `incompleta` solo
+   trae `sin_precio` o `proveedor_no_configurado`, el `404` sigue siendo
+   definitivo.
 9. **Aplica el margen fuera del modelo.** Los precios de esta API son costo.
 
 La implementación de referencia de todo esto —tools, margen, esquemas y system

@@ -248,15 +248,33 @@ export function hayAlgunCatalogo(
  * no prueba que nadie lo venda. Separada para que el llamador pueda
  * distinguir "se revisaron todos los catalogos y ninguno lo vende" de "no se
  * pudo preguntarle a todos".
+ *
+ * Un proveedor sin credenciales nunca carga catalogo (server.ts lo excluye
+ * del refresco), asi que hay que chequear estaConfigurado() primero: si no,
+ * este proveedor caeria siempre en catalogo_no_disponible (transitorio)
+ * cuando en realidad le faltan las llaves (permanente). Misma distincion que
+ * ya hace compararPorClave.
  */
 export function catalogosNoDisponibles(
   registro: Record<string, Proveedor> = PROVEEDORES,
 ): ProveedorAusente[] {
-  return Object.keys(registro)
-    .filter((nombre) => catalogoDe(nombre) === null)
-    .map((nombre) => ({
-      proveedor: nombre,
-      error: 'catalogo_no_disponible' as const,
-      detail: `El catalogo de '${nombre}' aun no esta disponible`,
-    }));
+  const ausentes: ProveedorAusente[] = [];
+  for (const proveedor of Object.values(registro)) {
+    if (!proveedor.estaConfigurado()) {
+      ausentes.push({
+        proveedor: proveedor.nombre,
+        error: 'proveedor_no_configurado',
+        detail: `El proveedor '${proveedor.nombre}' no tiene credenciales configuradas`,
+      });
+      continue;
+    }
+    if (catalogoDe(proveedor.nombre) === null) {
+      ausentes.push({
+        proveedor: proveedor.nombre,
+        error: 'catalogo_no_disponible',
+        detail: `El catalogo de '${proveedor.nombre}' aun no esta disponible`,
+      });
+    }
+  }
+  return ausentes;
 }

@@ -372,6 +372,19 @@ describe('catalogosNoDisponibles', () => {
       catalogosNoDisponibles({ a: proveedorFalso('a', {}), b: proveedorFalso('b', {}) }),
     ).toEqual([]);
   });
+
+  // Un proveedor sin credenciales nunca carga catalogo (server.ts lo excluye
+  // del refresco), asi que sin este chequeo caeria siempre en
+  // catalogo_no_disponible: transitorio, cuando en realidad es permanente.
+  it('distingue un proveedor sin credenciales del que simplemente no cargo', () => {
+    catalogos.set('a', [producto({ sku: 'A1' })]);
+    const sinLlaves = proveedorFalso('b', {}, { configurado: false });
+    const registro = { a: proveedorFalso('a', {}), b: sinLlaves };
+
+    expect(catalogosNoDisponibles(registro)).toEqual([
+      { proveedor: 'b', error: 'proveedor_no_configurado', detail: expect.any(String) },
+    ]);
+  });
 });
 
 describe('claveDeSku', () => {

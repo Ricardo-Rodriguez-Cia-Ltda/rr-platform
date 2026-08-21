@@ -15,6 +15,15 @@ function marcaDeClave(clave: string): string {
   return clave.split('|')[1] ?? clave;
 }
 
+// catalogo_no_disponible y upstream son fallas de un momento: reintentar
+// puede darle una respuesta distinta. sin_precio y proveedor_no_configurado
+// son estados; reintentar no los cambia.
+const CAUSAS_TRANSITORIAS = new Set(['catalogo_no_disponible', 'upstream']);
+
+function esTransitoria(p: { error: string }): boolean {
+  return CAUSAS_TRANSITORIAS.has(p.error);
+}
+
 export function crearHandlerMejorPrecio(): Handler {
   return async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
     if (req.method && req.method !== 'GET') {
@@ -117,10 +126,12 @@ export function crearHandlerMejorPrecio(): Handler {
 
     if (!comparacion.mejor) {
       // La clave se resolvio -algun proveedor tiene el producto en
-      // catalogo-, asi que si incompleta trae algo no es que nadie lo venda:
-      // es que no se pudo cotizar con nadie. Eso es transitorio (cuota, un
-      // 500 puntual) y hay que reintentar, no cerrar la puerta con un 404.
-      if (comparacion.incompleta.length > 0) {
+      // catalogo-, pero eso no alcanza para responder 502: sin_precio (el
+      // precio 0 de H1 cae aca) y proveedor_no_configurado son estados
+      // permanentes, no fallas de un momento. Solo si hay al menos una causa
+      // transitoria (cuota, un 500 puntual, catalogo aun sin cargar) vale la
+      // pena reintentar.
+      if (comparacion.incompleta.some(esTransitoria)) {
         res.status(502).json({
           error: 'upstream',
           detail: 'No se pudo cotizar con ningun proveedor',
@@ -128,8 +139,9 @@ export function crearHandlerMejorPrecio(): Handler {
         });
         return;
       }
-      // Sin ofertas y sin nadie que fallara si es definitivo: se revisaron
-      // todos los catalogos y ninguno lo vende.
+      // Sin ofertas y sin ninguna causa transitoria es definitivo: o se
+      // revisaron todos los catalogos y ninguno lo vende, o los que lo
+      // tienen no le asignan precio.
       res.status(404).json({
         error: 'not_found',
         detail: 'Ningun proveedor entrego precio para este producto',

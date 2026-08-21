@@ -316,14 +316,24 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           description: |
-            Dos causas, distinguibles por `error` y por que campos extra
-            trae: `not_found` si el MPN o el SKU no aparecen en ningun
-            catalogo que se pudo revisar (agrega `incompleta`: los
-            proveedores cuyo catalogo no cargo y por lo tanto no se
-            descarta que lo vendan; vacio cuando se revisaron todos y
-            ninguno lo vende, ahi si es definitivo); `proveedor_desconocido`
-            si el proveedor de `proveedor=` no existe (agrega `proveedor`
-            con el valor recibido).
+            Cuatro causas, distinguibles por `error` y por que campos extra
+            trae:
+
+            - `not_found` por MPN no encontrado en ningun catalogo que se
+              pudo revisar. Agrega `incompleta`: los proveedores que no se
+              pudieron consultar (catalogo sin cargar o sin credenciales).
+              Vacio cuando se revisaron todos los catalogos registrados y
+              ninguno lo vende; ahi si es definitivo.
+            - `not_found` por SKU desconocido para el proveedor indicado
+              (camino proveedor+sku). No agrega `incompleta`.
+            - `not_found` porque la clave se resolvio pero ningun proveedor
+              entrego precio, y ninguna causa en `incompleta` es transitoria
+              (todas `sin_precio` o `proveedor_no_configurado`). Agrega
+              `incompleta`, mismo contenido que en el 200. Si en cambio
+              alguna causa es transitoria (`catalogo_no_disponible` o
+              `upstream`), la respuesta es 502, no 404.
+            - `proveedor_desconocido` si el proveedor de `proveedor=` no
+              existe. Agrega `proveedor` con el valor recibido.
           content:
             application/json:
               schema:
@@ -342,10 +352,12 @@ paths:
         '502':
           description: |
             La clave se resolvio -al menos un proveedor tiene el producto en
-            catalogo- pero cotizar fallo en todos (cuota, un 500 puntual).
-            Distinto del 404: aca si se sabe que alguien lo vende. Es
-            transitorio, reintentar tras unos segundos. `incompleta` trae
-            quien fallo y por que.
+            catalogo- y `incompleta` trae al menos una causa transitoria
+            (`catalogo_no_disponible` o `upstream`: cuota, un 500 puntual).
+            Puede convivir con causas permanentes (`sin_precio`,
+            `proveedor_no_configurado`) en la misma lista. Distinto del 404:
+            aca conviene reintentar, la proxima consulta puede resolver la
+            causa transitoria.
           content:
             application/json:
               schema:
@@ -775,10 +787,15 @@ components:
             incompleta:
               type: array
               description: |
-                Proveedores cuyo catalogo no se pudo revisar al resolver el
-                MPN o SKU (error catalogo_no_disponible). Vacio cuando se
-                revisaron todos los catalogos registrados y ninguno lo
-                vende: ahi el 404 es definitivo.
+                Ausente solo cuando error es proveedor_desconocido. Si no,
+                dos casos segun en que paso ocurrio el 404: al resolver el
+                MPN, son los proveedores cuyo catalogo no se pudo revisar
+                (catalogo_no_disponible o proveedor_no_configurado), vacio
+                cuando se revisaron todos y ninguno lo vende; al cotizar la
+                clave ya resuelta, son los proveedores que no entregaron
+                precio, todos con causa permanente (sin_precio o
+                proveedor_no_configurado) - si alguna fuera transitoria la
+                respuesta habria sido 502, no 404.
               items:
                 $ref: '#/components/schemas/ProveedorIncompleto'
 
@@ -791,9 +808,12 @@ components:
             incompleta:
               type: array
               description: |
-                Quien fallo al cotizar. La clave ya se resolvio -algun
-                proveedor tiene el producto en catalogo-, asi que esta lista
-                nunca viene vacia en un 502.
+                Proveedores que no entregaron precio. La clave ya se
+                resolvio -algun proveedor tiene el producto en catalogo-, y
+                al menos una de estas entradas es una causa transitoria
+                (catalogo_no_disponible o upstream); puede convivir con
+                causas permanentes (sin_precio, proveedor_no_configurado) en
+                la misma lista. Nunca viene vacia en un 502.
               items:
                 $ref: '#/components/schemas/ProveedorIncompleto'
 
