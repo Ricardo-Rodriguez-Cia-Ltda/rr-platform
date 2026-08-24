@@ -42,8 +42,11 @@ beforeEach(() => {
   // La foto se persiste en disco: sin un directorio propio por test, los
   // precios reales que deja una corrida en vivo se cuelan en la suite.
   vi.stubEnv('CATALOG_CACHE_DIR', mkdtempSync(join(tmpdir(), 'tg-')));
+  // Valor de mentira con la forma de un MD5. La clave real de Tecnoglobal se
+  // manda literal en el Basic auth, o sea que ES la contrasena: no puede vivir
+  // en un archivo versionado.
   vi.stubEnv('TECNOGLOBAL_USER', 'usuario');
-  vi.stubEnv('TECNOGLOBAL_PASSWORD', 'a6deb7170539fa7cf45c44b0d3505a8c');
+  vi.stubEnv('TECNOGLOBAL_PASSWORD', '0123456789abcdef0123456789abcdef');
   vi.stubEnv('TECNOGLOBAL_BASE_URL', 'http://tecnoglobal.test/stock/v1/');
   _resetFotoParaTests();
 });
@@ -73,7 +76,7 @@ describe('autenticacion', () => {
 
     const [url, init] = fetchMock.mock.calls[0];
     expect((url as URL).href).toBe('http://tecnoglobal.test/stock/v1/price');
-    const esperado = Buffer.from('usuario:a6deb7170539fa7cf45c44b0d3505a8c').toString('base64');
+    const esperado = Buffer.from('usuario:0123456789abcdef0123456789abcdef').toString('base64');
     expect((init as RequestInit).headers).toMatchObject({ Authorization: `Basic ${esperado}` });
   });
 });
