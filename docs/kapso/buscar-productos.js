@@ -102,6 +102,8 @@ async function handler(request, env) {
 
   const aVenta = (p) => ({
     sku: p.sku,
+    // cart_items exige mpn: sin esto el agente no tiene de donde sacarlo.
+    mpn: p.mpn ?? null,
     nombre: p.nombre,
     marca: p.marca,
     categoria: p.categoria,

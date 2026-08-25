@@ -1,0 +1,51 @@
+{
+  "error": false,
+  "message": "Articulos encontrados: 3",
+  "products": [
+    {
+      "codigoTg": "KN3-661",
+      "pnFabricante": "SDS3/128GB",
+      "upcEan13": "740617348286",
+      "marca": "KINGSTON",
+      "descripcion": "Memoria 128GB SD XC Canvas Select Plus Gen3 150MB/",
+      "categoria": "TG Almacenamiento de datos",
+      "subCategoria": "Memoria Flash",
+      "ofertaSiNo": 0,
+      "precio": 21.18,
+      "tipoMoneda": "USD",
+      "dolarTg": 919,
+      "timeStamp": "2026-08-18 14:46:13",
+      "stockDisp": 117
+    },
+    {
+      "codigoTg": "TM0-943",
+      "pnFabricante": "C31CJ57012",
+      "upcEan13": "0",
+      "marca": "EPSON COMMERCIAL HW",
+      "descripcion": "Impresora Termica TM-T88VII-012:SRL(S01);UIB;PS&AC",
+      "categoria": "TG Impresion",
+      "subCategoria": "POS",
+      "ofertaSiNo": 0,
+      "precio": 316.08,
+      "tipoMoneda": "USD",
+      "dolarTg": 919,
+      "timeStamp": "2026-08-18 14:46:13",
+      "stockDisp": 0
+    },
+    {
+      "codigoTg": "AUD-027",
+      "pnFabricante": "90PT03X6-M06LP0",
+      "upcEan13": "199291336520",
+      "marca": "ASUS DESKTOP  AIO",
+      "descripcion": "COMPUTADOR AIO ASUS P440 3 512G 8G 23 8 W11P 1Y",
+      "categoria": "TG Computadores",
+      "subCategoria": "Computador desktop",
+      "ofertaSiNo": 1,
+      "precio": 599,
+      "tipoMoneda": "USD",
+      "dolarTg": 919,
+      "timeStamp": "2026-08-18 14:46:13",
+      "stockDisp": 2
+    }
+  ]
+}

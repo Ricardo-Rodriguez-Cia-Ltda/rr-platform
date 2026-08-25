@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import type { CatalogProduct } from '../lib/search.js';
+import { CatalogUnavailableError } from '../lib/catalog.js';
+import type { ProductoNormalizado } from '../lib/producto.js';
 import { ProviderError } from '../lib/types.js';
 
 const obtenerCatalogoMock = vi.fn();
@@ -13,21 +14,30 @@ vi.mock('../lib/catalog.js', async () => {
 
 vi.mock('../lib/providers/intcomex.js', () => ({
   getPrices: (skus: string[]) => getPricesMock(skus),
+  cargarCatalogoIntcomex: async () => [],
+  intcomex: {
+    nombre: 'intcomex',
+    maxSkusPorLote: 100,
+    estaConfigurado: () => true,
+    cargarCatalogo: async () => [],
+    getPrecios: (skus: string[]) => getPricesMock(skus),
+    getPrecio: async () => {
+      throw new Error('no usado');
+    },
+  },
 }));
 
 const { default: productHandler } = await import('../api/product.js');
 const { default: facetasHandler } = await import('../api/facetas.js');
 
-const PRODUCTO: CatalogProduct = {
-  Sku: 'HP1',
-  Mpn: '2N6G5LT',
-  Description: 'HP ProBook 640 G8 - Notebook - 14"',
-  Type: 'Physical',
-  Brand: { Description: 'HP' },
-  Category: {
-    Description: 'Computadores',
-    Subcategories: [{ Description: 'Notebooks' }],
-  },
+const PRODUCTO: ProductoNormalizado = {
+  sku: 'HP1',
+  mpn: '2N6G5LT',
+  nombre: 'HP ProBook 640 G8 - Notebook - 14"',
+  tipo: 'Physical',
+  marca: 'HP',
+  categoria: 'Computadores',
+  subcategorias: ['Notebooks'],
 };
 
 function makeReq(query: Record<string, string>, headers: Record<string, string> = {}): VercelRequest {
@@ -65,10 +75,45 @@ describe('GET /product/{sku}', () => {
     expect(res.statusCode).toBe(401);
   });
 
+  it('returns 401 with a wrong x-api-key and does not touch the catalog', async () => {
+    const res = makeRes();
+    await productHandler(makeReq({ sku: 'HP1' }, { 'x-api-key': 'nope' }), res);
+    expect(res.statusCode).toBe(401);
+    expect(obtenerCatalogoMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 405 for non-GET methods', async () => {
+    const res = makeRes();
+    await productHandler({ ...makeReq({ sku: 'HP1' }, AUTH), method: 'POST' } as VercelRequest, res);
+    expect(res.statusCode).toBe(405);
+    expect(res.body).toMatchObject({ error: 'method_not_allowed' });
+  });
+
   it('returns 400 without sku', async () => {
     const res = makeRes();
     await productHandler(makeReq({}, AUTH), res);
     expect(res.statusCode).toBe(400);
+  });
+
+  // Un sku de puros espacios llega asi desde clientes que serializan campos
+  // vacios; no debe pasar la validacion y caer despues como 404.
+  it('returns 400 for a whitespace-only sku', async () => {
+    const res = makeRes();
+    await productHandler(makeReq({ sku: '   ' }, AUTH), res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toMatchObject({ error: 'bad_request' });
+  });
+
+  it('returns 503 when the catalog is not loaded yet', async () => {
+    obtenerCatalogoMock.mockImplementation(() => {
+      throw new CatalogUnavailableError();
+    });
+
+    const res = makeRes();
+    await productHandler(makeReq({ sku: 'HP1' }, AUTH), res);
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toMatchObject({ error: 'catalogo_no_disponible' });
+    expect(getPricesMock).not.toHaveBeenCalled();
   });
 
   it('returns the full product sheet with price and stock', async () => {
@@ -138,5 +183,30 @@ describe('GET /facetas', () => {
     const res = makeRes();
     await facetasHandler(makeReq({}), res);
     expect(res.statusCode).toBe(401);
+  });
+
+  it('returns 401 with a wrong x-api-key and does not touch the catalog', async () => {
+    const res = makeRes();
+    await facetasHandler(makeReq({}, { 'x-api-key': 'nope' }), res);
+    expect(res.statusCode).toBe(401);
+    expect(obtenerCatalogoMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 405 for non-GET methods', async () => {
+    const res = makeRes();
+    await facetasHandler({ ...makeReq({}, AUTH), method: 'POST' } as VercelRequest, res);
+    expect(res.statusCode).toBe(405);
+    expect(res.body).toMatchObject({ error: 'method_not_allowed' });
+  });
+
+  it('returns 503 when the catalog is not loaded yet', async () => {
+    obtenerCatalogoMock.mockImplementation(() => {
+      throw new CatalogUnavailableError();
+    });
+
+    const res = makeRes();
+    await facetasHandler(makeReq({}, AUTH), res);
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toMatchObject({ error: 'catalogo_no_disponible' });
   });
 });

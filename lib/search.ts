@@ -1,14 +1,7 @@
-export interface CatalogProduct {
-  Sku: string;
-  Mpn: string | null;
-  Description: string | null;
-  Type?: string | null;
-  Brand?: { Description?: string | null } | null;
-  Category?: {
-    Description?: string | null;
-    Subcategories?: { Description?: string | null }[];
-  } | null;
-}
+import type { ProductoNormalizado } from './producto.js';
+import { normalizar, tokenizar } from './texto.js';
+
+export { normalizar, tokenizar };
 
 export interface SearchFilters {
   q: string;
@@ -17,7 +10,7 @@ export interface SearchFilters {
 }
 
 export interface ScoredProduct {
-  product: CatalogProduct;
+  product: ProductoNormalizado;
   score: number;
 }
 
@@ -30,22 +23,16 @@ const PESO_MPN_EXACTO = 100;
 const PESO_MARCA = 10;
 const PESO_DESCRIPCION = 3;
 
-export function normalizar(texto: string): string {
-  // U+0300-U+036F = marcas diacríticas combinantes que NFD separa de la letra.
-  return texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-}
 
-export function tokenizar(texto: string): string[] {
-  return normalizar(texto)
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter(Boolean);
-}
-
-function puntuar(product: CatalogProduct, terminos: string[], consultaNormalizada: string): number {
-  const mpnNormalizado = normalizar(product.Mpn ?? '');
-  const mpnCompacto = tokenizar(product.Mpn ?? '').join('');
-  const tokensMarca = new Set(tokenizar(product.Brand?.Description ?? ''));
-  const tokensDescripcion = new Set(tokenizar(product.Description ?? ''));
+function puntuar(
+  product: ProductoNormalizado,
+  terminos: string[],
+  consultaNormalizada: string,
+): number {
+  const mpnNormalizado = normalizar(product.mpn ?? '');
+  const mpnCompacto = tokenizar(product.mpn ?? '').join('');
+  const tokensMarca = new Set(tokenizar(product.marca ?? ''));
+  const tokensDescripcion = new Set(tokenizar(product.nombre ?? ''));
 
   // El MPN aporta a lo sumo PESO_MPN_EXACTO por producto, sin importar en
   // cuantos tokens se parta: un MPN de dos tokens no vale mas que uno de uno.
@@ -66,7 +53,7 @@ function puntuar(product: CatalogProduct, terminos: string[], consultaNormalizad
   return score;
 }
 
-export function buscar(catalogo: CatalogProduct[], filtros: SearchFilters): ScoredProduct[] {
+export function buscar(catalogo: ProductoNormalizado[], filtros: SearchFilters): ScoredProduct[] {
   const marca = filtros.marca ? normalizar(filtros.marca) : undefined;
   const categoria = filtros.categoria ? normalizar(filtros.categoria) : undefined;
   // Lo que ya se filtro no debe volver a puntuar: si se pide marca=HP, la
@@ -82,8 +69,8 @@ export function buscar(catalogo: CatalogProduct[], filtros: SearchFilters): Scor
 
   const resultados: ScoredProduct[] = [];
   for (const product of catalogo) {
-    if (marca && normalizar(product.Brand?.Description ?? '') !== marca) continue;
-    if (categoria && normalizar(product.Category?.Description ?? '') !== categoria) continue;
+    if (marca && normalizar(product.marca ?? '') !== marca) continue;
+    if (categoria && normalizar(product.categoria ?? '') !== categoria) continue;
 
     const score = terminos.length === 0 ? 1 : puntuar(product, terminos, consultaNormalizada);
     if (score > 0) resultados.push({ product, score });
@@ -103,9 +90,9 @@ function contar(valores: (string | null | undefined)[]): { valor: string; n: num
     .sort((a, b) => b.n - a.n || a.valor.localeCompare(b.valor));
 }
 
-export function calcularFacetas(productos: CatalogProduct[]): Facetas {
+export function calcularFacetas(productos: ProductoNormalizado[]): Facetas {
   return {
-    marca: contar(productos.map((p) => p.Brand?.Description)),
-    categoria: contar(productos.map((p) => p.Category?.Description)),
+    marca: contar(productos.map((p) => p.marca)),
+    categoria: contar(productos.map((p) => p.categoria)),
   };
 }

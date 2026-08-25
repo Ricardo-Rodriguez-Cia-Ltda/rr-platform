@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { fetchIws } from './providers/intcomex.js';
-import type { CatalogProduct } from './search.js';
+import { join } from 'node:path';
+import type { ProductoNormalizado } from './producto.js';
+import { PROVEEDORES } from './providers/index.js';
 
 const VIGENCIA_MS = 24 * 60 * 60 * 1000;
 
@@ -14,26 +14,30 @@ export class CatalogUnavailableError extends Error {
 
 interface CacheEnDisco {
   descargadoEn: string;
-  productos: CatalogProduct[];
+  productos: ProductoNormalizado[];
 }
 
-let enMemoria: CatalogProduct[] | null = null;
+const enMemoria = new Map<string, ProductoNormalizado[]>();
 
-function rutaCache(): string {
-  return process.env.CATALOG_CACHE_PATH ?? 'cache/catalog.json';
+function directorioCache(): string {
+  return process.env.CATALOG_CACHE_DIR ?? 'cache';
 }
 
-function leerCache(): CacheEnDisco | null {
+function rutaCache(proveedor: string): string {
+  return join(directorioCache(), `catalog-${proveedor}.json`);
+}
+
+function leerCache(proveedor: string): CacheEnDisco | null {
   try {
-    return JSON.parse(readFileSync(rutaCache(), 'utf8')) as CacheEnDisco;
+    return JSON.parse(readFileSync(rutaCache(proveedor), 'utf8')) as CacheEnDisco;
   } catch {
     return null;
   }
 }
 
-function escribirCache(productos: CatalogProduct[]): void {
-  const ruta = rutaCache();
-  mkdirSync(dirname(ruta), { recursive: true });
+function escribirCache(proveedor: string, productos: ProductoNormalizado[]): void {
+  const ruta = rutaCache(proveedor);
+  mkdirSync(directorioCache(), { recursive: true });
   writeFileSync(
     ruta,
     JSON.stringify({ descargadoEn: new Date().toISOString(), productos } satisfies CacheEnDisco),
@@ -45,47 +49,39 @@ function estaVigente(cache: CacheEnDisco): boolean {
   return Number.isFinite(edad) && edad >= 0 && edad < VIGENCIA_MS;
 }
 
-async function descargar(): Promise<CatalogProduct[]> {
-  const response = await fetchIws('getcatalog');
-  if (!response.ok) {
-    throw new Error(`Intcomex respondió HTTP ${response.status} al pedir el catálogo`);
-  }
-  const datos = await response.json();
-  if (!Array.isArray(datos) || datos.length === 0) {
-    throw new Error('getcatalog no devolvio un arreglo de productos');
-  }
-  return datos as CatalogProduct[];
-}
+export async function cargarCatalogo(proveedor: string): Promise<ProductoNormalizado[]> {
+  const registrado = PROVEEDORES[proveedor];
+  if (!registrado) throw new Error(`Proveedor desconocido: ${proveedor}`);
 
-export async function cargarCatalogo(): Promise<CatalogProduct[]> {
-  const cache = leerCache();
+  const cache = leerCache(proveedor);
   if (cache && estaVigente(cache)) {
-    enMemoria = cache.productos;
-    return enMemoria;
+    enMemoria.set(proveedor, cache.productos);
+    return cache.productos;
   }
 
   try {
-    const productos = await descargar();
-    escribirCache(productos);
-    enMemoria = productos;
-    return enMemoria;
+    const productos = await registrado.cargarCatalogo();
+    escribirCache(proveedor, productos);
+    enMemoria.set(proveedor, productos);
+    return productos;
   } catch (error) {
     // Un catálogo viejo sirve mucho más que ninguno: el precio siempre se
     // consulta aparte, así que lo desactualizado aquí es a lo sumo el surtido.
     if (cache) {
-      console.error('[catalog] no se pudo refrescar, se usa el caché vencido', error);
-      enMemoria = cache.productos;
-      return enMemoria;
+      console.error(`[catalog] ${proveedor}: no se pudo refrescar, se usa el caché vencido`, error);
+      enMemoria.set(proveedor, cache.productos);
+      return cache.productos;
     }
     throw error;
   }
 }
 
-export function obtenerCatalogo(): CatalogProduct[] {
-  if (!enMemoria) throw new CatalogUnavailableError();
-  return enMemoria;
+export function obtenerCatalogo(proveedor: string): ProductoNormalizado[] {
+  const productos = enMemoria.get(proveedor);
+  if (!productos) throw new CatalogUnavailableError();
+  return productos;
 }
 
 export function _resetCatalogoParaTests(): void {
-  enMemoria = null;
+  enMemoria.clear();
 }

@@ -4,10 +4,32 @@ import type { Server } from 'node:http';
 
 const getPriceMock = vi.fn();
 
+const CATALOGO = [
+  {
+    sku: 'HP1',
+    mpn: 'MPN-HP1',
+    nombre: 'HP ProBook 640 Notebook 14"',
+    marca: 'HP',
+    categoria: 'Computadores',
+    subcategorias: [],
+    tipo: null,
+  },
+];
+
+vi.mock('../lib/catalog.js', async () => {
+  const actual = await vi.importActual<typeof import('../lib/catalog.js')>('../lib/catalog.js');
+  return { ...actual, obtenerCatalogo: () => CATALOGO };
+});
+
 vi.mock('../lib/providers/intcomex.js', () => ({
+  cargarCatalogoIntcomex: async () => [],
   intcomex: {
-    name: 'intcomex',
-    getPrice: (query: unknown) => getPriceMock(query),
+    nombre: 'intcomex',
+    maxSkusPorLote: 100,
+    estaConfigurado: () => true,
+    cargarCatalogo: async () => [],
+    getPrecios: async () => new Map([['HP1', { price: 1000, currency: 'us', inStock: 5 }]]),
+    getPrecio: (query: unknown) => getPriceMock(query),
   },
 }));
 
@@ -60,6 +82,36 @@ describe('local server adapter', () => {
     expect(getPriceMock).toHaveBeenCalledWith({ sku: undefined, mpn: 'AAA-01148', upc: undefined });
   });
 
+  it('sirve /api/intcomex/search bajo la ruta con proveedor', async () => {
+    const res = await fetch(`${base}/api/intcomex/search?q=probook`, {
+      headers: { 'x-api-key': 'test-secret' },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('404 para un proveedor que no existe en la ruta', async () => {
+    const res = await fetch(`${base}/api/nadie/search?q=x`, {
+      headers: { 'x-api-key': 'test-secret' },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('enruta /api/intcomex/product/{sku} tomando el sku del path', async () => {
+    const res = await fetch(`${base}/api/intcomex/product/HP1`, {
+      headers: { 'x-api-key': 'test-secret' },
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { sku: string }).sku).toBe('HP1');
+  });
+
+  it('sigue enrutando /api/product/{sku} sin prefijo de proveedor', async () => {
+    const res = await fetch(`${base}/api/product/HP1`, {
+      headers: { 'x-api-key': 'test-secret' },
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { sku: string }).sku).toBe('HP1');
+  });
+
   it('returns 401 without x-api-key (handler auth reached)', async () => {
     const res = await fetch(`${base}/api/price?sku=X`);
     expect(res.status).toBe(401);
@@ -89,6 +141,22 @@ describe('local server adapter', () => {
     expect(getPriceMock).toHaveBeenCalledWith({ sku: 'PRIMERO', mpn: undefined, upc: undefined });
   });
 
+  it('sirve /api/mejor-precio', async () => {
+    const res = await fetch(`${base}/api/mejor-precio?mpn=MPN-HP1`, {
+      headers: { 'x-api-key': 'test-secret' },
+    });
+    // El catalogo del mock tiene HP1 con MPN-HP1, asi que la ruta resuelve y
+    // compara; lo que se verifica aca es que la ruta existe, no el resultado.
+    expect(res.status).not.toBe(404);
+  });
+
+  it('devuelve 400 en /api/mejor-precio sin identificador', async () => {
+    const res = await fetch(`${base}/api/mejor-precio`, {
+      headers: { 'x-api-key': 'test-secret' },
+    });
+    expect(res.status).toBe(400);
+  });
+
   it('responds 500 (not a crash) to a malformed Host header and stays alive', async () => {
     // An empty `Host:` header is now handled gracefully by the `||` fallback (falls back to
     // "localhost" and the request proceeds normally), so it no longer reproduces the crash.
@@ -114,6 +182,64 @@ describe('local server adapter', () => {
     // The server must still be responsive after the malformed request.
     const res = await fetch(`${base}/api/price?sku=X`);
     expect(res.status).toBe(401);
+  });
+});
+
+describe('cuerpo JSON en POST /credito/mock', () => {
+  beforeEach(() => {
+    vi.stubEnv('API_SECRET_KEY', 'test-secret');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('lee el cuerpo del socket y lo entrega parseado al handler', async () => {
+    const res = await fetch(`${base}/api/credito/mock`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'test-secret', 'content-type': 'application/json' },
+      body: JSON.stringify({ rut: '11.111.111-1', total_clp: 12_000_000 }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      rut: '111111111',
+      aprobado: false,
+      disponible_clp: 6_000_000,
+      faltante_clp: 6_000_000,
+      mock: true,
+    });
+  });
+
+  it('responde 400 a un cuerpo vacio en vez de colgarse', async () => {
+    const res = await fetch(`${base}/api/credito/mock`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'test-secret' },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('responde 405 a GET sobre la ruta de credito', async () => {
+    const res = await fetch(`${base}/api/credito/mock`, { headers: { 'x-api-key': 'test-secret' } });
+    expect(res.status).toBe(405);
+  });
+
+  it('rechaza un cuerpo sobre el tope antes de llegar al handler', async () => {
+    const res = await fetch(`${base}/api/credito/mock`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'test-secret', 'content-type': 'application/json' },
+      body: 'x'.repeat(1_000_001),
+    });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: 'payload_too_large' });
+  });
+
+  it('no rompe el 405 de los endpoints GET cuando llega un POST con cuerpo', async () => {
+    const res = await fetch(`${base}/api/price?sku=X`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'test-secret' },
+      body: JSON.stringify({ algo: true }),
+    });
+    expect(res.status).toBe(405);
   });
 });
 
@@ -171,5 +297,15 @@ describe('BASE_PATH routing', () => {
   it('404 para /product sin sku en el path', async () => {
     const res = await fetch(`${prefixedBase}/rr/captador-precios/product/`);
     expect(res.status).toBe(404);
+  });
+
+  it('sirve /credito/mock bajo el prefijo configurado', async () => {
+    const res = await fetch(`${prefixedBase}/rr/captador-precios/credito/mock`, {
+      method: 'POST',
+      headers: { 'x-api-key': 'test-secret', 'content-type': 'application/json' },
+      body: JSON.stringify({ rut: '111111111', total_clp: 1000 }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ aprobado: true, mock: true });
   });
 });

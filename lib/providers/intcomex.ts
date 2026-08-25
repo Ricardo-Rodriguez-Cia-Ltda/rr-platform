@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 
-import type { PriceInfo, PriceQuery, PriceResult, Provider } from '../types.js';
+import type { PriceInfo, PriceQuery, PriceResult, Proveedor } from '../types.js';
 import { ProviderError } from '../types.js';
+import type { ProductoNormalizado } from '../producto.js';
 
 export function formatUtcTimestamp(date: Date): string {
   return date.toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -57,56 +58,52 @@ interface IwsProduct {
   InStock?: number;
 }
 
-export const intcomex: Provider = {
-  name: 'intcomex',
+export async function getPrice(query: PriceQuery): Promise<PriceResult> {
+  const params: Record<string, string> = {
+    includePriceData: 'true',
+    includeInventoryData: 'true',
+  };
+  if (query.sku) params.sku = query.sku;
+  if (query.mpn) params.mpn = query.mpn;
+  if (query.upc) params.upc = query.upc;
 
-  async getPrice(query: PriceQuery): Promise<PriceResult> {
-    const params: Record<string, string> = {
-      includePriceData: 'true',
-      includeInventoryData: 'true',
-    };
-    if (query.sku) params.sku = query.sku;
-    if (query.mpn) params.mpn = query.mpn;
-    if (query.upc) params.upc = query.upc;
+  const response = await fetchIws('getproduct', params);
 
-    const response = await fetchIws('getproduct', params);
+  if (response.status === 404) {
+    throw new ProviderError('not_found', 'Product not found at Intcomex');
+  }
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new ProviderError(
+      'upstream',
+      `Intcomex responded with HTTP ${response.status}`,
+      body.slice(0, 500),
+    );
+  }
 
-    if (response.status === 404) {
-      throw new ProviderError('not_found', 'Product not found at Intcomex');
-    }
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      throw new ProviderError(
-        'upstream',
-        `Intcomex responded with HTTP ${response.status}`,
-        body.slice(0, 500),
-      );
-    }
+  let product: IwsProduct;
+  try {
+    product = (await response.json()) as IwsProduct;
+  } catch {
+    throw new ProviderError('upstream', 'Intcomex returned an invalid JSON response');
+  }
 
-    let product: IwsProduct;
-    try {
-      product = (await response.json()) as IwsProduct;
-    } catch {
-      throw new ProviderError('upstream', 'Intcomex returned an invalid JSON response');
-    }
+  if (product.Price?.UnitPrice == null) {
+    throw new ProviderError('not_found', 'Intcomex returned no price for this product');
+  }
 
-    if (product.Price?.UnitPrice == null) {
-      throw new ProviderError('not_found', 'Intcomex returned no price for this product');
-    }
+  return {
+    provider: 'intcomex',
+    sku: product.Sku ?? null,
+    mpn: product.Mpn ?? null,
+    description: product.Description ?? null,
+    price: product.Price.UnitPrice,
+    currency: product.Price.CurrencyId ?? 'USD',
+    inStock: product.InStock ?? null,
+  };
+}
 
-    return {
-      provider: 'intcomex',
-      sku: product.Sku ?? null,
-      mpn: product.Mpn ?? null,
-      description: product.Description ?? null,
-      price: product.Price.UnitPrice,
-      currency: product.Price.CurrencyId ?? 'USD',
-      inStock: product.InStock ?? null,
-    };
-  },
-};
-
-const MAX_SKUS_POR_LLAMADA = 100;
+export const MAX_SKUS_POR_LLAMADA = 100;
 
 export async function getPrices(skus: string[]): Promise<Map<string, PriceInfo>> {
   const prices = new Map<string, PriceInfo>();
@@ -151,3 +148,55 @@ export async function getPrices(skus: string[]): Promise<Map<string, PriceInfo>>
 
   return prices;
 }
+
+export interface ProductoIntcomex {
+  Sku: string;
+  Mpn?: string | null;
+  Description?: string | null;
+  Type?: string | null;
+  Brand?: { Description?: string | null } | null;
+  Category?: {
+    Description?: string | null;
+    Subcategories?: { Description?: string | null }[];
+  } | null;
+}
+
+export function normalizarProducto(crudo: ProductoIntcomex): ProductoNormalizado {
+  return {
+    sku: crudo.Sku,
+    mpn: crudo.Mpn ?? null,
+    nombre: crudo.Description ?? null,
+    marca: crudo.Brand?.Description ?? null,
+    categoria: crudo.Category?.Description ?? null,
+    subcategorias: (crudo.Category?.Subcategories ?? [])
+      .map((s) => s.Description)
+      .filter((d): d is string => Boolean(d)),
+    tipo: crudo.Type ?? null,
+  };
+}
+
+export async function cargarCatalogoIntcomex(): Promise<ProductoNormalizado[]> {
+  const response = await fetchIws('getcatalog');
+  if (!response.ok) {
+    throw new Error(`Intcomex respondió HTTP ${response.status} al pedir el catálogo`);
+  }
+  const datos = await response.json();
+  if (!Array.isArray(datos) || datos.length === 0) {
+    throw new Error('getcatalog no devolvio un arreglo de productos');
+  }
+  return (datos as ProductoIntcomex[]).map(normalizarProducto);
+}
+
+export const intcomex: Proveedor = {
+  nombre: 'intcomex',
+  maxSkusPorLote: MAX_SKUS_POR_LLAMADA,
+  estaConfigurado: () =>
+    Boolean(
+      process.env.INTCOMEX_API_KEY &&
+        process.env.INTCOMEX_ACCESS_KEY &&
+        process.env.INTCOMEX_BASE_URL,
+    ),
+  cargarCatalogo: cargarCatalogoIntcomex,
+  getPrecios: getPrices,
+  getPrecio: getPrice,
+};

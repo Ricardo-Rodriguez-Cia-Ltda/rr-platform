@@ -1,6 +1,8 @@
 # scrapper-proveedores
 
-API de precios de proveedores (Intcomex vía IWS) desplegada en Vercel.
+API de precios de proveedores. Cotiza contra Intcomex (IWS), Tecnoglobal e
+Ingram Micro, cada uno con su propio catálogo y sus propias rutas. Ver
+[Proveedores](#proveedores).
 
 ## Uso
 
@@ -35,6 +37,7 @@ npm test            # tests unitarios
 npm run typecheck
 cp .env.example .env.local   # completar con credenciales reales
 npm run check -- <SKU>       # smoke test contra IWS test
+npm run docs:vocabulario     # regenera docs/api/vocabulario.md desde la API
 vercel dev                   # servidor local
 ```
 
@@ -45,7 +48,18 @@ vercel dev                   # servidor local
 | `INTCOMEX_API_KEY` | clave pública de desarrollo | clave pública de producción |
 | `INTCOMEX_ACCESS_KEY` | access key de desarrollo | access key de producción |
 | `INTCOMEX_BASE_URL` | `https://intcomex-test.apigee.net/v1/` | `https://intcomex-prod.apigee.net/v1/` |
+| `TECNOGLOBAL_USER` | usuario entregado por su área TI | íd. |
+| `TECNOGLOBAL_PASSWORD` | clave **ya hasheada en MD5** por su área TI | íd. |
+| `INGRAM_CLIENT_ID` | generado en developer.ingrammicro.com | íd. |
+| `INGRAM_CLIENT_SECRET` | íd. | íd. |
+| `INGRAM_CUSTOMER_NUMBER` | número de cliente de Ingram (**sin** sufijo: `147645`, no `147645-RR`) | íd. |
 | `API_SECRET_KEY` | clave propia para `x-api-key` | clave propia para `x-api-key` |
+| `CATALOG_CACHE_DIR` | carpeta del caché de catálogos (opcional; default `cache/`) | íd. |
+
+Las opcionales con default razonable (`TECNOGLOBAL_BASE_URL`,
+`INGRAM_BASE_URL`, `INGRAM_TOKEN_URL`, `INGRAM_COUNTRY_CODE`,
+`INGRAM_SENDER_ID`, `INGRAM_MAX_PAGINAS`, `TECNOGLOBAL_PRECIOS_TTL_MS`) están
+listadas en `.env.example`.
 
 ## Deploy
 
@@ -55,36 +69,160 @@ vercel            # deploy preview
 vercel --prod     # deploy a producción
 ```
 
-## Búsqueda de productos (para consumo por LLM)
+## Documentación de la API
 
-Además de cotizar un SKU conocido, la API permite descubrir productos a partir de una descripción vaga. Pensado para que un LLM lo use como herramienta.
+La referencia completa vive en [`docs/api/`](docs/api/) y está escrita para ser leída por un LLM:
 
-### `GET /search` — buscar productos
+| Documento | Contenido |
+|---|---|
+| [`docs/api/README.md`](docs/api/README.md) | Referencia narrativa: cada endpoint, cada código de error, cómo funciona el ranking, cuándo reintentar y cuándo no. |
+| [`docs/api/openapi.yaml`](docs/api/openapi.yaml) | El mismo contrato, machine-readable (OpenAPI 3.1). |
+| [`docs/api/vocabulario.md`](docs/api/vocabulario.md) | Marcas y categorías reales del catálogo. Generado con `npm run docs:vocabulario`. |
+| [`docs/kapso/README.md`](docs/kapso/README.md) | Cómo conectar todo esto al agente de WhatsApp aplicando el margen fuera del modelo. |
 
-Parámetros: `q` (obligatorio, texto libre), `marca`, `categoria`, `precio_max`, `solo_con_stock`, `limite` (default 10).
+Resumen de endpoints (todos con `x-api-key`):
 
+- `GET /search?q=...` — buscar por texto libre; `marca`, `categoria`, `precio_max`, `solo_con_stock`, `limite`.
+- `GET /product?sku=...` — ficha completa de un SKU.
+- `GET /price?sku=|mpn=|upc=` — cotizar un identificador conocido, sin pasar por el catálogo.
+- `GET /mejor-precio?mpn=|proveedor=&sku=` — el precio más bajo entre todos los proveedores, con la lista completa de ofertas.
+- `GET /facetas` — vocabulario del catálogo (uso de build-time, no como tool de un LLM).
+- `POST /credito/mock` — cupo de crédito disponible. **Mock**: siempre responde línea de 10.000.000 CLP con 4.000.000 utilizados, sin importar el RUT. Ver abajo.
+
+### Crédito (mock)
+
+```bash
+curl -X POST https://api.pyxis-latam.cl/rr/captador-precios/credito/mock \
+  -H "x-api-key: $API_SECRET_KEY" -H "content-type: application/json" \
+  -d '{"rut":"111111111","total_clp":12000000}'
 ```
-GET /search?q=probook&marca=HP
-Header: x-api-key: <API_SECRET_KEY>
-```
 
-Respuesta 200: `total`, `productos[]` (sku, mpn, nombre, marca, categoria, precio, moneda, stock) y `facetas`.
+Devuelve `aprobado`, `disponible_clp` y `faltante_clp`. Un cupo insuficiente es `200` con `aprobado: false`, no un error.
 
-Si la consulta calza más de 25 productos y no se envió `marca` ni `categoria`, responde **409** con el total y las facetas disponibles, para que el LLM repregunte con opciones concretas en vez de adivinar.
+Mientras sea un mock, la ruta lleva `/mock` y toda respuesta trae `"mock": true`: un mock de crédito que se pueda confundir con el real aprueba compras que nadie autorizó. Cuando exista la integración con RRS, vivirá en `/credito`.
 
-### `GET /product/{sku}` — ficha completa
+Es el único endpoint que usa `POST` y el único que habla en **pesos chilenos** — el resto de la API cotiza en USD.
 
-Devuelve descripción íntegra, marca, categoría con subcategorías, tipo, precio, moneda y stock.
-
-### `GET /facetas` — vocabulario del catálogo
-
-Lista las marcas y categorías reales con su conteo. No es una herramienta para el LLM: sirve para construir el prompt del sistema con el vocabulario que Intcomex realmente usa.
+`docs/api/` no se desactualiza en silencio: [`tests/docs.test.ts`](tests/docs.test.ts) falla si las rutas, los códigos de error, los status, los nombres de campo o las constantes citadas dejan de coincidir con el código.
 
 ### Catálogo
 
-El catálogo (unos 10.000 productos) se descarga al arrancar y se refresca cada 24 horas, con copia en `cache/catalog.json`. Mientras la primera descarga no termina, estos tres endpoints responden **503 `catalogo_no_disponible`**. Si el refresco falla pero hay copia en disco, se sigue usando la copia vencida: el precio siempre se consulta en vivo, así que lo único desactualizado sería el surtido. Si la descarga inicial falla (por ejemplo, Intcomex caído en un arranque en frío) y no hay copia en disco, se reintenta cada 5 minutos en vez de esperar las 24 horas completas.
+El catálogo de **cada proveedor** se descarga al arrancar y se refresca cada 24 horas, con copia propia en `cache/catalog-<proveedor>.json` (la carpeta se configura con `CATALOG_CACHE_DIR`). Los tres se refrescan en paralelo: que un proveedor esté caído no deja sin catálogo a los demás, y el reintento se agenda solo para el que falló. Mientras la primera descarga no termina, estos tres endpoints responden **503 `catalogo_no_disponible`**. Si el refresco falla pero hay copia en disco, se sigue usando la copia vencida: el precio siempre se consulta en vivo, así que lo único desactualizado sería el surtido. Si la descarga inicial falla (por ejemplo, Intcomex caído en un arranque en frío) y no hay copia en disco, se reintenta cada 5 minutos en vez de esperar las 24 horas completas.
 
 > **Importante:** las respuestas de búsqueda traen el precio de **costo**. Si el consumidor es un LLM que habla con clientes finales, el margen debe aplicarse en un nodo determinista antes de que la respuesta entre al contexto del modelo.
+
+## Proveedores
+
+El negocio compra a tres distribuidores. Cada uno tiene su propio catálogo, sus
+propios SKU y su propio precio; lo único comparable entre ellos es el `mpn`
+(part number del fabricante).
+
+| Proveedor | Ruta | Estado |
+|---|---|---|
+| `intcomex` | `/api/intcomex/{search,product,facetas}` | En producción |
+| `tecnoglobal` | `/api/tecnoglobal/{search,product,facetas}` | Integrado y verificado contra su API real |
+| `ingram` | `/api/ingram/{search,product,facetas}` | Integrado y verificado contra su API real |
+
+`/api/search`, `/api/product` y `/api/facetas` sin proveedor **siguen siendo
+Intcomex** y responden exactamente lo mismo que antes: existen para que el
+agente Rayo no tenga que cambiar nada.
+
+Un proveedor sin credenciales responde `503 proveedor_no_configurado` en sus
+rutas y queda fuera del refresco de catálogos, en vez de reintentar cada 5
+minutos algo que no puede funcionar.
+
+El endpoint `GET /api/mejor-precio` compara entre los tres. Alrededor de 1.400
+productos existen en más de un proveedor; para el resto devuelve una sola
+oferta. Ver [`docs/api/README.md`](docs/api/README.md).
+
+### Notas por proveedor
+
+**Tecnoglobal.** Un solo servicio entrega catálogo, precio y stock juntos, todo
+en USD, y sus dos endpoints se comportan muy distinto — medido contra el
+servicio real, no documentado por ellos:
+
+| Endpoint | Costo | Cuota observada |
+|---|---|---|
+| `/price` (catálogo completo, ~500 KB, 1.488 productos) | ~3 s | Se agota en **pocas llamadas** y sigue rechazando (401, "Excede la cantidad máx. de consultas en el tiempo [10 min.]") **bastante más** que esos 10 minutos |
+| `/price/{sku}` | ~1,5 s cada una, **no mejora en paralelo** | Aguantó 12 llamadas seguidas sin quejarse |
+
+De ahí el reparto que hace el módulo:
+
+- **Pocos SKU** (≤ 5: una ficha de `/product`, una cotización de `/price`) se
+  piden en vivo por SKU. Es el precio del momento, y son las llamadas que de
+  verdad se cotizan a un cliente.
+- **Muchos SKU** (el ranking de un `/search`) salen de una foto en memoria del
+  último volcado, refrescable como mucho cada hora
+  (`TECNOGLOBAL_PRECIOS_TTL_MS`). Pedir 25 en vivo serían ~37 s de espera.
+- Si el refresco de la foto es rechazado por cuota, **se sigue usando la foto
+  vencida**: es el ranking de una búsqueda, y el precio definitivo se confirma
+  con `/product`.
+
+La foto se guarda en disco junto a los catálogos (`tecnoglobal-precios.json`), así que un reinicio no obliga a gastar una descarga del volcado.
+
+> **Para el consumidor:** el precio que trae `/search` de Tecnoglobal puede
+> tener hasta una hora. El de `/product` y `/price` es del momento. Si el
+> agente va a comprometer un precio con el cliente, que lo confirme con
+> `/product`.
+
+La cuota exacta del volcado no está documentada: conviene confirmarla con su
+área TI antes de subir el tráfico.
+
+**Ingram Micro.** OAuth2 `client_credentials` con el token cacheado en memoria
+(dura 24 h), catálogo paginado y precios en lotes de 50, el tope de su endpoint.
+Cotiza en USD, igual que los otros dos.
+
+Tres cosas medidas contra su API real que no coinciden con lo que uno esperaría
+de su documentación:
+
+- **Devuelve alrededor de la mitad de lo que se le pide por página**: pedir
+  `pageSize=100` trae ~50. Al parecer pagina primero y después filtra lo que
+  esta cuenta puede comprar.
+- **`recordsFound` no es confiable**: la misma consulta devolvió 6.103 y 3.188
+  en llamadas seguidas, mientras el catálogo real de la cuenta son **2.915
+  productos**. Por eso el volcado **no corta por ese contador** sino con la
+  primera página vacía; cortar por `recordsFound` dejaba el catálogo a medias, y
+  un catálogo incompleto se lee como "ese producto no existe en Ingram".
+- **60 llamadas por minuto y por endpoint**, y el catálogo son ~60 páginas: sin
+  pausa entre páginas el volcado se corta por cuota justo por la mitad. De ahí
+  `INGRAM_MS_ENTRE_PAGINAS` (default 1.100 ms), que deja la descarga completa en
+  ~110 s.
+
+El número de cliente va **sin sufijo**: `147645`, no `147645-RR`. Con el sufijo
+Ingram responde `403 customer validation failed` aunque el token sea válido.
+
+### Probar Ingram sin credenciales
+
+`scripts/mock-ingram.ts` levanta un servidor que imita el contrato publicado de
+Ingram, para ejercitar el módulo de punta a punta (ruta HTTP → handler →
+proveedor → red). Verifica el **cableado**, no que le hayamos acertado a la
+forma real del tenant:
+
+```bash
+npx tsx scripts/mock-ingram.ts    # queda escuchando en :4010
+```
+
+Y en otra terminal, `npm run serve` con `INGRAM_BASE_URL=http://127.0.0.1:4010`,
+`INGRAM_TOKEN_URL=http://127.0.0.1:4010/oauth/oauth30/token` y cualquier valor
+en `INGRAM_CLIENT_ID`, `INGRAM_CLIENT_SECRET` e `INGRAM_CUSTOMER_NUMBER`.
+
+Cuando lleguen las credenciales reales, sirve para comparar la respuesta
+simulada con la de verdad.
+
+### Agregar un proveedor nuevo
+
+1. Escribir `lib/providers/<nombre>.ts` exportando un objeto que cumpla
+   `Proveedor` (`lib/types.ts`): `cargarCatalogo`, `getPrecios`, `getPrecio`,
+   `maxSkusPorLote` y `estaConfigurado`. La normalización a
+   `ProductoNormalizado` ocurre **dentro** del módulo; ni el catálogo ni el
+   buscador ven nunca una respuesta cruda.
+2. Sumarlo a `PROVEEDORES` en `lib/providers/index.ts`.
+3. Documentar sus variables en `.env.example`.
+
+Con eso quedan andando sus tres rutas, su catálogo con caché propio
+(`cache/catalog-<nombre>.json`) y su refresco en paralelo. No hay nada más que
+tocar: `tests/paridad-proveedores.test.ts` verifica que el proveedor nuevo
+responda el mismo contrato que los demás.
 
 ## Hosting local (PC oficina) + Cloudflare Tunnel
 
