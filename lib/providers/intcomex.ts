@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 
+import { fetchConTimeout } from '../http.js';
 import type { PriceInfo, PriceQuery, PriceResult, Proveedor } from '../types.js';
 import { ProviderError } from '../types.js';
 import type { ProductoNormalizado } from '../producto.js';
@@ -40,7 +41,7 @@ export async function fetchIws(
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
 
   try {
-    return await fetch(url, {
+    return await fetchConTimeout(url, {
       headers: {
         Authorization: `Bearer ${buildAuthToken(apiKey, accessKey, new Date())}`,
       },

@@ -102,12 +102,14 @@ describe('compararPorClave', () => {
     expect(r.ofertas.map((o) => o.proveedor)).toEqual(['b', 'a']);
   });
 
+  // Ambos en cero confirmado: el unico caso en que 'no se puede entregar' es
+  // verdad. Un null aca significaria otra cosa y se prueba aparte.
   it('sin stock en ninguno, elige el mas barato y lo marca', async () => {
     catalogos.set('a', [producto({ sku: 'A1' })]);
     catalogos.set('b', [producto({ sku: 'B1' })]);
     const registro = {
       a: proveedorFalso('a', { A1: { price: 130, currency: 'USD', inStock: 0 } }),
-      b: proveedorFalso('b', { B1: { price: 100, currency: 'USD', inStock: null } }),
+      b: proveedorFalso('b', { B1: { price: 100, currency: 'USD', inStock: 0 } }),
     };
 
     const r = await compararPorClave(CLAVE, registro);
@@ -422,5 +424,60 @@ describe('hayAlgunCatalogo', () => {
     catalogos.set('a', [producto({ sku: 'A1' })]);
 
     expect(hayAlgunCatalogo({ a: proveedorFalso('a', {}), b: proveedorFalso('b', {}) })).toBe(true);
+  });
+});
+
+// El stock nulo es "el proveedor no lo dijo", no "no hay". Confundirlos hace
+// que una oferta mas barata pierda contra una mas cara, y encima le dice al
+// cliente que no se puede entregar cuando lo unico que falta es el dato.
+describe('stock desconocido', () => {
+  it('prefiere el que tiene stock confirmado sobre el desconocido', async () => {
+    catalogos.set('a', [producto({ sku: 'A1' })]);
+    catalogos.set('b', [producto({ sku: 'B1' })]);
+    const registro = {
+      a: proveedorFalso('a', { A1: { price: 130, currency: 'USD', inStock: 5 } }),
+      b: proveedorFalso('b', { B1: { price: 100, currency: 'USD', inStock: null } }),
+    };
+
+    const r = await compararPorClave(CLAVE, registro);
+
+    expect(r.mejor).toMatchObject({ proveedor: 'a', criterio: 'mas_barato_con_stock' });
+  });
+
+  // Desconocido gana contra un cero confirmado: "no se sabe" deja abierta la
+  // venta, "no hay" la cierra.
+  it('el stock desconocido le gana al cero confirmado', async () => {
+    catalogos.set('a', [producto({ sku: 'A1' })]);
+    catalogos.set('b', [producto({ sku: 'B1' })]);
+    const registro = {
+      a: proveedorFalso('a', { A1: { price: 130, currency: 'USD', inStock: 0 } }),
+      b: proveedorFalso('b', { B1: { price: 200, currency: 'USD', inStock: null } }),
+    };
+
+    const r = await compararPorClave(CLAVE, registro);
+
+    expect(r.mejor).toMatchObject({ proveedor: 'b', criterio: 'stock_desconocido' });
+  });
+
+  it('con todos desconocidos gana el mas barato y lo dice', async () => {
+    catalogos.set('a', [producto({ sku: 'A1' })]);
+    catalogos.set('b', [producto({ sku: 'B1' })]);
+    const registro = {
+      a: proveedorFalso('a', { A1: { price: 130, currency: 'USD', inStock: null } }),
+      b: proveedorFalso('b', { B1: { price: 100, currency: 'USD', inStock: null } }),
+    };
+
+    const r = await compararPorClave(CLAVE, registro);
+
+    expect(r.mejor).toMatchObject({ proveedor: 'b', criterio: 'stock_desconocido' });
+  });
+
+  it('con todos en cero confirmado sigue diciendo sin stock', async () => {
+    catalogos.set('a', [producto({ sku: 'A1' })]);
+    const registro = { a: proveedorFalso('a', { A1: { price: 130, currency: 'USD', inStock: 0 } }) };
+
+    const r = await compararPorClave(CLAVE, registro);
+
+    expect(r.mejor).toMatchObject({ criterio: 'mas_barato_sin_stock' });
   });
 });
