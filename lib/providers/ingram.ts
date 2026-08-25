@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import { fetchConTimeout } from '../http.js';
 import type { ProductoNormalizado } from '../producto.js';
 import type { PriceInfo, PriceQuery, PriceResult, Proveedor } from '../types.js';
 import { ProviderError } from '../types.js';
@@ -77,7 +78,7 @@ async function pedirToken(): Promise<TokenVigente> {
   const url = process.env.INGRAM_TOKEN_URL || TOKEN_URL_POR_DEFECTO;
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await fetchConTimeout(url, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -171,7 +172,7 @@ export async function fetchIngram(
   }
 
   try {
-    return await fetch(url, init);
+    return await fetchConTimeout(url, init);
   } catch {
     throw new ProviderError('upstream', 'Could not reach Ingram');
   }
@@ -328,8 +329,24 @@ function aPrecio(item: ItemPrecioIngram): PriceInfo | null {
   return {
     price: valor,
     currency: item.pricing?.currencyCode ?? 'USD',
-    inStock: item.availability?.totalAvailability ?? null,
+    inStock: aStock(item.availability),
   };
+}
+
+/**
+ * Ingram informa la disponibilidad dos veces: `totalAvailability` con las
+ * unidades y `available` con un si/no. Cuando manda el booleano pero no el
+ * numero, quedarse solo con el numero convierte "hay stock" en "no se sabe", y
+ * aguas arriba eso se lee como "no hay" y el producto pierde la comparacion.
+ *
+ * Con `available: false` se devuelve 0 —es un no explicito—; con `true` sin
+ * numero no se inventa una cantidad: null significa "hay, cuanto no se dice".
+ */
+function aStock(disponibilidad: ItemPrecioIngram['availability']): number | null {
+  const unidades = disponibilidad?.totalAvailability;
+  if (unidades != null) return unidades;
+  if (disponibilidad?.available === false) return 0;
+  return null;
 }
 
 async function consultarPrecios(

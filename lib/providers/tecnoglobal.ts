@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { fetchConTimeout } from '../http.js';
 import type { ProductoNormalizado } from '../producto.js';
 import type { PriceInfo, PriceQuery, PriceResult, Proveedor } from '../types.js';
 import { ProviderError } from '../types.js';
@@ -78,7 +79,7 @@ export async function fetchStock(path: string): Promise<Response> {
   const cabecera = autorizacion();
 
   try {
-    return await fetch(new URL(path, baseUrl), {
+    return await fetchConTimeout(new URL(path, baseUrl), {
       headers: { Authorization: cabecera, Accept: 'application/json' },
     });
   } catch {

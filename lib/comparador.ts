@@ -16,7 +16,10 @@ export interface Oferta {
   stock: number | null;
 }
 
-export type Criterio = 'mas_barato_con_stock' | 'mas_barato_sin_stock';
+export type Criterio =
+  | 'mas_barato_con_stock'
+  | 'stock_desconocido'
+  | 'mas_barato_sin_stock';
 
 export interface OfertaGanadora extends Oferta {
   criterio: Criterio;
@@ -56,18 +59,35 @@ function catalogoDe(proveedor: string): ProductoNormalizado[] | null {
 
 /**
  * Gana el mas barato CON stock: cotizar el mas barato sin stock es cotizar algo
- * que no se puede entregar. Si ninguno tiene, gana el mas barato igual pero
- * marcado, para que el consumidor sepa que el ganador no sale hoy.
+ * que no se puede entregar.
+ *
+ * El stock nulo es su propio caso, no un cero. Significa que el proveedor no
+ * informo disponibilidad, y tratarlo como ausencia hacia dos daños a la vez:
+ * una oferta mas barata perdia contra una mas cara, y al cliente se le decia
+ * que no se puede entregar cuando lo unico que faltaba era el dato. Por eso el
+ * orden de preferencia es stock confirmado, despues desconocido, y ultimo el
+ * cero confirmado, que es el unico "no" de verdad.
  */
 function elegirMejor(ofertas: Oferta[]): OfertaGanadora | null {
   if (ofertas.length === 0) return null;
-  const conStock = ofertas.filter((o) => (o.stock ?? 0) > 0);
-  const candidatas = conStock.length > 0 ? conStock : ofertas;
-  const ganadora = candidatas.reduce((a, b) => (b.precio < a.precio ? b : a));
-  return {
-    ...ganadora,
-    criterio: conStock.length > 0 ? 'mas_barato_con_stock' : 'mas_barato_sin_stock',
-  };
+
+  const conStock = ofertas.filter((o) => o.stock !== null && o.stock > 0);
+  const desconocido = ofertas.filter((o) => o.stock === null);
+
+  let candidatas: Oferta[];
+  let criterio: Criterio;
+  if (conStock.length > 0) {
+    candidatas = conStock;
+    criterio = 'mas_barato_con_stock';
+  } else if (desconocido.length > 0) {
+    candidatas = desconocido;
+    criterio = 'stock_desconocido';
+  } else {
+    candidatas = ofertas;
+    criterio = 'mas_barato_sin_stock';
+  }
+
+  return { ...candidatas.reduce((a, b) => (b.precio < a.precio ? b : a)), criterio };
 }
 
 function masBarata(proveedor: string, precios: Map<string, PriceInfo>): Oferta | null {

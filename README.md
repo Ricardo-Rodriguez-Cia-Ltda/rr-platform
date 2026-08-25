@@ -7,8 +7,8 @@ Ingram Micro, cada uno con su propio catálogo y sus propias rutas. Ver
 ## Uso
 
 ```
-GET /api/price?sku=SE001MSE01
-GET /api/price?mpn=AAA-01148
+GET /api/price?sku=NT016HPQ53
+GET /api/price?mpn=2N6G5LT%23ABM
 GET /api/price?upc=885370599871
 Header requerido: x-api-key: <API_SECRET_KEY>
 ```
@@ -18,12 +18,12 @@ Respuesta 200:
 ```json
 {
   "provider": "intcomex",
-  "sku": "SE001MSE01",
-  "mpn": "AAA-01148",
-  "description": "Microsoft Access 2013 - License...",
-  "price": 103.5294,
-  "currency": "US",
-  "inStock": 203
+  "sku": "NT016HPQ53",
+  "mpn": "2N6G5LT#ABM",
+  "description": "HP ProBook 640 G8 - Notebook - Intel Core i7...",
+  "price": 1697.8246,
+  "currency": "us",
+  "inStock": 0
 }
 ```
 
