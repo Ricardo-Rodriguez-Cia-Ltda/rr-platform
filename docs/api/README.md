@@ -108,6 +108,23 @@ dos proveedores no hay diferencia.
 
 ## Formato de error
 
+> **Excepción verificada: los `502` que llegan por el túnel no traen el sobre.**
+>
+> Cloudflare reemplaza el cuerpo de toda respuesta `502` por su propia página
+> de error, en texto plano (`error code: 502`). Nuestro `{ error, detail }`
+> **no sobrevive** en ese caso. Comprobado contra producción el 2026-08-25; los
+> `404`, `409` y `503` sí pasan intactos.
+>
+> Consecuencia para el consumidor: ante un `502`, **no intentes parsear el
+> cuerpo como JSON**. El status por sí solo ya dice lo que hay que saber —falla
+> transitoria aguas arriba, se puede reintentar una vez tras unos segundos—.
+> Lo que se pierde es el detalle de cuál proveedor falló, que es diagnóstico y
+> no cambia la decisión.
+>
+> Contra el servidor local, sin túnel de por medio, el sobre llega completo.
+
+
+
 Todos los errores comparten esta forma:
 
 ```json
@@ -593,8 +610,17 @@ Opcional: `marca`, para desambiguar cuando un mismo MPN existe bajo varias.
 ```
 
 `mejor` es la oferta ganadora: **la más barata con stock**. `criterio` dice por
-qué ganó — `mas_barato_con_stock` normalmente, o `mas_barato_sin_stock` cuando
-ningún proveedor tiene existencias y el ganador no se puede entregar hoy.
+qué ganó, y son tres casos distintos:
+
+| `criterio` | Qué significa | Qué hacer |
+|---|---|---|
+| `mas_barato_con_stock` | Hay stock confirmado | Cotizar con confianza |
+| `stock_desconocido` | Nadie confirmó unidades, pero al menos uno **no informó** disponibilidad | **No es "no hay": es "no se sabe".** Confirmar con el proveedor antes de prometer entrega |
+| `mas_barato_sin_stock` | Todos informaron cero | El ganador no se puede entregar hoy |
+
+La diferencia entre los dos últimos importa: los proveedores no siempre
+reportan disponibilidad, y tratar "no lo dijo" como "no hay" haría perder
+ventas sobre producto que sí existe.
 
 `ofertas` viene completa y ordenada por precio, no solo la ganadora: sirve para
 explicar la decisión o para ofrecer el segundo lugar. Fíjate que la primera de

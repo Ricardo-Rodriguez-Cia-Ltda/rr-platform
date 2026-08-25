@@ -748,10 +748,20 @@ components:
               properties:
                 criterio:
                   type: string
-                  enum: [mas_barato_con_stock, mas_barato_sin_stock]
+                  enum: [mas_barato_con_stock, stock_desconocido, mas_barato_sin_stock]
                   description: |
-                    Por que gano esta oferta. `mas_barato_sin_stock` significa
-                    que ningun proveedor tiene existencias.
+                    Por que gano esta oferta.
+
+                    `mas_barato_con_stock`: hay stock confirmado. Es el caso
+                    normal.
+
+                    `stock_desconocido`: ningun proveedor confirmo unidades,
+                    pero al menos uno no informo disponibilidad. NO significa
+                    que no haya: significa que no se sabe. Conviene confirmar
+                    con el proveedor antes de prometer entrega.
+
+                    `mas_barato_sin_stock`: todos informaron cero. El ganador
+                    no se puede entregar hoy.
         ofertas:
           type: array
           description: Todas las ofertas, ordenadas por precio ascendente.
