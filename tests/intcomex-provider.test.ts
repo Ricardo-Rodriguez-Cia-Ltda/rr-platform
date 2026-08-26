@@ -36,7 +36,7 @@ describe('intcomex.getPrice', () => {
       mpn: 'AAA-01148',
       description: 'Microsoft Access 2013 - License - 1 PC',
       price: 103.5294,
-      currency: 'US',
+      currency: 'USD',
       inStock: 203,
     });
 

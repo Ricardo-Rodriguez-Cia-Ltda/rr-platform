@@ -22,7 +22,7 @@ Respuesta 200:
   "mpn": "2N6G5LT#ABM",
   "description": "HP ProBook 640 G8 - Notebook - Intel Core i7...",
   "price": 1697.8246,
-  "currency": "us",
+  "currency": "USD",
   "inStock": 0
 }
 ```

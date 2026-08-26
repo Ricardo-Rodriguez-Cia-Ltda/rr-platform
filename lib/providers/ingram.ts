@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { fetchConTimeout } from '../http.js';
+import { normalizarMoneda } from '../moneda.js';
 import type { ProductoNormalizado } from '../producto.js';
 import type { PriceInfo, PriceQuery, PriceResult, Proveedor } from '../types.js';
 import { ProviderError } from '../types.js';
@@ -352,7 +353,7 @@ function aPrecio(item: ItemPrecioIngram): PriceInfo | null {
   if (valor == null) return null;
   return {
     price: valor,
-    currency: item.pricing?.currencyCode ?? 'USD',
+    currency: normalizarMoneda(item.pricing?.currencyCode),
     inStock: aStock(item.availability),
   };
 }

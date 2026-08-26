@@ -32,8 +32,9 @@ describe('getPrices', () => {
     expect(url.searchParams.get('includePriceData')).toBe('true');
     expect(url.searchParams.get('includeInventoryData')).toBe('true');
 
-    expect(prices.get('A1')).toEqual({ price: 10.5, currency: 'us', inStock: 3 });
-    expect(prices.get('B2')).toEqual({ price: 20, currency: 'us', inStock: 0 });
+    // Intcomex manda 'us'; nosotros exponemos ISO 4217, igual que los otros dos.
+    expect(prices.get('A1')).toEqual({ price: 10.5, currency: 'USD', inStock: 3 });
+    expect(prices.get('B2')).toEqual({ price: 20, currency: 'USD', inStock: 0 });
     // Sin precio: no aparece en el Map.
     expect(prices.has('C3')).toBe(false);
   });

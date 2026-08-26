@@ -106,6 +106,13 @@ una foto periódica. **Si vas a comprometer un precio de Tecnoglobal con un
 cliente, confírmalo con `/product`**, que sí consulta en vivo. Para los otros
 dos proveedores no hay diferencia.
 
+> **Moneda.** Todos los precios vienen en `USD`, en ISO 4217 de tres letras.
+> Cada proveedor la escribe a su manera —Intcomex manda `us`— y la API la
+> normaliza antes de responder, así que una misma respuesta nunca trae dos
+> etiquetas para la misma moneda. Si alguna vez aparece un código distinto de
+> `USD`, es real: ese proveedor cambió de moneda y **los precios dejan de ser
+> comparables entre sí**.
+
 ## Formato de error
 
 > **Excepción verificada: los `502` que llegan por el túnel no traen el sobre.**
@@ -174,7 +181,7 @@ precio y stock reales.
 | `q` | string | **sí** | — | Texto libre. Debe contener al menos un token alfanumérico. |
 | `marca` | string | no | — | Filtro **exacto** (ignora tildes y mayúsculas). Debe ser un valor real del catálogo. |
 | `categoria` | string | no | — | Filtro **exacto**, mismas reglas que `marca`. |
-| `precio_max` | número | no | ∞ | Tope de **costo** en la moneda del catálogo (USD). Debe ser > 0. |
+| `precio_max` | número | no | ∞ | Tope de **costo** en USD. Debe ser > 0. |
 | `solo_con_stock` | `"true"` | no | `false` | Solo el literal `true` activa el filtro; cualquier otro valor lo deja apagado. |
 | `limite` | entero | no | `10` | Cuántos productos devolver. Entero ≥ 0. |
 
@@ -397,7 +404,7 @@ Opcional: `provider` (default `intcomex`; hoy es el único valor válido, otro d
   "mpn": "AAA-01148",
   "description": "Microsoft Access 2013 - License",
   "price": 103.5294,
-  "currency": "US",
+  "currency": "USD",
   "inStock": 203
 }
 ```
