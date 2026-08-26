@@ -103,18 +103,28 @@ async function handler(request, env) {
       "Pago del cliente: contado."
     ].join("\n");
 
-    const respuesta = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from,
-        to: [destino],
-        subject: `OC ${poId} · ${proveedor.toUpperCase()} · cotización ${quote.quote_id}`,
-        html,
-        text: texto
-      })
-    });
-    const cuerpo = await respuesta.json().catch(() => ({}));
+    let respuesta;
+    let cuerpo = {};
+    try {
+      respuesta = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from,
+          to: [destino],
+          subject: `OC ${poId} · ${proveedor.toUpperCase()} · cotización ${quote.quote_id}`,
+          html,
+          text: texto
+        })
+      });
+      cuerpo = await respuesta.json().catch(() => ({}));
+    } catch (err) {
+      const mensaje = err instanceof Error ? err.message : "Error desconocido en fetch";
+      await env.DB.prepare("UPDATE purchase_orders SET status = 'failed', error = ?, updated_at = ? WHERE order_key = ?")
+        .bind(mensaje, new Date().toISOString(), orderKey).run();
+      resultados.push({ proveedor, po_id: poId, status: "failed", lineas: lineas.length, total_usd: totalUsd });
+      continue;
+    }
 
     if (!respuesta.ok) {
       await env.DB.prepare("UPDATE purchase_orders SET status = 'failed', error = ?, updated_at = ? WHERE order_key = ?")

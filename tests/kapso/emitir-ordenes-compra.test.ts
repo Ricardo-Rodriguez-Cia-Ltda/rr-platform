@@ -151,4 +151,25 @@ describe('emitir-ordenes-compra', () => {
     const res = await handler(peticion({ execution_context: { vars: { quote_confirmed: true } } }), env());
     expect(res.status).toBe(400);
   });
+
+  it('un fetch lanzado no impide el otro y es reintentable', async () => {
+    let llamada = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      llamada += 1;
+      if (llamada === 1) throw new Error('Network timeout');
+      return new Response(JSON.stringify({ id: 'email-3' }), { status: 200 });
+    }));
+    const res = await handler(peticion({ execution_context: { vars: vars() } }), env());
+    const datos = await res.json() as any;
+    expect(datos.vars.purchase_orders_ok).toBe(false);
+    let estados = datos.vars.purchase_orders_result.map((o: { status: string }) => o.status).sort();
+    expect(estados).toEqual(['failed', 'sent']);
+
+    // Reintentar con el mismo entorno: el que falló debe intentarse de nuevo, no tratarse como duplicado
+    llamada = 0;
+    const res2 = await handler(peticion({ execution_context: { vars: vars() } }), env());
+    const datos2 = await res2.json() as any;
+    estados = datos2.vars.purchase_orders_result.map((o: { status: string }) => o.status).sort();
+    expect(estados).toEqual(['failed', 'sent']);
+  });
 });
