@@ -6,12 +6,14 @@ import { describe, expect, it } from 'vitest';
 // prompts-rayo/ quedaron un v-02 marcado "vigente" y un v-03 sin estado, y no
 // hay forma de saber cual corria. Esto verifica el formato, no la prosa.
 
-const RAIZ = 'docs/kapso/prompts';
+const RAICES = ['docs/kapso/prompts', 'docs/kapso/prompts-v2'];
 const ESTADOS = ['vigente', 'reemplazado', 'borrador'];
 
-const AGENTES = readdirSync(RAIZ, { withFileTypes: true })
-  .filter((e) => e.isDirectory())
-  .map((e) => e.name);
+const AGENTES = RAICES.flatMap((raiz) =>
+  readdirSync(raiz, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => `${raiz}/${e.name}`)
+);
 
 interface Version {
   archivo: string;
@@ -19,11 +21,11 @@ interface Version {
 }
 
 function versionesDe(agente: string): Version[] {
-  return readdirSync(`${RAIZ}/${agente}`)
+  return readdirSync(agente)
     .filter((n) => /^v-\d+\.md$/.test(n))
     .map((archivo) => ({
       archivo: `${agente}/${archivo}`,
-      contenido: readFileSync(`${RAIZ}/${agente}/${archivo}`, 'utf8'),
+      contenido: readFileSync(`${agente}/${archivo}`, 'utf8'),
     }));
 }
 
@@ -45,9 +47,11 @@ describe('estructura de docs/kapso/prompts', () => {
   });
 
   it('el README indexa cada directorio de agente', () => {
-    const readme = readFileSync(`${RAIZ}/README.md`, 'utf8');
     for (const agente of AGENTES) {
-      expect(readme, `falta ${agente} en el indice`).toContain(`${agente}/`);
+      const raiz = agente.slice(0, agente.lastIndexOf('/'));
+      const nombre = agente.slice(agente.lastIndexOf('/') + 1);
+      const readme = readFileSync(`${raiz}/README.md`, 'utf8');
+      expect(readme, `falta ${nombre} en el indice de ${raiz}`).toContain(`${nombre}/`);
     }
   });
 });
