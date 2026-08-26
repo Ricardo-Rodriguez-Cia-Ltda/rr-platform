@@ -1,0 +1,27 @@
+{
+  "total": 2,
+  "evaluados": 2,
+  "productos": [
+    {
+      "sku": "AR155EPS14",
+      "mpn": "ERC-38B",
+      "nombre": "Cinta Epson ERC-38B negra",
+      "marca": "Epson",
+      "categoria": "Suministros",
+      "precio": 11.0,
+      "moneda": "US",
+      "stock": 14
+    },
+    {
+      "sku": "AR155EPS15",
+      "mpn": "ERC-30B",
+      "nombre": "Cinta Epson ERC-30B negra",
+      "marca": "Epson",
+      "categoria": "Suministros",
+      "precio": 9.5,
+      "moneda": "US",
+      "stock": 0
+    }
+  ],
+  "facetas": { "marca": [], "categoria": [], "precio": { "min": 9.5, "max": 11.0 } }
+}
