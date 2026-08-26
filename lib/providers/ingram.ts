@@ -58,7 +58,12 @@ let token: TokenVigente | null = null;
 // una: la primera comparte su promesa con el resto.
 let tokenEnCurso: Promise<TokenVigente> | null = null;
 
-export function _resetTokenParaTests(): void {
+/**
+ * Descarta el token cacheado.
+ *
+ * La usan el reintento ante 401 y los tests: no es un helper de pruebas.
+ */
+export function olvidarToken(): void {
   token = null;
   tokenEnCurso = null;
 }
@@ -163,19 +168,38 @@ export async function fetchIngram(
     url.searchParams.set(clave, valor);
   }
 
-  const headers = cabeceras(await obtenerToken());
-  const init: RequestInit = { headers };
-  if (opciones.body !== undefined) {
-    init.method = 'POST';
-    init.body = JSON.stringify(opciones.body);
-    headers['content-type'] = 'application/json';
+  async function pedir(): Promise<Response> {
+    const headers = cabeceras(await obtenerToken());
+    const init: RequestInit = { headers };
+    if (opciones.body !== undefined) {
+      init.method = 'POST';
+      init.body = JSON.stringify(opciones.body);
+      headers['content-type'] = 'application/json';
+    }
+
+    try {
+      return await fetchConTimeout(url, init);
+    } catch {
+      throw new ProviderError('upstream', 'Could not reach Ingram');
+    }
   }
 
-  try {
-    return await fetchConTimeout(url, init);
-  } catch {
-    throw new ProviderError('upstream', 'Could not reach Ingram');
-  }
+  const respuesta = await pedir();
+
+  // Un 401 con un token que todavia creemos vigente significa que Ingram lo
+  // invalido antes de su `expires_in` —pasa, por ejemplo, cuando se emite otro
+  // token para el mismo cliente—. Sin este reintento el proceso sigue usando
+  // el token muerto hasta que el reloj diga que vencio: visto en produccion,
+  // 24 horas con Ingram fuera de toda comparacion y sin mas rastro que un 401
+  // repetido en el log.
+  //
+  // Se reintenta una sola vez: si el token recien pedido tambien da 401, el
+  // problema son las credenciales y insistir no lo arregla.
+  if (respuesta.status !== 401) return respuesta;
+
+  console.error('[ingram] 401 con el token cacheado; se pide uno nuevo y se reintenta');
+  olvidarToken();
+  return pedir();
 }
 
 async function leerJson<T>(response: Response, contexto: string): Promise<T> {
