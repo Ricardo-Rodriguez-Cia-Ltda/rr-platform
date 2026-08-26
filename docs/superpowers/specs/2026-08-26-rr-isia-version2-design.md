@@ -17,7 +17,7 @@ Además, hoy el flujo termina en un correo interno con la cotización. No emite 
 
 - Workflow nuevo en Kapso llamado `rr-isia-version2`, independiente de `Rayo Perez` (que queda intacto y activo).
 - Cuatro nodos de agente: descubrimiento, presentación, facturación, cierre.
-- Functions nuevas: `buscar-productos-v2`, `generar-cotizacion-v2`, `check-quote-validity-v2`, `route-quote-decision-v2`, `emitir-ordenes-compra`.
+- Functions nuevas: `buscar-productos-v2`, `generar-cotizacion-v2`, `check-quote-validity-v2`, `route-quote-decision-v2`, `route-rut-v2`, `emitir-ordenes-compra`.
 - Margen de venta **13%** (`MARGEN=0.13` en los secretos de las functions nuevas).
 - Emisión de órdenes de compra agrupadas por mayorista, por correo interno, idempotentes.
 - Prompts versionados en el repositorio, con el mismo formato que los de v1.
@@ -113,7 +113,7 @@ start
 | `route_decision` | decide | `route-quote-decision-v2`: `accepted` / `rejected` |
 | `agente_facturacion` | agent | RUT y datos tributarios. Sin método de pago |
 | `fn_validar_rut` | function | `validar-rut` (reutilizada de v1) |
-| `route_rut` | decide | `route-rut` (reutilizada): `valid` / `invalid` |
+| `route_rut` | decide | `route-rut-v2`: `valid` / `invalid` |
 | `fn_check_validity` | decide | `check-quote-validity-v2`: `valid` / `expired` |
 | `agente_cierre` | agent | Resumen final y confirmación explícita |
 | `fn_emitir_ordenes` | function | `emitir-ordenes-compra` |
@@ -210,6 +210,12 @@ Decide sobre `quote_result.valid_until`: `valid` si `Date.now() < valid_until`, 
 ### `route-quote-decision-v2`
 
 Decide sobre `quote_decision`: `accepted` / `rejected`. Cualquier otro valor rutea a `rejected` (volver a descubrimiento es recuperable; emitir órdenes no).
+
+### `route-rut-v2`
+
+Decide sobre `rut_valid` (la escribe `validar-rut`): `valid` solo si es exactamente `true`, `invalid` en cualquier otro caso, incluido que no exista.
+
+**No se puede reutilizar el `route-rut` de v1.** Ese devuelve `valid` salvo que `factura === true` *y* `rut_valid !== true`; como v2 nunca setea `factura`, dejaría pasar cualquier RUT inválido. `validar-rut` sí se reutiliza tal cual: es pura y ya está desplegada.
 
 ### `emitir-ordenes-compra`
 
