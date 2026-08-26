@@ -159,17 +159,21 @@ describe('emitir-ordenes-compra', () => {
       if (llamada === 1) throw new Error('Network timeout');
       return new Response(JSON.stringify({ id: 'email-3' }), { status: 200 });
     }));
-    const res = await handler(peticion({ execution_context: { vars: vars() } }), env());
+    const entorno = env();
+    const res = await handler(peticion({ execution_context: { vars: vars() } }), entorno);
     const datos = await res.json() as any;
     expect(datos.vars.purchase_orders_ok).toBe(false);
-    let estados = datos.vars.purchase_orders_result.map((o: { status: string }) => o.status).sort();
-    expect(estados).toEqual(['failed', 'sent']);
+    let resultados = datos.vars.purchase_orders_result;
+    expect(resultados.some((o: { proveedor: string; status: string }) => o.proveedor === 'ingram' && o.status === 'failed')).toBe(true);
+    expect(resultados.some((o: { proveedor: string; status: string }) => o.proveedor === 'tecnoglobal' && o.status === 'sent')).toBe(true);
 
-    // Reintentar con el mismo entorno: el que falló debe intentarse de nuevo, no tratarse como duplicado
-    llamada = 0;
-    const res2 = await handler(peticion({ execution_context: { vars: vars() } }), env());
+    // Reintentar con el MISMO entorno: ingram (que estaba failed) se reintenta y queda sent;
+    // tecnoglobal (que estaba sent) queda duplicate
+    // (NO reiniciar llamada: el contador persiste, así ingram en la segunda invocación no lanza)
+    const res2 = await handler(peticion({ execution_context: { vars: vars() } }), entorno);
     const datos2 = await res2.json() as any;
-    estados = datos2.vars.purchase_orders_result.map((o: { status: string }) => o.status).sort();
-    expect(estados).toEqual(['failed', 'sent']);
+    resultados = datos2.vars.purchase_orders_result;
+    expect(resultados.some((o: { proveedor: string; status: string }) => o.proveedor === 'ingram' && o.status === 'sent')).toBe(true);
+    expect(resultados.some((o: { proveedor: string; status: string }) => o.proveedor === 'tecnoglobal' && o.status === 'duplicate')).toBe(true);
   });
 });
