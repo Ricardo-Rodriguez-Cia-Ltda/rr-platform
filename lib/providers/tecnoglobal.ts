@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { fetchConTimeout } from '../http.js';
+import { normalizarMoneda } from '../moneda.js';
 import type { ProductoNormalizado } from '../producto.js';
 import type { PriceInfo, PriceQuery, PriceResult, Proveedor } from '../types.js';
 import { ProviderError } from '../types.js';
@@ -173,7 +174,7 @@ function aPrecio(crudo: ProductoTecnoglobal): PriceInfo | null {
   if (crudo.precio == null) return null;
   return {
     price: crudo.precio,
-    currency: crudo.tipoMoneda ?? 'USD',
+    currency: normalizarMoneda(crudo.tipoMoneda),
     inStock: crudo.stockDisp ?? null,
   };
 }

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { fetchConTimeout } from '../http.js';
+import { normalizarMoneda } from '../moneda.js';
 import type { PriceInfo, PriceQuery, PriceResult, Proveedor } from '../types.js';
 import { ProviderError } from '../types.js';
 import type { ProductoNormalizado } from '../producto.js';
@@ -99,7 +100,7 @@ export async function getPrice(query: PriceQuery): Promise<PriceResult> {
     mpn: product.Mpn ?? null,
     description: product.Description ?? null,
     price: product.Price.UnitPrice,
-    currency: product.Price.CurrencyId ?? 'USD',
+    currency: normalizarMoneda(product.Price.CurrencyId),
     inStock: product.InStock ?? null,
   };
 }
@@ -142,7 +143,7 @@ export async function getPrices(skus: string[]): Promise<Map<string, PriceInfo>>
     if (!item.Sku || item.Price?.UnitPrice == null) continue;
     prices.set(item.Sku, {
       price: item.Price.UnitPrice,
-      currency: item.Price.CurrencyId ?? 'USD',
+      currency: normalizarMoneda(item.Price.CurrencyId),
       inStock: item.InStock ?? null,
     });
   }
