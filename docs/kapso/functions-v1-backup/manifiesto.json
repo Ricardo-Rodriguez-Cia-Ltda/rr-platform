@@ -1,0 +1,114 @@
+[
+  {
+    "nombre": "check-quote-validity",
+    "id": "551e4cc8-6c46-4b76-a527-9bc76700b7e5",
+    "slug": "check-quote-validity",
+    "estado": "draft",
+    "tipo": "cloudflare_worker",
+    "secretos_declarados": null
+  },
+  {
+    "nombre": "route-rejection",
+    "id": "8d2d1549-dafd-428e-82d7-2490aa34d4db",
+    "slug": "route-rejection",
+    "estado": "draft",
+    "tipo": "cloudflare_worker",
+    "secretos_declarados": null
+  },
+  {
+    "nombre": "generar-cotizacion",
+    "id": "70e3fb47-3227-4ef4-a4ac-bc418f4a67bf",
+    "slug": "generar-cotizacion",
+    "estado": "deployed",
+    "tipo": "cloudflare_worker",
+    "secretos_declarados": null
+  },
+  {
+    "nombre": "detalle-producto",
+    "id": "f41a0e53-9c25-47e3-ba51-10e0043273dd",
+    "slug": "detalle-producto",
+    "estado": "deployed",
+    "tipo": "cloudflare_worker",
+    "secretos_declarados": null
+  },
+  {
+    "nombre": "route-quote-decision",
+    "id": "d14db6eb-e5c0-481c-87cd-6ffbabc49a2a",
+    "slug": "route-quote-decision",
+    "estado": "draft",
+    "tipo": "cloudflare_worker",
+    "secretos_declarados": null
+  },
+  {
+    "nombre": "validar-rut",
+    "id": "68eff91b-3be5-4dfa-bf5e-7f20b7eefed3",
+    "slug": "validar-rut",
+    "estado": "deployed",
+    "tipo": "cloudflare_worker",
+    "secretos_declarados": null
+  },
+  {
+    "nombre": "route-payment-method",
+    "id": "1b33c0d7-eb84-43e0-8531-18f7013e9778",
+    "slug": "route-payment-method",
+    "estado": "draft",
+    "tipo": "cloudflare_worker",
+    "secretos_declarados": null
+  },
+  {
+    "nombre": "buscar-productos",
+    "id": "77f22884-3211-417e-967c-5adff2f9fb5c",
+    "slug": "buscar-productos-v2",
+    "estado": "deployed",
+    "tipo": "cloudflare_worker",
+    "secretos_declarados": null
+  },
+  {
+    "nombre": "route-credit-result",
+    "id": "178555ef-6dd6-4bd3-9894-ab96d0561f26",
+    "slug": "route-credit-result",
+    "estado": "draft",
+    "tipo": "cloudflare_worker",
+    "secretos_declarados": null
+  },
+  {
+    "nombre": "notify-pending-quote",
+    "id": "435d3c23-6025-41ca-8f0d-7395475085ae",
+    "slug": "notify-pending-quote",
+    "estado": "draft",
+    "tipo": "cloudflare_worker",
+    "secretos_declarados": null
+  },
+  {
+    "nombre": "route-rut",
+    "id": "6af2915d-ddfa-4dd8-9689-212d3f8d32a1",
+    "slug": "route-rut",
+    "estado": "draft",
+    "tipo": "cloudflare_worker",
+    "secretos_declarados": null
+  },
+  {
+    "nombre": "route-partial-credit",
+    "id": "b53afab3-2b6b-4f2a-90ce-f0c5412dd0d0",
+    "slug": "route-partial-credit",
+    "estado": "draft",
+    "tipo": "cloudflare_worker",
+    "secretos_declarados": null
+  },
+  {
+    "nombre": "chequear-credito",
+    "id": "0fde19b8-95d8-4029-bd2c-cadac7931398",
+    "slug": "chequear-credito",
+    "estado": "draft",
+    "tipo": "cloudflare_worker",
+    "secretos_declarados": null
+  },
+  {
+    "nombre": "send-quote-request-email",
+    "id": "c7d9db04-a389-4db6-8319-ac8c46d28e00",
+    "slug": "send-quote-request-email",
+    "estado": "deployed",
+    "tipo": "cloudflare_worker",
+    "secretos_declarados": null
+  }
+]
