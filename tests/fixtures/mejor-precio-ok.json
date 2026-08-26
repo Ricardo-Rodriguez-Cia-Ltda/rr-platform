@@ -1,0 +1,13 @@
+{
+  "clave": "ERC38B|EPSON",
+  "mpn": "ERC-38B",
+  "marca": "Epson",
+  "nombre": "Cinta Epson ERC-38B negra",
+  "mejor": { "proveedor": "ingram", "sku": "ING-778", "precio": 11.0, "moneda": "USD", "stock": 25, "criterio": "mas_barato_con_stock" },
+  "ofertas": [
+    { "proveedor": "ingram", "sku": "ING-778", "precio": 11.0, "moneda": "USD", "stock": 25 },
+    { "proveedor": "intcomex", "sku": "AR155EPS14", "precio": 12.5, "moneda": "USD", "stock": 14 },
+    { "proveedor": "tecnoglobal", "sku": "TG-9001", "precio": 13.0, "moneda": "USD", "stock": 3 }
+  ],
+  "incompleta": []
+}
