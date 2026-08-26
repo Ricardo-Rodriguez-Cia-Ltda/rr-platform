@@ -668,7 +668,7 @@ git commit -m "feat(kapso-v2): cotizacion con mejor precio entre los tres mayori
 
 **Interfaces:**
 - Consumes: `quote_result` con la forma que produce Task 2; `cargarHandler`, `peticion` de Task 1.
-- Produces: variables `purchase_orders_result` (arreglo de `{ proveedor, po_id, status, lineas, total_usd }`), `purchase_orders_count` (entero) y `purchase_orders_ok` (booleano). Task 7 las referencia en el prompt de cierre y en el mensaje final.
+- Produces: variables `purchase_orders_result` (arreglo de `{ proveedor, po_id, status, lineas, total_usd }`), `purchase_orders_count` (entero) y `purchase_orders_ok` (booleano). Ningún nodo aguas abajo las consume: el mensaje de confirmación es texto fijo. Existen para poder diagnosticar una emisión fallida desde el historial de ejecución de Kapso.
 
 - [ ] **Step 1: Escribir las pruebas que fallan**
 
@@ -1642,6 +1642,7 @@ const VALORES: Record<string, string> = {
 async function main() {
   const { data: existentes } = await kapso<{ data: Funcion[] }>('/functions');
   const ids: Record<string, string> = {};
+  const pendientes: string[] = [];
 
   for (const { nombre, secretos } of FUNCIONES) {
     const codigo = readFileSync(`docs/kapso/functions-v2/${nombre}.js`, 'utf8');
@@ -1663,7 +1664,10 @@ async function main() {
 
     for (const secreto of secretos) {
       const valor = VALORES[secreto];
-      if (!valor) throw new Error(`Falta el valor de ${secreto} para ${nombre}. Revisa .env.local.`);
+      // RESEND_API_KEY y RESEND_FROM_EMAIL no viven en .env.local, y la API de
+      // Kapso solo lista los nombres de los secretos de v1, nunca sus valores.
+      // Se avisa y se sigue: abortar dejaria el despliegue a medias.
+      if (!valor) { pendientes.push(`${nombre}: ${secreto}`); continue; }
       await kapso(`/functions/${id}/secrets`, { metodo: 'POST', cuerpo: { secret: { name: secreto, value: valor } } })
         .catch((error: Error) => {
           // Un secreto que ya existe no es un fallo: se deja el valor vigente.
@@ -1678,6 +1682,12 @@ async function main() {
 
   console.log('\nfunction_id por nombre:');
   console.log(JSON.stringify(ids, null, 2));
+
+  if (pendientes.length > 0) {
+    console.log('
+SECRETOS PENDIENTES (cargar en Kapso antes de emitir ordenes):');
+    for (const pendiente of pendientes) console.log(`  - ${pendiente}`);
+  }
 }
 
 main().catch((error) => { console.error(error.message); process.exit(1); });
@@ -1701,6 +1711,8 @@ Expected: sin errores.
 
 Run: `npm run kapso:functions`
 Expected: seis líneas `creada` + `desplegada`, y el mapa de `function_id`. **Guarda ese mapa**: Task 7 lo necesita.
+
+Es esperable que el script liste `RESEND_API_KEY` y `RESEND_FROM_EMAIL` como pendientes: no están en `.env.local`, y la API de Kapso solo expone los nombres de los secretos que ya usa v1, nunca sus valores. Cárgalos a mano en Kapso → Functions → `emitir-ordenes-compra` → Secrets, o expórtalos en el shell y vuelve a correr el script. Sin ellos la emisión responde 500, y el smoke test de Task 8 lo detecta.
 
 Verificación de que v1 no se tocó:
 
@@ -2044,7 +2056,9 @@ Expected: `purchase_orders_count: 2`, ambas con `status: "sent"`, y **dos correo
 
 Repetir el mismo `curl`: la segunda vez no debe llegar ningún correo y las dos órdenes vienen con `status: "duplicate"`.
 
-- [ ] **Step 4: Activar el workflow**
+- [ ] **Step 4: Dejar documentado el PATCH de activación, sin ejecutarlo**
+
+**No actives el workflow.** `Rayo Perez` está activo sobre el mismo número de WhatsApp, y decidir si conviven dos workflows activos es una decisión de operación, no de implementación. Deja `rr-isia-version2` en `draft` y documenta en `README-v2.md` el comando exacto para activarlo:
 
 ```bash
 LOCK=$(curl -s -H "X-API-Key: $KAPSO_API_KEY" "https://api.kapso.ai/platform/v1/workflows/<uuid>" \
