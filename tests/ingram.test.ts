@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
-  _resetTokenParaTests,
+  olvidarToken,
   cargarCatalogoIngram,
   getPrice,
   getPrices,
@@ -46,7 +46,7 @@ beforeEach(() => {
   vi.stubEnv('INGRAM_TOKEN_URL', 'https://ingram.test/oauth/oauth30/token');
   // Sin pausa entre paginas: el ritmo real se verifica aparte.
   vi.stubEnv('INGRAM_MS_ENTRE_PAGINAS', '0');
-  _resetTokenParaTests();
+  olvidarToken();
 });
 
 afterEach(() => {
@@ -455,5 +455,63 @@ describe('getPrice', () => {
     vi.stubGlobal('fetch', conToken(new Response('boom', { status: 500 })));
 
     await expect(getPrice({ sku: 'A1' })).rejects.toThrow(ProviderError);
+  });
+});
+
+// Visto en produccion: el proceso llevaba ~24 h y Ingram devolvia 401 en todas
+// las llamadas, incluido el refresco de catalogo, mientras un proceso nuevo
+// funcionaba perfecto. El token cacheado estaba muerto antes de su expires_in
+// —Ingram lo invalida, por ejemplo, al emitir otro para el mismo cliente— y
+// nada lo renovaba: Ingram quedaba fuera de toda comparacion, en silencio.
+describe('token invalidado antes de tiempo', () => {
+  it('ante un 401 pide un token nuevo y reintenta una vez', async () => {
+    let tokensEmitidos = 0;
+    const fetchMock = vi.fn(async (url: unknown, init?: RequestInit) => {
+      if (String(url).includes('/token')) {
+        tokensEmitidos += 1;
+        return json({ access_token: `token-${tokensEmitidos}`, expires_in: '86400' });
+      }
+      // El primer token esta muerto; el segundo sirve.
+      const cabeceras = init?.headers as Record<string, string> | undefined;
+      return cabeceras?.Authorization === 'Bearer token-1'
+        ? json({ error: 'unauthorized' }, 401)
+        : json(PRECIOS);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const precios = await getPrices(['4A0036']);
+
+    expect(precios.get('4A0036')).toBeDefined();
+    expect(tokensEmitidos).toBe(2);
+    errorSpy.mockRestore();
+  });
+
+  // Si el token recien pedido tambien da 401, el problema son las credenciales
+  // y reintentar en bucle solo esconde el error.
+  it('no reintenta mas de una vez', async () => {
+    let tokensEmitidos = 0;
+    const fetchMock = vi.fn(async (url: unknown) => {
+      if (String(url).includes('/token')) {
+        tokensEmitidos += 1;
+        return json({ access_token: `token-${tokensEmitidos}`, expires_in: '86400' });
+      }
+      return json({ error: 'unauthorized' }, 401);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await expect(getPrices(['4A0036'])).rejects.toThrow(ProviderError);
+    expect(tokensEmitidos).toBe(2);
+    errorSpy.mockRestore();
+  });
+
+  it('una respuesta normal no dispara ningun token extra', async () => {
+    const fetchMock = conToken(json(PRECIOS));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getPrices(['4A0036']);
+
+    expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('/token'))).toHaveLength(1);
   });
 });
