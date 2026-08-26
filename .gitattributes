@@ -1,0 +1,14 @@
+# El repo guarda todo con LF y el arbol de trabajo tambien lo usa.
+#
+# Sin esto, `core.autocrlf=true` —el default de Git para Windows— convierte los
+# archivos a CRLF al hacer checkout. tests/docs.test.ts compara la
+# documentacion contra el codigo con expresiones regulares ancladas en \n, asi
+# que en un clon nuevo en Windows fallaba entero: la red que evita que la doc
+# que lee el agente se desactualice quedaba caida sin que nadie lo notara.
+* text=auto eol=lf
+
+# Binarios: que Git no toque su contenido.
+*.pdf binary
+*.png binary
+*.jpg binary
+*.ico binary

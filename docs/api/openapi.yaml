@@ -292,24 +292,29 @@ paths:
           description: Part number del fabricante. Excluyente con proveedor+sku.
           schema:
             type: string
+          example: ERC-38B
         - name: proveedor
           in: query
           required: false
           description: Proveedor que identifica el producto con `sku`. Va junto con `sku`.
           schema:
             $ref: '#/components/schemas/NombreProveedor'
+          example: intcomex
         - name: sku
           in: query
           required: false
           description: SKU del proveedor indicado. Va junto con `proveedor`.
           schema:
             type: string
+          example: AR155EPS14
         - name: marca
           in: query
           required: false
           description: Desambigua cuando el mismo MPN existe bajo varias marcas.
           schema:
             type: string
+          example: Epson
+
       responses:
         '200':
           description: Comparacion resuelta (puede ser parcial, ver incompleta)
