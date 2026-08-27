@@ -1,5 +1,10 @@
 const DESTINO_DEFAULT = "pyxis.latam@gmail.com";
 
+// Una fila que quedo en 'processing' mas tiempo que esto es una corrida que se
+// murio entre el INSERT y el UPDATE terminal (limite de CPU, reintento del
+// nodo). No es un duplicado: es una orden que nunca se mando.
+const ABANDONO_MS = 10 * 60 * 1000;
+
 function json(payload, status = 200) {
   return new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
 }
@@ -15,9 +20,23 @@ async function handler(request, env) {
   const vars = body.execution_context?.vars || {};
   const quote = vars.quote_result?.quote || vars.quote_result || null;
 
-  if (vars.quote_confirmed !== true) return json({ ok: false, error: "El cliente no ha confirmado la orden." }, 400);
+  // `quote_confirmed` la escribe el LLM con save_variable, asi que puede llegar
+  // como booleano o como la cadena "true". Cualquier otra cosa no es un si.
+  const confirmado = vars.quote_confirmed === true
+    || String(vars.quote_confirmed ?? "").trim().toLowerCase() === "true";
+
+  if (!confirmado) return json({ ok: false, error: "El cliente no ha confirmado la orden." }, 400);
   if (!quote || !Array.isArray(quote.lineas) || quote.lineas.length === 0 || !quote.quote_id) {
     return json({ ok: false, error: "Falta la cotización estructurada." }, 400);
+  }
+
+  // El unico chequeo de vigencia del grafo (fn_check_validity) corre ANTES de
+  // agente_cierre, que es una conversacion de WhatsApp sin limite de tiempo. Si
+  // el cliente confirma cuatro horas despues, las ordenes irian contra precios
+  // vencidos: se revisa aca, que es el ultimo punto antes de emitir.
+  const vigenteHasta = Date.parse(String(quote.valid_until || vars.quote_valid_until || ""));
+  if (!Number.isFinite(vigenteHasta) || Date.now() >= vigenteHasta) {
+    return json({ ok: false, error: "La cotización expiró; debe recalcularse." }, 409);
   }
 
   const margen = Number(env.MARGEN ?? "0.13");
@@ -25,7 +44,9 @@ async function handler(request, env) {
   const from = env.RESEND_FROM_EMAIL;
   const destino = String(env.OC_EMAIL_DESTINO || DESTINO_DEFAULT);
 
-  if (!Number.isFinite(margen) || margen < 0) return json({ ok: false, error: "Margen mal configurado." }, 500);
+  // Mayor que cero: un secreto MARGEN vacio coacciona a 0 y dejaria el costo
+  // reconstruido igual al precio de venta.
+  if (!Number.isFinite(margen) || margen <= 0) return json({ ok: false, error: "Margen mal configurado." }, 500);
   if (!apiKey || !from) return json({ ok: false, error: "Faltan RESEND_API_KEY o RESEND_FROM_EMAIL." }, 500);
   if (!env.DB) return json({ ok: false, error: "Falta la base D1 para idempotencia." }, 500);
 
@@ -56,21 +77,40 @@ async function handler(request, env) {
     const poId = `oc-${orderKey.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
     const ahora = new Date().toISOString();
 
-    let duplicada = false;
+    let saltar = false;
     try {
       await env.DB.prepare(
         "INSERT INTO purchase_orders (order_key, po_id, quote_id, quote_version, proveedor, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'processing', ?, ?)"
       ).bind(orderKey, poId, String(quote.quote_id), version, proveedor, ahora, ahora).run();
     } catch (_) {
-      const existente = await env.DB.prepare("SELECT po_id, status FROM purchase_orders WHERE order_key = ? LIMIT 1").bind(orderKey).first();
-      if (existente && existente.status !== "failed") {
-        resultados.push({ proveedor, po_id: String(existente.po_id || poId), status: "duplicate", lineas: lineas.length, total_usd: null });
-        duplicada = true;
+      const existente = await env.DB.prepare("SELECT po_id, status, updated_at FROM purchase_orders WHERE order_key = ? LIMIT 1").bind(orderKey).first();
+
+      if (!existente) {
+        // El INSERT fallo y ademas no hay fila: no fue un choque de clave, fue
+        // D1 caida, bloqueada o sin espacio. Sin fila persistida la
+        // idempotencia no existe, y cada reintento reenviaria esta misma orden
+        // al mayorista. Se aborta esta orden; las demas siguen.
+        resultados.push({ proveedor, po_id: poId, status: "failed", lineas: lineas.length });
+        saltar = true;
       } else {
-        await env.DB.prepare("UPDATE purchase_orders SET status = 'processing', error = NULL, updated_at = ? WHERE order_key = ?").bind(ahora, orderKey).run();
+        const estado = String(existente.status || "");
+        const actualizado = Date.parse(String(existente.updated_at || ""));
+        // 'processing' vieja = corrida abandonada. Solo se reintenta cuando se
+        // puede probar la antiguedad: sin fecha legible, no hay evidencia de
+        // abandono y tratarla como duplicado es el error reversible.
+        const abandonada = estado === "processing"
+          && Number.isFinite(actualizado)
+          && Date.now() - actualizado > ABANDONO_MS;
+
+        if (estado !== "failed" && !abandonada) {
+          resultados.push({ proveedor, po_id: String(existente.po_id || poId), status: "duplicate", lineas: lineas.length });
+          saltar = true;
+        } else {
+          await env.DB.prepare("UPDATE purchase_orders SET status = 'processing', error = NULL, updated_at = ? WHERE order_key = ?").bind(ahora, orderKey).run();
+        }
       }
     }
-    if (duplicada) continue;
+    if (saltar) continue;
 
     const detalle = lineas.map((linea) => {
       const costoUnitario = Math.round((Number(linea.precio_unitario_usd) / (1 + margen)) * 100) / 100;
@@ -122,20 +162,20 @@ async function handler(request, env) {
       const mensaje = err instanceof Error ? err.message : "Error desconocido en fetch";
       await env.DB.prepare("UPDATE purchase_orders SET status = 'failed', error = ?, updated_at = ? WHERE order_key = ?")
         .bind(mensaje, new Date().toISOString(), orderKey).run();
-      resultados.push({ proveedor, po_id: poId, status: "failed", lineas: lineas.length, total_usd: totalUsd });
+      resultados.push({ proveedor, po_id: poId, status: "failed", lineas: lineas.length });
       continue;
     }
 
     if (!respuesta.ok) {
       await env.DB.prepare("UPDATE purchase_orders SET status = 'failed', error = ?, updated_at = ? WHERE order_key = ?")
         .bind(String(cuerpo?.message || "No se pudo enviar la orden."), new Date().toISOString(), orderKey).run();
-      resultados.push({ proveedor, po_id: poId, status: "failed", lineas: lineas.length, total_usd: totalUsd });
+      resultados.push({ proveedor, po_id: poId, status: "failed", lineas: lineas.length });
       continue;
     }
 
     await env.DB.prepare("UPDATE purchase_orders SET status = 'sent', email_id = ?, error = NULL, updated_at = ? WHERE order_key = ?")
       .bind(cuerpo.id || null, new Date().toISOString(), orderKey).run();
-    resultados.push({ proveedor, po_id: poId, status: "sent", lineas: lineas.length, total_usd: totalUsd });
+    resultados.push({ proveedor, po_id: poId, status: "sent", lineas: lineas.length });
   }
 
   const todasOk = resultados.every((r) => r.status === "sent" || r.status === "duplicate");
