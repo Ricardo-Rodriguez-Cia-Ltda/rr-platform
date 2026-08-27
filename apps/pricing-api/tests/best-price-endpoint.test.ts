@@ -8,11 +8,11 @@ const hayAlgunCatalogoMock = vi.fn();
 const catalogosNoDisponiblesMock = vi.fn();
 
 vi.mock('@rr/providers/comparator', () => ({
-  compararPorClave: (...a: unknown[]) => compararMock(...a),
-  resolverClaves: (...a: unknown[]) => resolverClavesMock(...a),
-  claveDeSku: (...a: unknown[]) => claveDeSkuMock(...a),
-  hayAlgunCatalogo: () => hayAlgunCatalogoMock(),
-  catalogosNoDisponibles: () => catalogosNoDisponiblesMock(),
+  compareByKey: (...a: unknown[]) => compararMock(...a),
+  resolveKeys: (...a: unknown[]) => resolverClavesMock(...a),
+  skuKey: (...a: unknown[]) => claveDeSkuMock(...a),
+  hasAnyCatalog: () => hayAlgunCatalogoMock(),
+  unavailableCatalogs: () => catalogosNoDisponiblesMock(),
 }));
 
 const { default: handler } = await import('../api/mejor-precio.js');

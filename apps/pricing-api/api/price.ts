@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { isAuthorized } from '../src/auth.js';
-import { PROVEEDORES } from '@rr/providers';
+import { PROVIDERS } from '@rr/providers';
 import { ProviderError } from '@rr/domain/types';
 
 function firstString(value: string | string[] | undefined): string | undefined {
@@ -32,11 +32,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   const providerName = firstString(req.query.provider) ?? 'intcomex';
-  const provider = PROVEEDORES[providerName];
+  const provider = PROVIDERS[providerName];
   if (!provider) {
     res.status(400).json({
       error: 'bad_request',
-      detail: `Unknown provider '${providerName}'. Available: ${Object.keys(PROVEEDORES).join(', ')}`,
+      detail: `Unknown provider '${providerName}'. Available: ${Object.keys(PROVIDERS).join(', ')}`,
     });
     return;
   }

@@ -1,3 +1,3 @@
-import { crearHandlerFacetasPorRuta } from '../../src/handlers/facets.js';
+import { createFacetsByRouteHandler } from '../../src/handlers/facets.js';
 
-export default crearHandlerFacetasPorRuta();
+export default createFacetsByRouteHandler();

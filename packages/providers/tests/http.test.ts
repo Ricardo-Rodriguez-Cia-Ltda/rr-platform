@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { fetchConTimeout, timeoutProveedor } from '../src/http.js';
+import { fetchWithTimeout, providerTimeout } from '../src/http.js';
 
 // Un servidor que acepta la conexion y nunca contesta: es el proveedor
 // colgado, que es distinto del proveedor caido. El caido ya estaba cubierto
@@ -27,29 +27,29 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe('timeoutProveedor', () => {
+describe('providerTimeout', () => {
   it('usa 20 segundos por defecto', () => {
-    expect(timeoutProveedor()).toBe(20_000);
+    expect(providerTimeout()).toBe(20_000);
   });
 
   it('se puede ajustar por entorno', () => {
     vi.stubEnv('PROVEEDOR_TIMEOUT_MS', '5000');
-    expect(timeoutProveedor()).toBe(5000);
+    expect(providerTimeout()).toBe(5000);
   });
 
   // Un valor invalido no debe dejar la peticion sin tope: se cae al default.
   it.each(['0', '-1', 'abc', ''])('ignora el valor invalido %s', (valor) => {
     vi.stubEnv('PROVEEDOR_TIMEOUT_MS', valor);
-    expect(timeoutProveedor()).toBe(20_000);
+    expect(providerTimeout()).toBe(20_000);
   });
 });
 
-describe('fetchConTimeout', () => {
+describe('fetchWithTimeout', () => {
   it('aborta contra un servidor que nunca responde', async () => {
     vi.stubEnv('PROVEEDOR_TIMEOUT_MS', '300');
 
     const inicio = Date.now();
-    await expect(fetchConTimeout(`${base}/cuelga`)).rejects.toThrow();
+    await expect(fetchWithTimeout(`${base}/cuelga`)).rejects.toThrow();
 
     // Lo que se verifica es que corte, no cuanto tarda exactamente.
     expect(Date.now() - inicio).toBeLessThan(5000);
@@ -60,7 +60,7 @@ describe('fetchConTimeout', () => {
     await new Promise<void>((resolve) => rapido.listen(0, '127.0.0.1', resolve));
     const puerto = (rapido.address() as AddressInfo).port;
 
-    const res = await fetchConTimeout(`http://127.0.0.1:${puerto}/`);
+    const res = await fetchWithTimeout(`http://127.0.0.1:${puerto}/`);
     expect(await res.text()).toBe('ok');
 
     rapido.closeAllConnections();

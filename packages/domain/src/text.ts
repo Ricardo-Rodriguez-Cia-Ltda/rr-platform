@@ -1,10 +1,10 @@
-export function normalizar(texto: string): string {
+export function normalize(text: string): string {
   // U+0300-U+036F = marcas diacríticas combinantes que NFD separa de la letra.
-  return texto.normalize('NFD').replace(/[\u0300-\u036F]/g, '').toLowerCase();
+  return text.normalize('NFD').replace(/[\u0300-\u036F]/g, '').toLowerCase();
 }
 
-export function tokenizar(texto: string): string[] {
-  return normalizar(texto)
+export function tokenize(text: string): string[] {
+  return normalize(text)
     .split(/[^\p{L}\p{N}]+/u)
     .filter(Boolean);
 }

@@ -1,10 +1,10 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { fetchConTimeout } from './http.js';
-import { normalizarMoneda } from '@rr/domain/currency';
-import type { ProductoNormalizado } from '@rr/domain/product';
-import type { PriceInfo, PriceQuery, PriceResult, Proveedor } from '@rr/domain/types';
+import { fetchWithTimeout } from './http.js';
+import { normalizeCurrency } from '@rr/domain/currency';
+import type { NormalizedProduct } from '@rr/domain/product';
+import type { PriceInfo, PriceQuery, PriceResult, Provider } from '@rr/domain/types';
 import { ProviderError } from '@rr/domain/types';
 
 /**
@@ -13,7 +13,7 @@ import { ProviderError } from '@rr/domain/types';
  * forma mas segura de seguir rechazados, asi que el reintento la reconoce y
  * espera mucho mas.
  */
-export const MENSAJE_CUOTA = 'exceso de llamadas';
+export const QUOTA_MESSAGE = 'exceso de llamadas';
 
 const BASE_URL_POR_DEFECTO = 'http://200.6.78.34/stock/v1/';
 
@@ -56,7 +56,7 @@ const CONCURRENCIA = 8;
  */
 const TTL_FOTO_MS_POR_DEFECTO = 60 * 60 * 1000;
 
-export function estaConfigurado(): boolean {
+export function isConfigured(): boolean {
   return Boolean(process.env.TECNOGLOBAL_USER && process.env.TECNOGLOBAL_PASSWORD);
 }
 
@@ -66,29 +66,29 @@ export function estaConfigurado(): boolean {
  * calculemos nosotros sobre la contrasena en claro.
  */
 function autorizacion(): string {
-  const usuario = process.env.TECNOGLOBAL_USER;
-  const clave = process.env.TECNOGLOBAL_PASSWORD;
-  if (!usuario || !clave) {
+  const user = process.env.TECNOGLOBAL_USER;
+  const password = process.env.TECNOGLOBAL_PASSWORD;
+  if (!user || !password) {
     throw new ProviderError('upstream', 'Tecnoglobal credentials are not configured');
   }
-  return `Basic ${Buffer.from(`${usuario}:${clave}`).toString('base64')}`;
+  return `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`;
 }
 
 export async function fetchStock(path: string): Promise<Response> {
   const rawBaseUrl = process.env.TECNOGLOBAL_BASE_URL || BASE_URL_POR_DEFECTO;
   const baseUrl = rawBaseUrl.endsWith('/') ? rawBaseUrl : `${rawBaseUrl}/`;
-  const cabecera = autorizacion();
+  const authHeader = autorizacion();
 
   try {
-    return await fetchConTimeout(new URL(path, baseUrl), {
-      headers: { Authorization: cabecera, Accept: 'application/json' },
+    return await fetchWithTimeout(new URL(path, baseUrl), {
+      headers: { Authorization: authHeader, Accept: 'application/json' },
     });
   } catch {
     throw new ProviderError('upstream', 'Could not reach Tecnoglobal');
   }
 }
 
-export interface ProductoTecnoglobal {
+export interface TecnoglobalProduct {
   codigoTg: string;
   pnFabricante?: string | null;
   upcEan13?: string | null;
@@ -107,7 +107,7 @@ export interface ProductoTecnoglobal {
 interface RespuestaTecnoglobal {
   error?: boolean;
   message?: string;
-  products?: ProductoTecnoglobal[];
+  products?: TecnoglobalProduct[];
 }
 
 /**
@@ -117,36 +117,36 @@ interface RespuestaTecnoglobal {
  * la presencia de `products` alcanzan por si solos: hay que mirar `error` y el
  * mensaje.
  */
-async function leerProductos(response: Response): Promise<ProductoTecnoglobal[]> {
-  const texto = await response.text().catch(() => '');
+async function leerProductos(response: Response): Promise<TecnoglobalProduct[]> {
+  const text = await response.text().catch(() => '');
 
-  let datos: RespuestaTecnoglobal | null = null;
+  let data: RespuestaTecnoglobal | null = null;
   try {
-    datos = JSON.parse(texto) as RespuestaTecnoglobal;
+    data = JSON.parse(text) as RespuestaTecnoglobal;
   } catch {
-    datos = null;
+    data = null;
   }
 
   if (!response.ok) {
     throw new ProviderError(
       'upstream',
-      esCuotaExcedida(datos)
-        ? `Tecnoglobal rechazo la consulta por ${MENSAJE_CUOTA} en su ventana de 10 minutos`
+      esCuotaExcedida(data)
+        ? `Tecnoglobal rechazo la consulta por ${QUOTA_MESSAGE} en su ventana de 10 minutos`
         : `Tecnoglobal responded with HTTP ${response.status}`,
-      texto.slice(0, 500),
+      text.slice(0, 500),
     );
   }
-  if (!datos) {
+  if (!data) {
     throw new ProviderError('upstream', 'Tecnoglobal returned an invalid JSON response');
   }
-  if (datos.error) {
-    throw new ProviderError('upstream', datos.message ?? 'Tecnoglobal reported an error');
+  if (data.error) {
+    throw new ProviderError('upstream', data.message ?? 'Tecnoglobal reported an error');
   }
-  return Array.isArray(datos.products) ? datos.products : [];
+  return Array.isArray(data.products) ? data.products : [];
 }
 
-function esCuotaExcedida(datos: RespuestaTecnoglobal | null): boolean {
-  return /excede la cantidad/i.test(datos?.message ?? '');
+function esCuotaExcedida(data: RespuestaTecnoglobal | null): boolean {
+  return /excede la cantidad/i.test(data?.message ?? '');
 }
 
 /**
@@ -154,33 +154,33 @@ function esCuotaExcedida(datos: RespuestaTecnoglobal | null): boolean {
  * pasar convertiria a "0" en la clave que empareja productos sin relacion.
  */
 function upcValido(upc: string | null | undefined): string | null {
-  const limpio = (upc ?? '').trim();
-  return limpio && limpio !== '0' ? limpio : null;
+  const clean = (upc ?? '').trim();
+  return clean && clean !== '0' ? clean : null;
 }
 
-export function normalizarProducto(crudo: ProductoTecnoglobal): ProductoNormalizado {
+export function normalizeProduct(raw: TecnoglobalProduct): NormalizedProduct {
   return {
-    sku: crudo.codigoTg,
-    mpn: crudo.pnFabricante?.trim() || null,
-    nombre: crudo.descripcion ?? null,
-    marca: crudo.marca ?? null,
-    categoria: crudo.categoria ?? null,
-    subcategorias: crudo.subCategoria ? [crudo.subCategoria] : [],
+    sku: raw.codigoTg,
+    mpn: raw.pnFabricante?.trim() || null,
+    nombre: raw.descripcion ?? null,
+    marca: raw.marca ?? null,
+    categoria: raw.categoria ?? null,
+    subcategorias: raw.subCategoria ? [raw.subCategoria] : [],
     tipo: null,
   };
 }
 
-function aPrecio(crudo: ProductoTecnoglobal): PriceInfo | null {
-  if (crudo.precio == null) return null;
+function aPrecio(raw: TecnoglobalProduct): PriceInfo | null {
+  if (raw.precio == null) return null;
   return {
-    price: crudo.precio,
-    currency: normalizarMoneda(crudo.tipoMoneda),
-    inStock: crudo.stockDisp ?? null,
+    price: raw.precio,
+    currency: normalizeCurrency(raw.tipoMoneda),
+    inStock: raw.stockDisp ?? null,
   };
 }
 
 interface Foto {
-  productos: ProductoTecnoglobal[];
+  productos: TecnoglobalProduct[];
   obtenidaEn: number;
 }
 
@@ -202,10 +202,10 @@ function rutaFoto(): string {
   return join(process.env.CATALOG_CACHE_DIR ?? 'cache', 'tecnoglobal-precios.json');
 }
 
-function guardarFotoEnDisco(nueva: Foto): void {
+function guardarFotoEnDisco(snapshot: Foto): void {
   try {
     mkdirSync(process.env.CATALOG_CACHE_DIR ?? 'cache', { recursive: true });
-    writeFileSync(rutaFoto(), JSON.stringify(nueva));
+    writeFileSync(rutaFoto(), JSON.stringify(snapshot));
   } catch (error) {
     // No poder cachear no es motivo para fallar la consulta que ya se resolvio.
     console.error('[tecnoglobal] no se pudo guardar la foto en disco', error);
@@ -214,16 +214,16 @@ function guardarFotoEnDisco(nueva: Foto): void {
 
 function leerFotoDeDisco(): Foto | null {
   try {
-    const guardada = JSON.parse(readFileSync(rutaFoto(), 'utf8')) as Foto;
-    return Array.isArray(guardada.productos) && guardada.productos.length > 0 ? guardada : null;
+    const stored = JSON.parse(readFileSync(rutaFoto(), 'utf8')) as Foto;
+    return Array.isArray(stored.productos) && stored.productos.length > 0 ? stored : null;
   } catch {
     return null;
   }
 }
 
 function ttlFoto(): number {
-  const crudo = Number(process.env.TECNOGLOBAL_PRECIOS_TTL_MS);
-  return Number.isFinite(crudo) && crudo >= 0 ? crudo : TTL_FOTO_MS_POR_DEFECTO;
+  const raw = Number(process.env.TECNOGLOBAL_PRECIOS_TTL_MS);
+  return Number.isFinite(raw) && raw >= 0 ? raw : TTL_FOTO_MS_POR_DEFECTO;
 }
 
 async function descargarCatalogo(): Promise<Foto> {
@@ -234,16 +234,16 @@ async function descargarCatalogo(): Promise<Foto> {
   if (productos.length === 0) {
     throw new ProviderError('upstream', 'Tecnoglobal no devolvio productos en /price');
   }
-  const nueva: Foto = { productos, obtenidaEn: Date.now() };
-  foto = nueva;
-  guardarFotoEnDisco(nueva);
-  return nueva;
+  const snapshot: Foto = { productos, obtenidaEn: Date.now() };
+  foto = snapshot;
+  guardarFotoEnDisco(snapshot);
+  return snapshot;
 }
 
 async function obtenerFoto(): Promise<Foto> {
   // Tras un reinicio la foto en memoria esta vacia pero la de disco sirve.
-  const vigente = foto ?? (foto = leerFotoDeDisco());
-  if (vigente && Date.now() - vigente.obtenidaEn < ttlFoto()) return vigente;
+  const current = foto ?? (foto = leerFotoDeDisco());
+  if (current && Date.now() - current.obtenidaEn < ttlFoto()) return current;
   if (!descargaEnCurso) {
     descargaEnCurso = descargarCatalogo().finally(() => {
       descargaEnCurso = null;
@@ -256,61 +256,61 @@ async function obtenerFoto(): Promise<Foto> {
     // La cuota del volcado es tan estrecha que un refresco rechazado es
     // esperable. Una foto vieja sirve mucho mas que ninguna: es el ranking de
     // una busqueda, y el precio definitivo se confirma por SKU en /product.
-    if (vigente) {
+    if (current) {
       console.error('[tecnoglobal] no se pudo refrescar la foto, se usa la vencida', error);
-      return vigente;
+      return current;
     }
     throw error;
   }
 }
 
-export function _resetFotoParaTests(): void {
+export function _resetSnapshotForTests(): void {
   foto = null;
   descargaEnCurso = null;
 }
 
-export async function cargarCatalogoTecnoglobal(): Promise<ProductoNormalizado[]> {
+export async function cargarCatalogoTecnoglobal(): Promise<NormalizedProduct[]> {
   // El refresco diario del catalogo trae exactamente el mismo cuerpo que usan
   // los precios, asi que deja la foto lista y evita una segunda descarga.
   const { productos } = await descargarCatalogo();
-  return productos.map(normalizarProducto);
+  return productos.map(normalizeProduct);
 }
 
-async function consultarPorSku(sku: string): Promise<ProductoTecnoglobal | null> {
+async function consultarPorSku(sku: string): Promise<TecnoglobalProduct | null> {
   const productos = await leerProductos(await fetchStock(`price/${encodeURIComponent(sku)}`));
   return productos.find((p) => p.codigoTg === sku) ?? null;
 }
 
 async function preciosEnVivo(skus: string[]): Promise<Map<string, PriceInfo>> {
-  const precios = new Map<string, PriceInfo>();
-  const pendientes = [...skus];
+  const prices = new Map<string, PriceInfo>();
+  const pending = [...skus];
 
-  async function trabajador(): Promise<void> {
-    for (let sku = pendientes.shift(); sku !== undefined; sku = pendientes.shift()) {
-      const crudo = await consultarPorSku(sku);
-      if (!crudo) continue;
-      const precio = aPrecio(crudo);
-      if (precio) precios.set(sku, precio);
+  async function worker(): Promise<void> {
+    for (let sku = pending.shift(); sku !== undefined; sku = pending.shift()) {
+      const raw = await consultarPorSku(sku);
+      if (!raw) continue;
+      const price = aPrecio(raw);
+      if (price) prices.set(sku, price);
     }
   }
 
   await Promise.all(
-    Array.from({ length: Math.min(CONCURRENCIA, skus.length) }, () => trabajador()),
+    Array.from({ length: Math.min(CONCURRENCIA, skus.length) }, () => worker()),
   );
-  return precios;
+  return prices;
 }
 
 async function preciosDeLaFoto(skus: string[]): Promise<Map<string, PriceInfo>> {
-  const precios = new Map<string, PriceInfo>();
+  const prices = new Map<string, PriceInfo>();
   const { productos } = await obtenerFoto();
-  const pedidos = new Set(skus);
+  const requested = new Set(skus);
 
-  for (const crudo of productos) {
-    if (!pedidos.has(crudo.codigoTg)) continue;
-    const precio = aPrecio(crudo);
-    if (precio) precios.set(crudo.codigoTg, precio);
+  for (const raw of productos) {
+    if (!requested.has(raw.codigoTg)) continue;
+    const price = aPrecio(raw);
+    if (price) prices.set(raw.codigoTg, price);
   }
-  return precios;
+  return prices;
 }
 
 export async function getPrices(skus: string[]): Promise<Map<string, PriceInfo>> {
@@ -332,44 +332,44 @@ export async function getPrice(query: PriceQuery): Promise<PriceResult> {
   // hay busqueda, asi que se resuelve contra la foto del ultimo volcado y se
   // vuelve a preguntar por el SKU encontrado, para no cotizar con un precio
   // que puede tener horas.
-  let encontrado: ProductoTecnoglobal | null;
+  let found: TecnoglobalProduct | null;
   if (query.sku) {
-    encontrado = await consultarPorSku(query.sku);
+    found = await consultarPorSku(query.sku);
   } else {
     const { productos } = await obtenerFoto();
-    const enFoto = productos.find((c) => {
+    const inSnapshot = productos.find((c) => {
       if (query.mpn) return (c.pnFabricante ?? '').trim() === query.mpn;
       if (query.upc) return upcValido(c.upcEan13) === query.upc;
       return false;
     });
-    encontrado = enFoto ? await consultarPorSku(enFoto.codigoTg) : null;
+    found = inSnapshot ? await consultarPorSku(inSnapshot.codigoTg) : null;
   }
 
-  if (!encontrado) {
+  if (!found) {
     throw new ProviderError('not_found', 'Product not found at Tecnoglobal');
   }
 
-  const precio = aPrecio(encontrado);
-  if (!precio) {
+  const priceInfo = aPrecio(found);
+  if (!priceInfo) {
     throw new ProviderError('not_found', 'Tecnoglobal returned no price for this product');
   }
 
   return {
     provider: 'tecnoglobal',
-    sku: encontrado.codigoTg,
-    mpn: encontrado.pnFabricante?.trim() || null,
-    description: encontrado.descripcion ?? null,
-    price: precio.price,
-    currency: precio.currency,
-    inStock: precio.inStock,
+    sku: found.codigoTg,
+    mpn: found.pnFabricante?.trim() || null,
+    description: found.descripcion ?? null,
+    price: priceInfo.price,
+    currency: priceInfo.currency,
+    inStock: priceInfo.inStock,
   };
 }
 
-export const tecnoglobal: Proveedor = {
+export const tecnoglobal: Provider = {
   nombre: 'tecnoglobal',
   maxSkusPorLote: MAX_SKUS_POR_LOTE,
-  estaConfigurado,
-  cargarCatalogo: cargarCatalogoTecnoglobal,
+  isConfigured,
+  loadCatalog: cargarCatalogoTecnoglobal,
   getPrecios: getPrices,
   getPrecio: getPrice,
 };

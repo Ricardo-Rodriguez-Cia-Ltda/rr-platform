@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ProductoNormalizado } from '@rr/domain/product';
-import { PROVEEDORES } from './index.js';
+import type { NormalizedProduct } from '@rr/domain/product';
+import { PROVIDERS } from './index.js';
 
 const VIGENCIA_MS = 24 * 60 * 60 * 1000;
 
@@ -14,10 +14,10 @@ export class CatalogUnavailableError extends Error {
 
 interface CacheEnDisco {
   descargadoEn: string;
-  productos: ProductoNormalizado[];
+  productos: NormalizedProduct[];
 }
 
-const enMemoria = new Map<string, ProductoNormalizado[]>();
+const enMemoria = new Map<string, NormalizedProduct[]>();
 
 function directorioCache(): string {
   return process.env.CATALOG_CACHE_DIR ?? 'cache';
@@ -35,7 +35,7 @@ function leerCache(proveedor: string): CacheEnDisco | null {
   }
 }
 
-function escribirCache(proveedor: string, productos: ProductoNormalizado[]): void {
+function escribirCache(proveedor: string, productos: NormalizedProduct[]): void {
   const ruta = rutaCache(proveedor);
   mkdirSync(directorioCache(), { recursive: true });
   writeFileSync(
@@ -49,9 +49,9 @@ function estaVigente(cache: CacheEnDisco): boolean {
   return Number.isFinite(edad) && edad >= 0 && edad < VIGENCIA_MS;
 }
 
-export async function cargarCatalogo(proveedor: string): Promise<ProductoNormalizado[]> {
-  const registrado = PROVEEDORES[proveedor];
-  if (!registrado) throw new Error(`Proveedor desconocido: ${proveedor}`);
+export async function loadCatalog(proveedor: string): Promise<NormalizedProduct[]> {
+  const registered = PROVIDERS[proveedor];
+  if (!registered) throw new Error(`Proveedor desconocido: ${proveedor}`);
 
   const cache = leerCache(proveedor);
   if (cache && estaVigente(cache)) {
@@ -60,7 +60,7 @@ export async function cargarCatalogo(proveedor: string): Promise<ProductoNormali
   }
 
   try {
-    const productos = await registrado.cargarCatalogo();
+    const productos = await registered.loadCatalog();
     escribirCache(proveedor, productos);
     enMemoria.set(proveedor, productos);
     return productos;
@@ -76,12 +76,12 @@ export async function cargarCatalogo(proveedor: string): Promise<ProductoNormali
   }
 }
 
-export function obtenerCatalogo(proveedor: string): ProductoNormalizado[] {
+export function getCatalog(proveedor: string): NormalizedProduct[] {
   const productos = enMemoria.get(proveedor);
   if (!productos) throw new CatalogUnavailableError();
   return productos;
 }
 
-export function _resetCatalogoParaTests(): void {
+export function _resetCatalogForTests(): void {
   enMemoria.clear();
 }

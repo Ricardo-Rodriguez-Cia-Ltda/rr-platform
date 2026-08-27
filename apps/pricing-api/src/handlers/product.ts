@@ -1,12 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { isAuthorized } from '../auth.js';
-import { CatalogUnavailableError, obtenerCatalogo } from '@rr/providers/catalog';
-import type { Proveedor } from '@rr/domain/types';
+import { CatalogUnavailableError, getCatalog } from '@rr/providers/catalog';
+import type { Provider } from '@rr/domain/types';
 import { ProviderError } from '@rr/domain/types';
-import { resolverOResponder } from './guards.js';
+import { resolveOrRespond } from './guards.js';
 import { firstString, type Handler } from './types.js';
 
-export function crearHandlerProducto(proveedor: Proveedor): Handler {
+export function createProductHandler(provider: Provider): Handler {
   return async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
     if (req.method && req.method !== 'GET') {
       res.status(405).json({ error: 'method_not_allowed', detail: 'Use GET' });
@@ -23,9 +23,9 @@ export function crearHandlerProducto(proveedor: Proveedor): Handler {
       return;
     }
 
-    let catalogo;
+    let catalog;
     try {
-      catalogo = obtenerCatalogo(proveedor.nombre);
+      catalog = getCatalog(provider.nombre);
     } catch (error) {
       if (error instanceof CatalogUnavailableError) {
         res.status(503).json({
@@ -37,15 +37,15 @@ export function crearHandlerProducto(proveedor: Proveedor): Handler {
       throw error;
     }
 
-    const producto = catalogo.find((p) => p.sku === sku);
-    if (!producto) {
+    const product = catalog.find((p) => p.sku === sku);
+    if (!product) {
       res.status(404).json({ error: 'not_found', detail: 'SKU no encontrado en el catalogo' });
       return;
     }
 
-    let precios;
+    let prices;
     try {
-      precios = await proveedor.getPrecios([sku]);
+      prices = await provider.getPrecios([sku]);
     } catch (error) {
       if (error instanceof ProviderError) {
         console.error('[product] fallo getPrices', { sku, error });
@@ -57,8 +57,8 @@ export function crearHandlerProducto(proveedor: Proveedor): Handler {
       return;
     }
 
-    const precio = precios.get(sku);
-    if (!precio) {
+    const price = prices.get(sku);
+    if (!price) {
       res
         .status(404)
         .json({ error: 'not_found', detail: 'El proveedor no entrego precio para este SKU' });
@@ -66,16 +66,16 @@ export function crearHandlerProducto(proveedor: Proveedor): Handler {
     }
 
     res.status(200).json({
-      sku: producto.sku,
-      mpn: producto.mpn,
-      nombre: producto.nombre,
-      marca: producto.marca,
-      categoria: producto.categoria,
-      subcategorias: producto.subcategorias,
-      tipo: producto.tipo,
-      precio: precio.price,
-      moneda: precio.currency,
-      stock: precio.inStock,
+      sku: product.sku,
+      mpn: product.mpn,
+      nombre: product.nombre,
+      marca: product.marca,
+      categoria: product.categoria,
+      subcategorias: product.subcategorias,
+      tipo: product.tipo,
+      precio: price.price,
+      moneda: price.currency,
+      stock: price.inStock,
     });
   };
 }
@@ -87,7 +87,7 @@ export function crearHandlerProducto(proveedor: Proveedor): Handler {
  * La api key se valida antes de resolver el proveedor: un cliente sin
  * autenticar no debe poder enumerar que proveedores existen probando nombres.
  */
-export function crearHandlerProductoPorRuta(): Handler {
+export function createProductByRouteHandler(): Handler {
   return async function handler(req, res) {
     if (req.method && req.method !== 'GET') {
       res.status(405).json({ error: 'method_not_allowed', detail: 'Use GET' });
@@ -98,9 +98,9 @@ export function crearHandlerProductoPorRuta(): Handler {
       return;
     }
 
-    const proveedor = resolverOResponder(firstString(req.query.proveedor), res);
-    if (!proveedor) return;
+    const provider = resolveOrRespond(firstString(req.query.proveedor), res);
+    if (!provider) return;
 
-    await crearHandlerProducto(proveedor)(req, res);
+    await createProductHandler(provider)(req, res);
   };
 }

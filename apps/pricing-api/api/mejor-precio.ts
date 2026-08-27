@@ -1,3 +1,3 @@
-import { crearHandlerMejorPrecio } from '../src/handlers/best-price.js';
+import { createBestPriceHandler } from '../src/handlers/best-price.js';
 
-export default crearHandlerMejorPrecio();
+export default createBestPriceHandler();

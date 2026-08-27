@@ -6,22 +6,22 @@
  * rechaza, porque el llamador es un temporizador de fondo sin nadie que
  * atrape la excepcion.
  */
-export async function refrescarTodos(
-  nombres: string[],
-  cargar: (proveedor: string) => Promise<unknown[]>,
-  alFallar: (proveedor: string, error: unknown) => void = () => {},
+export async function refreshAll(
+  names: string[],
+  load: (proveedor: string) => Promise<unknown[]>,
+  onFailure: (proveedor: string, error: unknown) => void = () => {},
 ): Promise<void> {
-  const resultados = await Promise.allSettled(
-    nombres.map(async (nombre) => {
-      const productos = await cargar(nombre);
+  const results = await Promise.allSettled(
+    names.map(async (nombre) => {
+      const productos = await load(nombre);
       console.log(`[catalog] ${nombre}: ${productos.length} productos disponibles`);
     }),
   );
 
-  resultados.forEach((resultado, i) => {
-    if (resultado.status === 'rejected') {
-      console.error(`[catalog] ${nombres[i]}: no se pudo cargar`, resultado.reason);
-      alFallar(nombres[i], resultado.reason);
+  results.forEach((result, i) => {
+    if (result.status === 'rejected') {
+      console.error(`[catalog] ${names[i]}: no se pudo cargar`, result.reason);
+      onFailure(names[i], result.reason);
     }
   });
 }
@@ -33,10 +33,10 @@ export async function refrescarTodos(
  * va a fallar igual dentro de 5 minutos. Se lo deja fuera del refresco y sus
  * rutas responden `proveedor_no_configurado`, que dice exactamente que pasa.
  */
-export function proveedoresConfigurados(
-  registro: Record<string, { estaConfigurado(): boolean }>,
+export function configuredProviders(
+  registry: Record<string, { isConfigured(): boolean }>,
 ): string[] {
-  return Object.entries(registro)
-    .filter(([, proveedor]) => proveedor.estaConfigurado())
+  return Object.entries(registry)
+    .filter(([, proveedor]) => proveedor.isConfigured())
     .map(([nombre]) => nombre);
 }

@@ -9,7 +9,7 @@ import mejorPrecioHandler from '../api/mejor-precio.js';
 import priceHandler from '../api/price.js';
 import productHandler from '../api/product.js';
 import searchHandler from '../api/search.js';
-import { PROVEEDORES } from '@rr/providers';
+import { PROVIDERS } from '@rr/providers';
 
 // BASE_PATH lets the tunnel expose the API under a path prefix
 // (e.g. /rr/captador-precios/price) while /api/price keeps working, so the
@@ -24,23 +24,26 @@ interface Ruta {
 
 function rutas(): Record<string, Ruta> {
   const basePath = (process.env.BASE_PATH ?? '').replace(/\/+$/, '');
+  // OJO: docs.test.ts extrae esta lista con una regex sobre el texto fuente
+  // ("const nombres = ["); si este nombre cambia, esa lectura deja de
+  // encontrar nada y la prueba de rutas queda verde sin verificar nada.
   const nombres = ['price', 'search', 'product', 'facetas', 'mejor-precio', 'credito/mock'];
-  const tabla: Record<string, Ruta> = {};
+  const table: Record<string, Ruta> = {};
   for (const nombre of nombres) {
-    tabla[`/api/${nombre}`] = { handler: nombre };
-    if (basePath) tabla[`${basePath}/${nombre}`] = { handler: nombre };
+    table[`/api/${nombre}`] = { handler: nombre };
+    if (basePath) table[`${basePath}/${nombre}`] = { handler: nombre };
   }
   // Un proveedor no registrado no entra en la tabla, asi que cae en el 404
   // generico de ruta. El proveedor_desconocido con cuerpo detallado lo entrega
   // Vercel, donde el segmento es dinamico y siempre llega al handler.
-  for (const proveedor of Object.keys(PROVEEDORES)) {
-    for (const recurso of RECURSOS_POR_PROVEEDOR) {
-      const ruta: Ruta = { handler: `proveedor:${recurso}`, proveedor };
-      tabla[`/api/${proveedor}/${recurso}`] = ruta;
-      if (basePath) tabla[`${basePath}/${proveedor}/${recurso}`] = ruta;
+  for (const proveedor of Object.keys(PROVIDERS)) {
+    for (const resource of RECURSOS_POR_PROVEEDOR) {
+      const route: Ruta = { handler: `proveedor:${resource}`, proveedor };
+      table[`/api/${proveedor}/${resource}`] = route;
+      if (basePath) table[`${basePath}/${proveedor}/${resource}`] = route;
     }
   }
-  return tabla;
+  return table;
 }
 
 const handlers = {
@@ -65,7 +68,7 @@ class CuerpoDemasiadoGrandeError extends Error {}
 
 function leerCuerpo(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
-    const partes: Buffer[] = [];
+    const parts: Buffer[] = [];
     let bytes = 0;
 
     req.on('data', (chunk: Buffer) => {
@@ -78,15 +81,15 @@ function leerCuerpo(req: IncomingMessage): Promise<string> {
         reject(new CuerpoDemasiadoGrandeError());
         return;
       }
-      partes.push(chunk);
+      parts.push(chunk);
     });
-    req.on('end', () => resolve(Buffer.concat(partes).toString('utf8')));
+    req.on('end', () => resolve(Buffer.concat(parts).toString('utf8')));
     req.on('error', reject);
   });
 }
 
 export function createApp(): Server {
-  const tabla = rutas();
+  const table = rutas();
 
   return createServer(async (req, res) => {
     const vres = res as unknown as VercelResponse;
@@ -104,22 +107,22 @@ export function createApp(): Server {
       const url = new URL(req.url ?? '/', `http://${req.headers.host || 'localhost'}`);
 
       const basePath = (process.env.BASE_PATH ?? '').replace(/\/+$/, '');
-      const escapado = basePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const escaped = basePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       // El sku puede venir en el path con o sin prefijo de proveedor:
       // /api/product/HP1 y /api/intcomex/product/HP1.
-      const patronProducto = new RegExp(
-        `^(?:${escapado})?(?:/api)?(?:/([a-z0-9-]+))?/product/(.+)$`,
+      const productPattern = new RegExp(
+        `^(?:${escaped})?(?:/api)?(?:/([a-z0-9-]+))?/product/(.+)$`,
       );
 
-      const conSku = patronProducto.exec(url.pathname);
-      const proveedorDelPath = conSku?.[1];
-      const ruta: Ruta | undefined = conSku
-        ? proveedorDelPath
-          ? { handler: 'proveedor:product', proveedor: proveedorDelPath }
+      const skuMatch = productPattern.exec(url.pathname);
+      const providerFromPath = skuMatch?.[1];
+      const route: Ruta | undefined = skuMatch
+        ? providerFromPath
+          ? { handler: 'proveedor:product', proveedor: providerFromPath }
           : { handler: 'product' }
-        : tabla[url.pathname];
+        : table[url.pathname];
 
-      if (!ruta) {
+      if (!route) {
         vres.status(404).json({ error: 'not_found', detail: 'Unknown route' });
         return;
       }
@@ -128,10 +131,10 @@ export function createApp(): Server {
       for (const [key, value] of url.searchParams) {
         if (!(key in query)) query[key] = value;
       }
-      if (conSku) query.sku = decodeURIComponent(conSku[2]);
+      if (skuMatch) query.sku = decodeURIComponent(skuMatch[2]);
       // En Vercel el segmento [proveedor] llega como query param; aca hay que
       // ponerlo a mano o el handler por ruta no sabe a quien preguntarle.
-      if (ruta.proveedor) query.proveedor = ruta.proveedor;
+      if (route.proveedor) query.proveedor = route.proveedor;
       (req as unknown as VercelRequest).query = query;
 
       // Se lee despues de resolver la ruta: una ruta desconocida no deberia
@@ -152,7 +155,7 @@ export function createApp(): Server {
         }
       }
 
-      await handlers[ruta.handler as keyof typeof handlers](req as unknown as VercelRequest, vres);
+      await handlers[route.handler as keyof typeof handlers](req as unknown as VercelRequest, vres);
     } catch (error) {
       console.error('[server] unhandled request error', error);
       if (!res.headersSent) {

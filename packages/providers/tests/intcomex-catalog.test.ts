@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cargarCatalogoIntcomex, normalizarProducto } from '@rr/providers/intcomex';
+import { cargarCatalogoIntcomex, normalizeProduct } from '@rr/providers/intcomex';
 
 beforeEach(() => {
   vi.stubEnv('INTCOMEX_API_KEY', 'pub');
@@ -21,9 +21,9 @@ const CRUDO = {
   Category: { Description: 'Computadores', Subcategories: [{ Description: 'Notebooks' }] },
 };
 
-describe('normalizarProducto', () => {
+describe('normalizeProduct', () => {
   it('traduce la forma de Intcomex a la forma comun', () => {
-    expect(normalizarProducto(CRUDO)).toEqual({
+    expect(normalizeProduct(CRUDO)).toEqual({
       sku: 'NT016HPQ53',
       mpn: '2N6G5LT#ABM',
       nombre: 'HP ProBook 640 G8 - Notebook - 14"',
@@ -35,7 +35,7 @@ describe('normalizarProducto', () => {
   });
 
   it('convierte los campos ausentes en null, no en undefined', () => {
-    const p = normalizarProducto({ Sku: 'X1' });
+    const p = normalizeProduct({ Sku: 'X1' });
     expect(p).toEqual({
       sku: 'X1',
       mpn: null,
@@ -48,7 +48,7 @@ describe('normalizarProducto', () => {
   });
 
   it('descarta subcategorias sin descripcion en vez de dejar huecos', () => {
-    const p = normalizarProducto({
+    const p = normalizeProduct({
       Sku: 'X1',
       Category: { Description: 'C', Subcategories: [{ Description: null }, { Description: 'Buena' }] },
     });

@@ -14,9 +14,9 @@
  */
 const TIMEOUT_MS_POR_DEFECTO = 20_000;
 
-export function timeoutProveedor(): number {
-  const crudo = Number(process.env.PROVEEDOR_TIMEOUT_MS);
-  return Number.isFinite(crudo) && crudo > 0 ? crudo : TIMEOUT_MS_POR_DEFECTO;
+export function providerTimeout(): number {
+  const raw = Number(process.env.PROVEEDOR_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : TIMEOUT_MS_POR_DEFECTO;
 }
 
 /**
@@ -26,9 +26,9 @@ export function timeoutProveedor(): number {
  * desde que empieza *esta* peticion. Al vencer, `fetch` rechaza y cada
  * proveedor lo traduce a su propio error de transporte.
  */
-export function fetchConTimeout(
-  entrada: URL | string,
+export function fetchWithTimeout(
+  input: URL | string,
   init: RequestInit = {},
 ): Promise<Response> {
-  return fetch(entrada, { ...init, signal: AbortSignal.timeout(timeoutProveedor()) });
+  return fetch(input, { ...init, signal: AbortSignal.timeout(providerTimeout()) });
 }

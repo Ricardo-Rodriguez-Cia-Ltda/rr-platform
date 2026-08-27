@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { CatalogUnavailableError } from '@rr/providers/catalog';
-import type { ProductoNormalizado } from '@rr/domain/product';
+import type { NormalizedProduct } from '@rr/domain/product';
 import { ProviderError } from '@rr/domain/types';
 
 const obtenerCatalogoMock = vi.fn();
@@ -9,7 +9,7 @@ const getPricesMock = vi.fn();
 
 vi.mock('@rr/providers/catalog', async () => {
   const actual = await vi.importActual<typeof import('@rr/providers/catalog')>('@rr/providers/catalog');
-  return { ...actual, obtenerCatalogo: () => obtenerCatalogoMock() };
+  return { ...actual, getCatalog: () => obtenerCatalogoMock() };
 });
 
 vi.mock('@rr/providers/intcomex', () => ({
@@ -18,8 +18,8 @@ vi.mock('@rr/providers/intcomex', () => ({
   intcomex: {
     nombre: 'intcomex',
     maxSkusPorLote: 100,
-    estaConfigurado: () => true,
-    cargarCatalogo: async () => [],
+    isConfigured: () => true,
+    loadCatalog: async () => [],
     getPrecios: (skus: string[]) => getPricesMock(skus),
     getPrecio: async () => {
       throw new Error('no usado');
@@ -34,7 +34,7 @@ function producto(
   nombre: string,
   marca: string,
   categoria: string,
-): ProductoNormalizado {
+): NormalizedProduct {
   return { sku, mpn: `MPN-${sku}`, nombre, marca, categoria, subcategorias: [], tipo: null };
 }
 
@@ -450,7 +450,7 @@ describe('GET /search — paginado con filtros', () => {
 // pasa la suite entera y recien rompe en produccion, porque getPrices rechaza
 // mas de 100 SKUs por llamada.
 describe('GET /search — topes de cotizacion', () => {
-  function catalogoDe(n: number): ProductoNormalizado[] {
+  function catalogoDe(n: number): NormalizedProduct[] {
     return Array.from({ length: n }, (_, i) =>
       producto(`S${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
     );

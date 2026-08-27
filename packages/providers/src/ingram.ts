@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 
-import { fetchConTimeout } from './http.js';
-import { normalizarMoneda } from '@rr/domain/currency';
-import type { ProductoNormalizado } from '@rr/domain/product';
-import type { PriceInfo, PriceQuery, PriceResult, Proveedor } from '@rr/domain/types';
+import { fetchWithTimeout } from './http.js';
+import { normalizeCurrency } from '@rr/domain/currency';
+import type { NormalizedProduct } from '@rr/domain/product';
+import type { PriceInfo, PriceQuery, PriceResult, Provider } from '@rr/domain/types';
 import { ProviderError } from '@rr/domain/types';
 
 const BASE_URL_POR_DEFECTO = 'https://api.ingrammicro.com';
@@ -41,7 +41,7 @@ const MAX_PAGINAS_POR_DEFECTO = 500;
 /** Se renueva el token un poco antes de que expire, no justo al vencer. */
 const MARGEN_TOKEN_MS = 60 * 1000;
 
-export function estaConfigurado(): boolean {
+export function isConfigured(): boolean {
   return Boolean(
     process.env.INGRAM_CLIENT_ID &&
       process.env.INGRAM_CLIENT_SECRET &&
@@ -64,7 +64,7 @@ let tokenEnCurso: Promise<TokenVigente> | null = null;
  *
  * La usan el reintento ante 401 y los tests: no es un helper de pruebas.
  */
-export function olvidarToken(): void {
+export function forgetToken(): void {
   token = null;
   tokenEnCurso = null;
 }
@@ -84,7 +84,7 @@ async function pedirToken(): Promise<TokenVigente> {
   const url = process.env.INGRAM_TOKEN_URL || TOKEN_URL_POR_DEFECTO;
   let response: Response;
   try {
-    response = await fetchConTimeout(url, {
+    response = await fetchWithTimeout(url, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -97,31 +97,31 @@ async function pedirToken(): Promise<TokenVigente> {
     throw new ProviderError('upstream', 'Could not reach Ingram');
   }
 
-  const texto = await response.text().catch(() => '');
+  const text = await response.text().catch(() => '');
   if (!response.ok) {
     throw new ProviderError(
       'upstream',
       `Ingram rechazo las credenciales (HTTP ${response.status})`,
-      texto.slice(0, 500),
+      text.slice(0, 500),
     );
   }
 
-  let datos: RespuestaToken;
+  let data: RespuestaToken;
   try {
-    datos = JSON.parse(texto) as RespuestaToken;
+    data = JSON.parse(text) as RespuestaToken;
   } catch {
     throw new ProviderError('upstream', 'Ingram returned an invalid token response');
   }
-  if (!datos.access_token) {
+  if (!data.access_token) {
     throw new ProviderError('upstream', 'Ingram no devolvio access_token');
   }
 
-  const duracionMs = Number(datos.expires_in) * 1000;
+  const durationMs = Number(data.expires_in) * 1000;
   return {
-    valor: datos.access_token,
+    valor: data.access_token,
     // Sin expires_in usable se asume vencido de inmediato: pedir un token de
     // mas es barato, usar uno vencido devuelve 401 en medio de una cotizacion.
-    expiraEn: Number.isFinite(duracionMs) && duracionMs > 0 ? Date.now() + duracionMs : 0,
+    expiraEn: Number.isFinite(durationMs) && durationMs > 0 ? Date.now() + durationMs : 0,
   };
 }
 
@@ -129,9 +129,9 @@ async function obtenerToken(): Promise<string> {
   if (token && Date.now() < token.expiraEn - MARGEN_TOKEN_MS) return token.valor;
   if (!tokenEnCurso) {
     tokenEnCurso = pedirToken()
-      .then((nuevo) => {
-        token = nuevo;
-        return nuevo;
+      .then((fresh) => {
+        token = fresh;
+        return fresh;
       })
       .finally(() => {
         tokenEnCurso = null;
@@ -141,14 +141,14 @@ async function obtenerToken(): Promise<string> {
 }
 
 function cabeceras(bearer: string): Record<string, string> {
-  const cliente = process.env.INGRAM_CUSTOMER_NUMBER;
-  if (!cliente) {
+  const customerNumber = process.env.INGRAM_CUSTOMER_NUMBER;
+  if (!customerNumber) {
     throw new ProviderError('upstream', 'Falta INGRAM_CUSTOMER_NUMBER');
   }
   const headers: Record<string, string> = {
     Authorization: `Bearer ${bearer}`,
     Accept: 'application/json',
-    'IM-CustomerNumber': cliente,
+    'IM-CustomerNumber': customerNumber,
     'IM-CountryCode': process.env.INGRAM_COUNTRY_CODE || PAIS_POR_DEFECTO,
     // Ingram exige un identificador distinto por transaccion para poder
     // rastrearla de su lado; repetirlo mezcla peticiones en sus logs.
@@ -161,31 +161,31 @@ function cabeceras(bearer: string): Record<string, string> {
 
 export async function fetchIngram(
   path: string,
-  opciones: { params?: Record<string, string>; body?: unknown } = {},
+  options: { params?: Record<string, string>; body?: unknown } = {},
 ): Promise<Response> {
   const rawBaseUrl = process.env.INGRAM_BASE_URL || BASE_URL_POR_DEFECTO;
   const url = new URL(path.replace(/^\//, ''), rawBaseUrl.endsWith('/') ? rawBaseUrl : `${rawBaseUrl}/`);
-  for (const [clave, valor] of Object.entries(opciones.params ?? {})) {
-    url.searchParams.set(clave, valor);
+  for (const [key, value] of Object.entries(options.params ?? {})) {
+    url.searchParams.set(key, value);
   }
 
-  async function pedir(): Promise<Response> {
+  async function request(): Promise<Response> {
     const headers = cabeceras(await obtenerToken());
     const init: RequestInit = { headers };
-    if (opciones.body !== undefined) {
+    if (options.body !== undefined) {
       init.method = 'POST';
-      init.body = JSON.stringify(opciones.body);
+      init.body = JSON.stringify(options.body);
       headers['content-type'] = 'application/json';
     }
 
     try {
-      return await fetchConTimeout(url, init);
+      return await fetchWithTimeout(url, init);
     } catch {
       throw new ProviderError('upstream', 'Could not reach Ingram');
     }
   }
 
-  const respuesta = await pedir();
+  const response = await request();
 
   // Un 401 con un token que todavia creemos vigente significa que Ingram lo
   // invalido antes de su `expires_in` —pasa, por ejemplo, cuando se emite otro
@@ -196,36 +196,36 @@ export async function fetchIngram(
   //
   // Se reintenta una sola vez: si el token recien pedido tambien da 401, el
   // problema son las credenciales y insistir no lo arregla.
-  if (respuesta.status !== 401) return respuesta;
+  if (response.status !== 401) return response;
 
   console.error('[ingram] 401 con el token cacheado; se pide uno nuevo y se reintenta');
-  olvidarToken();
-  return pedir();
+  forgetToken();
+  return request();
 }
 
-async function leerJson<T>(response: Response, contexto: string): Promise<T> {
-  const texto = await response.text().catch(() => '');
+async function leerJson<T>(response: Response, context: string): Promise<T> {
+  const text = await response.text().catch(() => '');
   if (!response.ok) {
     // 429 y el 4xx generico que Ingram usa al agotarse la cuota se nombran
     // aparte: no es que fallara nada aguas arriba, es que pedimos demasiado
     // rapido, y quien lea el log tiene que saber que la cura es esperar.
-    const porCuota = response.status === 429 || /quota limit exceeds/i.test(texto);
+    const quotaExceeded = response.status === 429 || /quota limit exceeds/i.test(text);
     throw new ProviderError(
       'upstream',
-      porCuota
-        ? `Ingram corto por cuota al pedir ${contexto} (permite 60 llamadas por minuto y por endpoint)`
-        : `Ingram responded with HTTP ${response.status} al pedir ${contexto}`,
-      texto.slice(0, 500),
+      quotaExceeded
+        ? `Ingram corto por cuota al pedir ${context} (permite 60 llamadas por minuto y por endpoint)`
+        : `Ingram responded with HTTP ${response.status} al pedir ${context}`,
+      text.slice(0, 500),
     );
   }
   try {
-    return JSON.parse(texto) as T;
+    return JSON.parse(text) as T;
   } catch {
     throw new ProviderError('upstream', 'Ingram returned an invalid JSON response');
   }
 }
 
-export interface ProductoIngram {
+export interface IngramProduct {
   ingramPartNumber?: string;
   vendorPartNumber?: string | null;
   upcCode?: string | null;
@@ -241,28 +241,28 @@ interface PaginaCatalogo {
   recordsFound?: number;
   pageSize?: number;
   pageNumber?: number;
-  catalog?: ProductoIngram[];
+  catalog?: IngramProduct[];
 }
 
-export function normalizarProducto(crudo: ProductoIngram): ProductoNormalizado {
+export function normalizeProduct(raw: IngramProduct): NormalizedProduct {
   return {
-    sku: crudo.ingramPartNumber ?? '',
+    sku: raw.ingramPartNumber ?? '',
     // vendorPartNumber es el part number del fabricante: la clave de union.
     // ingramPartNumber es el codigo interno de Ingram y no sirve para comparar.
-    mpn: crudo.vendorPartNumber?.trim() || null,
-    nombre: crudo.description?.trim() || null,
-    marca: crudo.vendorName?.trim() || null,
-    categoria: crudo.category?.trim() || null,
-    subcategorias: crudo.subCategory?.trim() ? [crudo.subCategory.trim()] : [],
+    mpn: raw.vendorPartNumber?.trim() || null,
+    nombre: raw.description?.trim() || null,
+    marca: raw.vendorName?.trim() || null,
+    categoria: raw.category?.trim() || null,
+    subcategorias: raw.subCategory?.trim() ? [raw.subCategory.trim()] : [],
     // productType es el tipo comercial ("LCD Monitors"); `type` viene como
     // "IM::Physical", un prefijo interno de Ingram que no aporta al consumidor.
-    tipo: crudo.productType?.trim() || null,
+    tipo: raw.productType?.trim() || null,
   };
 }
 
 function msEntrePaginas(): number {
-  const crudo = Number(process.env.INGRAM_MS_ENTRE_PAGINAS);
-  return Number.isFinite(crudo) && crudo >= 0 ? crudo : MS_ENTRE_PAGINAS_POR_DEFECTO;
+  const raw = Number(process.env.INGRAM_MS_ENTRE_PAGINAS);
+  return Number.isFinite(raw) && raw >= 0 ? raw : MS_ENTRE_PAGINAS_POR_DEFECTO;
 }
 
 // Sin unref: la pausa es parte de una descarga en curso, y un timer que no
@@ -274,49 +274,49 @@ function esperar(ms: number): Promise<void> {
 }
 
 function maxPaginas(): number {
-  const crudo = Number(process.env.INGRAM_MAX_PAGINAS);
-  return Number.isInteger(crudo) && crudo > 0 ? crudo : MAX_PAGINAS_POR_DEFECTO;
+  const raw = Number(process.env.INGRAM_MAX_PAGINAS);
+  return Number.isInteger(raw) && raw > 0 ? raw : MAX_PAGINAS_POR_DEFECTO;
 }
 
-export async function cargarCatalogoIngram(): Promise<ProductoNormalizado[]> {
-  const productos: ProductoNormalizado[] = [];
-  const tope = maxPaginas();
-  let pagina = 1;
-  let encontrados: number | null = null;
+export async function cargarCatalogoIngram(): Promise<NormalizedProduct[]> {
+  const productos: NormalizedProduct[] = [];
+  const limit = maxPaginas();
+  let page = 1;
+  let found: number | null = null;
 
-  const pausa = msEntrePaginas();
+  const pause = msEntrePaginas();
 
-  for (; pagina <= tope; pagina += 1) {
+  for (; page <= limit; page += 1) {
     // La pausa va antes de cada pagina menos la primera: sin ella el volcado
     // dispara ~60 llamadas en pocos segundos y Ingram lo corta por cuota.
-    if (pagina > 1 && pausa > 0) await esperar(pausa);
+    if (page > 1 && pause > 0) await esperar(pause);
 
-    const respuesta = await leerJson<PaginaCatalogo>(
+    const response = await leerJson<PaginaCatalogo>(
       await fetchIngram('resellers/v6/catalog', {
-        params: { pageNumber: String(pagina), pageSize: String(TAMANO_PAGINA) },
+        params: { pageNumber: String(page), pageSize: String(TAMANO_PAGINA) },
       }),
       'el catalogo',
     );
 
-    if (encontrados === null && typeof respuesta.recordsFound === 'number') {
-      encontrados = respuesta.recordsFound;
+    if (found === null && typeof response.recordsFound === 'number') {
+      found = response.recordsFound;
     }
 
-    const lote = respuesta.catalog ?? [];
+    const batch = response.catalog ?? [];
     // Una pagina vacia es el fin real del listado. No se usa `recordsFound`
     // para cortar: Ingram devuelve menos items de los pedidos y ese contador
     // varia entre llamadas, asi que confiar en el deja el catalogo incompleto.
-    if (lote.length === 0) break;
+    if (batch.length === 0) break;
 
-    for (const crudo of lote) {
+    for (const raw of batch) {
       // Sin ingramPartNumber no hay como cotizarlo ni referenciarlo despues.
-      if (crudo.ingramPartNumber) productos.push(normalizarProducto(crudo));
+      if (raw.ingramPartNumber) productos.push(normalizeProduct(raw));
     }
   }
 
-  if (pagina > tope) {
+  if (page > limit) {
     console.error(
-      `[ingram] catalogo truncado en ${tope} paginas (${productos.length} productos de ${encontrados ?? '?'}); sube INGRAM_MAX_PAGINAS`,
+      `[ingram] catalogo truncado en ${limit} paginas (${productos.length} productos de ${found ?? '?'}); sube INGRAM_MAX_PAGINAS`,
     );
   }
 
@@ -349,11 +349,11 @@ interface ItemPrecioIngram {
  * cotiza sobre el primero, con el segundo como respaldo.
  */
 function aPrecio(item: ItemPrecioIngram): PriceInfo | null {
-  const valor = item.pricing?.customerPrice ?? item.pricing?.retailPrice;
-  if (valor == null) return null;
+  const value = item.pricing?.customerPrice ?? item.pricing?.retailPrice;
+  if (value == null) return null;
   return {
-    price: valor,
-    currency: normalizarMoneda(item.pricing?.currencyCode),
+    price: value,
+    currency: normalizeCurrency(item.pricing?.currencyCode),
     inStock: aStock(item.availability),
   };
 }
@@ -367,29 +367,29 @@ function aPrecio(item: ItemPrecioIngram): PriceInfo | null {
  * Con `available: false` se devuelve 0 —es un no explicito—; con `true` sin
  * numero no se inventa una cantidad: null significa "hay, cuanto no se dice".
  */
-function aStock(disponibilidad: ItemPrecioIngram['availability']): number | null {
-  const unidades = disponibilidad?.totalAvailability;
-  if (unidades != null) return unidades;
-  if (disponibilidad?.available === false) return 0;
+function aStock(availability: ItemPrecioIngram['availability']): number | null {
+  const units = availability?.totalAvailability;
+  if (units != null) return units;
+  if (availability?.available === false) return 0;
   return null;
 }
 
 async function consultarPrecios(
-  productos: Record<string, string>[],
+  items: Record<string, string>[],
 ): Promise<ItemPrecioIngram[]> {
-  const respuesta = await leerJson<ItemPrecioIngram[]>(
+  const response = await leerJson<ItemPrecioIngram[]>(
     await fetchIngram('resellers/v6/catalog/priceandavailability', {
       params: { includeAvailability: 'true', includePricing: 'true' },
-      body: { products: productos },
+      body: { products: items },
     }),
     'precio y disponibilidad',
   );
-  return Array.isArray(respuesta) ? respuesta : [];
+  return Array.isArray(response) ? response : [];
 }
 
 export async function getPrices(skus: string[]): Promise<Map<string, PriceInfo>> {
-  const precios = new Map<string, PriceInfo>();
-  if (skus.length === 0) return precios;
+  const prices = new Map<string, PriceInfo>();
+  if (skus.length === 0) return prices;
   if (skus.length > MAX_SKUS_POR_LOTE) {
     throw new ProviderError(
       'upstream',
@@ -401,26 +401,26 @@ export async function getPrices(skus: string[]): Promise<Map<string, PriceInfo>>
 
   for (const item of items) {
     if (!item.ingramPartNumber) continue;
-    const precio = aPrecio(item);
-    if (precio) precios.set(item.ingramPartNumber, precio);
+    const price = aPrecio(item);
+    if (price) prices.set(item.ingramPartNumber, price);
   }
-  return precios;
+  return prices;
 }
 
 export async function getPrice(query: PriceQuery): Promise<PriceResult> {
-  const producto: Record<string, string> = {};
-  if (query.sku) producto.ingramPartNumber = query.sku;
-  else if (query.mpn) producto.vendorPartNumber = query.mpn;
-  else if (query.upc) producto.upc = query.upc;
+  const selector: Record<string, string> = {};
+  if (query.sku) selector.ingramPartNumber = query.sku;
+  else if (query.mpn) selector.vendorPartNumber = query.mpn;
+  else if (query.upc) selector.upc = query.upc;
 
-  const items = await consultarPrecios([producto]);
+  const items = await consultarPrecios([selector]);
   const item = items[0];
   if (!item) {
     throw new ProviderError('not_found', 'Product not found at Ingram');
   }
 
-  const precio = aPrecio(item);
-  if (!precio) {
+  const priceInfo = aPrecio(item);
+  if (!priceInfo) {
     // Ingram responde 200 con el item y un motivo cuando no lo puede cotizar
     // (SKU inexistente, no autorizado para el cliente): perder ese mensaje
     // convierte "no estas autorizado" en un 404 mudo.
@@ -435,17 +435,17 @@ export async function getPrice(query: PriceQuery): Promise<PriceResult> {
     sku: item.ingramPartNumber ?? null,
     mpn: item.vendorPartNumber?.trim() || null,
     description: item.description?.trim() || null,
-    price: precio.price,
-    currency: precio.currency,
-    inStock: precio.inStock,
+    price: priceInfo.price,
+    currency: priceInfo.currency,
+    inStock: priceInfo.inStock,
   };
 }
 
-export const ingram: Proveedor = {
+export const ingram: Provider = {
   nombre: 'ingram',
   maxSkusPorLote: MAX_SKUS_POR_LOTE,
-  estaConfigurado,
-  cargarCatalogo: cargarCatalogoIngram,
+  isConfigured,
+  loadCatalog: cargarCatalogoIngram,
   getPrecios: getPrices,
   getPrecio: getPrice,
 };

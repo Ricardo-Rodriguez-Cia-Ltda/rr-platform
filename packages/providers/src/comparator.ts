@@ -1,14 +1,14 @@
-import { CatalogUnavailableError, obtenerCatalogo } from './catalog.js';
+import { CatalogUnavailableError, getCatalog } from './catalog.js';
 import {
-  claveUnion,
-  compactarMpn,
-  marcaCanonica,
-  type ProductoNormalizado,
+  unionKey,
+  compactMpn,
+  canonicalBrand,
+  type NormalizedProduct,
 } from '@rr/domain/product';
-import { PROVEEDORES } from './index.js';
-import type { PriceInfo, Proveedor } from '@rr/domain/types';
+import { PROVIDERS } from './index.js';
+import type { PriceInfo, Provider } from '@rr/domain/types';
 
-export interface Oferta {
+export interface Offer {
   proveedor: string;
   sku: string;
   precio: number;
@@ -16,41 +16,41 @@ export interface Oferta {
   stock: number | null;
 }
 
-export type Criterio =
+export type Criterion =
   | 'mas_barato_con_stock'
   | 'stock_desconocido'
   | 'mas_barato_sin_stock';
 
-export interface OfertaGanadora extends Oferta {
-  criterio: Criterio;
+export interface WinningOffer extends Offer {
+  criterio: Criterion;
 }
 
-export interface ProveedorAusente {
+export interface MissingProvider {
   proveedor: string;
   error: 'catalogo_no_disponible' | 'proveedor_no_configurado' | 'sin_precio' | 'upstream';
   detail: string;
 }
 
-export interface Comparacion {
+export interface Comparison {
   clave: string;
   mpn: string | null;
   marca: string | null;
   nombre: string | null;
   /** null cuando ningun proveedor entrego una oferta. */
-  mejor: OfertaGanadora | null;
-  ofertas: Oferta[];
-  incompleta: ProveedorAusente[];
+  mejor: WinningOffer | null;
+  ofertas: Offer[];
+  incompleta: MissingProvider[];
 }
 
 /**
  * Catalogo de un proveedor, o null si todavia no cargo.
  *
- * Envuelve el `throw` de `obtenerCatalogo` porque aca un catalogo sin cargar
+ * Envuelve el `throw` de `getCatalog` porque aca un catalogo sin cargar
  * no es un error: es un proveedor que no puede participar de la comparacion.
  */
-function catalogoDe(proveedor: string): ProductoNormalizado[] | null {
+function catalogoDe(proveedor: string): NormalizedProduct[] | null {
   try {
-    return obtenerCatalogo(proveedor);
+    return getCatalog(proveedor);
   } catch (error) {
     if (error instanceof CatalogUnavailableError) return null;
     throw error;
@@ -68,31 +68,31 @@ function catalogoDe(proveedor: string): ProductoNormalizado[] | null {
  * orden de preferencia es stock confirmado, despues desconocido, y ultimo el
  * cero confirmado, que es el unico "no" de verdad.
  */
-function elegirMejor(ofertas: Oferta[]): OfertaGanadora | null {
+function elegirMejor(ofertas: Offer[]): WinningOffer | null {
   if (ofertas.length === 0) return null;
 
-  const conStock = ofertas.filter((o) => o.stock !== null && o.stock > 0);
-  const desconocido = ofertas.filter((o) => o.stock === null);
+  const withStock = ofertas.filter((o) => o.stock !== null && o.stock > 0);
+  const unknownStock = ofertas.filter((o) => o.stock === null);
 
-  let candidatas: Oferta[];
-  let criterio: Criterio;
-  if (conStock.length > 0) {
-    candidatas = conStock;
+  let candidates: Offer[];
+  let criterio: Criterion;
+  if (withStock.length > 0) {
+    candidates = withStock;
     criterio = 'mas_barato_con_stock';
-  } else if (desconocido.length > 0) {
-    candidatas = desconocido;
+  } else if (unknownStock.length > 0) {
+    candidates = unknownStock;
     criterio = 'stock_desconocido';
   } else {
-    candidatas = ofertas;
+    candidates = ofertas;
     criterio = 'mas_barato_sin_stock';
   }
 
-  return { ...candidatas.reduce((a, b) => (b.precio < a.precio ? b : a)), criterio };
+  return { ...candidates.reduce((a, b) => (b.precio < a.precio ? b : a)), criterio };
 }
 
-function masBarata(proveedor: string, precios: Map<string, PriceInfo>): Oferta | null {
-  let mejor: Oferta | null = null;
-  for (const [sku, precio] of precios) {
+function masBarata(proveedor: string, prices: Map<string, PriceInfo>): Offer | null {
+  let mejor: Offer | null = null;
+  for (const [sku, precio] of prices) {
     // Un precio no positivo no es un precio, es ausencia de precio: sale
     // cotizado a un cliente real si se deja pasar. Tambien descarta NaN.
     if (!(precio.price > 0)) continue;
@@ -110,16 +110,16 @@ function masBarata(proveedor: string, precios: Map<string, PriceInfo>): Oferta |
 }
 
 async function cotizar(
-  proveedor: Proveedor,
-  productos: ProductoNormalizado[],
-): Promise<Oferta | ProveedorAusente> {
+  proveedor: Provider,
+  productos: NormalizedProduct[],
+): Promise<Offer | MissingProvider> {
   // Varios productos con la misma clave son duplicados del propio catalogo del
   // proveedor, no ofertas distintas: se piden juntos y gana el mas barato.
   const skus = productos.slice(0, proveedor.maxSkusPorLote).map((p) => p.sku);
 
   try {
-    const oferta = masBarata(proveedor.nombre, await proveedor.getPrecios(skus));
-    if (oferta) return oferta;
+    const offer = masBarata(proveedor.nombre, await proveedor.getPrecios(skus));
+    if (offer) return offer;
     return {
       proveedor: proveedor.nombre,
       error: 'sin_precio',
@@ -134,26 +134,26 @@ async function cotizar(
   }
 }
 
-function esAusente(r: Oferta | ProveedorAusente): r is ProveedorAusente {
+function esAusente(r: Offer | MissingProvider): r is MissingProvider {
   return 'error' in r;
 }
 
 /**
  * Compara el mismo producto entre todos los proveedores del registro.
  *
- * No nombra a ninguno: recorre lo que le pasen, con PROVEEDORES por defecto.
+ * No nombra a ninguno: recorre lo que le pasen, con PROVIDERS por defecto.
  * Agregar un proveedor nuevo no toca este modulo.
  */
-export async function compararPorClave(
+export async function compareByKey(
   clave: string,
-  registro: Record<string, Proveedor> = PROVEEDORES,
-): Promise<Comparacion> {
-  const incompleta: ProveedorAusente[] = [];
-  const conElProducto: { proveedor: Proveedor; productos: ProductoNormalizado[] }[] = [];
-  let descripcion: ProductoNormalizado | null = null;
+  registry: Record<string, Provider> = PROVIDERS,
+): Promise<Comparison> {
+  const incompleta: MissingProvider[] = [];
+  const providersWithProduct: { proveedor: Provider; productos: NormalizedProduct[] }[] = [];
+  let description: NormalizedProduct | null = null;
 
-  for (const proveedor of Object.values(registro)) {
-    if (!proveedor.estaConfigurado()) {
+  for (const proveedor of Object.values(registry)) {
+    if (!proveedor.isConfigured()) {
       incompleta.push({
         proveedor: proveedor.nombre,
         error: 'proveedor_no_configurado',
@@ -162,8 +162,8 @@ export async function compararPorClave(
       continue;
     }
 
-    const catalogo = catalogoDe(proveedor.nombre);
-    if (!catalogo) {
+    const catalog = catalogoDe(proveedor.nombre);
+    if (!catalog) {
       incompleta.push({
         proveedor: proveedor.nombre,
         error: 'catalogo_no_disponible',
@@ -172,21 +172,21 @@ export async function compararPorClave(
       continue;
     }
 
-    const suyos = catalogo.filter((p) => claveUnion(p) === clave);
+    const matches = catalog.filter((p) => unionKey(p) === clave);
     // Que no lo venda es una respuesta definitiva, no un hueco: su catalogo se
     // reviso. Solo se omite.
-    if (suyos.length === 0) continue;
+    if (matches.length === 0) continue;
 
-    descripcion ??= suyos[0];
-    conElProducto.push({ proveedor, productos: suyos });
+    description ??= matches[0];
+    providersWithProduct.push({ proveedor, productos: matches });
   }
 
-  const resultados = await Promise.all(
-    conElProducto.map(({ proveedor, productos }) => cotizar(proveedor, productos)),
+  const results = await Promise.all(
+    providersWithProduct.map(({ proveedor, productos }) => cotizar(proveedor, productos)),
   );
 
-  const ofertas: Oferta[] = [];
-  for (const r of resultados) {
+  const ofertas: Offer[] = [];
+  for (const r of results) {
     if (esAusente(r)) incompleta.push(r);
     else ofertas.push(r);
   }
@@ -194,9 +194,9 @@ export async function compararPorClave(
 
   return {
     clave,
-    mpn: descripcion?.mpn ?? null,
-    marca: descripcion?.marca ?? null,
-    nombre: descripcion?.nombre ?? null,
+    mpn: description?.mpn ?? null,
+    marca: description?.marca ?? null,
+    nombre: description?.nombre ?? null,
     mejor: elegirMejor(ofertas),
     ofertas,
     incompleta,
@@ -210,29 +210,29 @@ export async function compararPorClave(
  * —raro, una sola vez en los 10.411 productos de Intcomex, pero real—. El
  * llamador tiene que pedir desambiguacion en vez de elegir por el consumidor.
  */
-export function resolverClaves(
+export function resolveKeys(
   mpn: string,
   marca?: string,
-  registro: Record<string, Proveedor> = PROVEEDORES,
+  registry: Record<string, Provider> = PROVIDERS,
 ): string[] {
-  const compacto = compactarMpn(mpn);
-  if (!compacto) return [];
+  const compact = compactMpn(mpn);
+  if (!compact) return [];
 
-  const filtro = marca ? marcaCanonica(marca) : null;
-  const claves = new Set<string>();
+  const filter = marca ? canonicalBrand(marca) : null;
+  const keys = new Set<string>();
 
-  for (const nombre of Object.keys(registro)) {
+  for (const nombre of Object.keys(registry)) {
     for (const p of catalogoDe(nombre) ?? []) {
-      if (compactarMpn(p.mpn) !== compacto) continue;
-      if (filtro && marcaCanonica(p.marca) !== filtro) continue;
-      const clave = claveUnion(p);
-      if (clave) claves.add(clave);
+      if (compactMpn(p.mpn) !== compact) continue;
+      if (filter && canonicalBrand(p.marca) !== filter) continue;
+      const clave = unionKey(p);
+      if (clave) keys.add(clave);
     }
   }
-  return [...claves].sort();
+  return [...keys].sort();
 }
 
-export type ResolucionSku =
+export type SkuResolution =
   | { estado: 'ok'; clave: string }
   | { estado: 'catalogo_no_disponible' }
   | { estado: 'sku_desconocido' }
@@ -244,44 +244,44 @@ export type ResolucionSku =
  * Devuelve un estado y no un string nulo porque los tres fracasos son tres
  * respuestas HTTP distintas.
  */
-export function claveDeSku(proveedor: string, sku: string): ResolucionSku {
-  const catalogo = catalogoDe(proveedor);
-  if (!catalogo) return { estado: 'catalogo_no_disponible' };
+export function skuKey(proveedor: string, sku: string): SkuResolution {
+  const catalog = catalogoDe(proveedor);
+  if (!catalog) return { estado: 'catalogo_no_disponible' };
 
-  const producto = catalogo.find((p) => p.sku === sku);
-  if (!producto) return { estado: 'sku_desconocido' };
+  const product = catalog.find((p) => p.sku === sku);
+  if (!product) return { estado: 'sku_desconocido' };
 
-  const clave = claveUnion(producto);
+  const clave = unionKey(product);
   return clave ? { estado: 'ok', clave } : { estado: 'no_comparable' };
 }
 
-export function hayAlgunCatalogo(
-  registro: Record<string, Proveedor> = PROVEEDORES,
+export function hasAnyCatalog(
+  registry: Record<string, Provider> = PROVIDERS,
 ): boolean {
-  return Object.keys(registro).some((nombre) => catalogoDe(nombre) !== null);
+  return Object.keys(registry).some((nombre) => catalogoDe(nombre) !== null);
 }
 
 /**
  * Proveedores cuyo catalogo no cargo, con la misma forma que `incompleta`.
  *
- * resolverClaves salta estos catalogos en silencio: no encontrar el MPN ahi
+ * resolveKeys salta estos catalogos en silencio: no encontrar el MPN ahi
  * no prueba que nadie lo venda. Separada para que el llamador pueda
  * distinguir "se revisaron todos los catalogos y ninguno lo vende" de "no se
  * pudo preguntarle a todos".
  *
  * Un proveedor sin credenciales nunca carga catalogo (server.ts lo excluye
- * del refresco), asi que hay que chequear estaConfigurado() primero: si no,
+ * del refresco), asi que hay que chequear isConfigured() primero: si no,
  * este proveedor caeria siempre en catalogo_no_disponible (transitorio)
  * cuando en realidad le faltan las llaves (permanente). Misma distincion que
- * ya hace compararPorClave.
+ * ya hace compareByKey.
  */
-export function catalogosNoDisponibles(
-  registro: Record<string, Proveedor> = PROVEEDORES,
-): ProveedorAusente[] {
-  const ausentes: ProveedorAusente[] = [];
-  for (const proveedor of Object.values(registro)) {
-    if (!proveedor.estaConfigurado()) {
-      ausentes.push({
+export function unavailableCatalogs(
+  registry: Record<string, Provider> = PROVIDERS,
+): MissingProvider[] {
+  const missing: MissingProvider[] = [];
+  for (const proveedor of Object.values(registry)) {
+    if (!proveedor.isConfigured()) {
+      missing.push({
         proveedor: proveedor.nombre,
         error: 'proveedor_no_configurado',
         detail: `El proveedor '${proveedor.nombre}' no tiene credenciales configuradas`,
@@ -289,12 +289,12 @@ export function catalogosNoDisponibles(
       continue;
     }
     if (catalogoDe(proveedor.nombre) === null) {
-      ausentes.push({
+      missing.push({
         proveedor: proveedor.nombre,
         error: 'catalogo_no_disponible',
         detail: `El catalogo de '${proveedor.nombre}' aun no esta disponible`,
       });
     }
   }
-  return ausentes;
+  return missing;
 }

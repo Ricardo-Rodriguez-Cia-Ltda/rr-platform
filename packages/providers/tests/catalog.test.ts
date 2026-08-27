@@ -4,9 +4,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   CatalogUnavailableError,
-  cargarCatalogo,
-  obtenerCatalogo,
-  _resetCatalogoParaTests,
+  loadCatalog,
+  getCatalog,
+  _resetCatalogForTests,
 } from '@rr/providers/catalog';
 
 // Lo que devuelve la red viene crudo de Intcomex; lo que queda en disco y en
@@ -32,7 +32,7 @@ beforeEach(() => {
   vi.stubEnv('INTCOMEX_API_KEY', 'pub');
   vi.stubEnv('INTCOMEX_ACCESS_KEY', 'secret-key');
   vi.stubEnv('INTCOMEX_BASE_URL', 'https://intcomex-prod.apigee.net/v1/');
-  _resetCatalogoParaTests();
+  _resetCatalogForTests();
 });
 
 afterEach(() => {
@@ -40,23 +40,23 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('obtenerCatalogo', () => {
+describe('getCatalog', () => {
   it('lanza CatalogUnavailableError si aún no se cargó', () => {
-    expect(() => obtenerCatalogo('intcomex')).toThrow(CatalogUnavailableError);
+    expect(() => getCatalog('intcomex')).toThrow(CatalogUnavailableError);
   });
 });
 
-describe('cargarCatalogo', () => {
+describe('loadCatalog', () => {
   it('descarga getcatalog, lo persiste en disco y lo deja en memoria', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(CRUDOS), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const catalogo = await cargarCatalogo('intcomex');
+    const catalogo = await loadCatalog('intcomex');
 
     expect(catalogo).toEqual(ITEMS);
     expect((fetchMock.mock.calls[0][0] as URL).href).toContain('/v1/getcatalog');
     expect(JSON.parse(readFileSync(cachePath, 'utf8')).productos).toEqual(ITEMS);
-    expect(obtenerCatalogo('intcomex')).toEqual(ITEMS);
+    expect(getCatalog('intcomex')).toEqual(ITEMS);
   });
 
   it('usa el caché de disco sin llamar a la red si tiene menos de 24 horas', async () => {
@@ -67,7 +67,7 @@ describe('cargarCatalogo', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    const catalogo = await cargarCatalogo('intcomex');
+    const catalogo = await loadCatalog('intcomex');
 
     expect(catalogo).toHaveLength(2);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -79,7 +79,7 @@ describe('cargarCatalogo', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(CRUDOS), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const catalogo = await cargarCatalogo('intcomex');
+    const catalogo = await loadCatalog('intcomex');
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(catalogo).toHaveLength(2);
@@ -90,7 +90,7 @@ describe('cargarCatalogo', () => {
     writeFileSync(cachePath, JSON.stringify({ descargadoEn: viejo, productos: ITEMS }));
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('boom', { status: 500 })));
 
-    const catalogo = await cargarCatalogo('intcomex');
+    const catalogo = await loadCatalog('intcomex');
 
     expect(catalogo).toHaveLength(2);
   });
@@ -105,11 +105,11 @@ describe('cargarCatalogo', () => {
       ),
     );
 
-    const catalogo = await cargarCatalogo('intcomex');
+    const catalogo = await loadCatalog('intcomex');
 
     // Cae al fallback del caché vencido, no al objeto envenenado.
     expect(catalogo).toEqual(ITEMS);
-    expect(obtenerCatalogo('intcomex')).toEqual(ITEMS);
+    expect(getCatalog('intcomex')).toEqual(ITEMS);
 
     // El archivo en disco sigue siendo el caché viejo válido: no se sobrescribió
     // con el objeto de error ni con una marca de tiempo fresca.
@@ -121,8 +121,8 @@ describe('cargarCatalogo', () => {
   it('rechaza un arreglo vacío como catálogo válido', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('[]', { status: 200 })));
 
-    await expect(cargarCatalogo('intcomex')).rejects.toThrow();
-    expect(() => obtenerCatalogo('intcomex')).toThrow(CatalogUnavailableError);
+    await expect(loadCatalog('intcomex')).rejects.toThrow();
+    expect(() => getCatalog('intcomex')).toThrow(CatalogUnavailableError);
   });
 
   it('una respuesta no-arreglo sin caché de respaldo se propaga como error (no queda catálogo envenenado en memoria)', async () => {
@@ -133,8 +133,8 @@ describe('cargarCatalogo', () => {
       ),
     );
 
-    await expect(cargarCatalogo('intcomex')).rejects.toThrow();
-    expect(() => obtenerCatalogo('intcomex')).toThrow(CatalogUnavailableError);
+    await expect(loadCatalog('intcomex')).rejects.toThrow();
+    expect(() => getCatalog('intcomex')).toThrow(CatalogUnavailableError);
   });
 
   it('cachea cada proveedor en su propio archivo', async () => {
@@ -142,7 +142,7 @@ describe('cargarCatalogo', () => {
       'fetch',
       vi.fn().mockResolvedValue(new Response(JSON.stringify(CRUDOS), { status: 200 })),
     );
-    await cargarCatalogo('intcomex');
+    await loadCatalog('intcomex');
     expect(existsSync(join(cacheDir, 'catalog-intcomex.json'))).toBe(true);
   });
 
@@ -151,12 +151,12 @@ describe('cargarCatalogo', () => {
       'fetch',
       vi.fn().mockResolvedValue(new Response(JSON.stringify(CRUDOS), { status: 200 })),
     );
-    await cargarCatalogo('intcomex');
-    expect(obtenerCatalogo('intcomex')).toHaveLength(2);
-    expect(() => obtenerCatalogo('ingram')).toThrow(CatalogUnavailableError);
+    await loadCatalog('intcomex');
+    expect(getCatalog('intcomex')).toHaveLength(2);
+    expect(() => getCatalog('ingram')).toThrow(CatalogUnavailableError);
   });
 
   it('lanza para un proveedor que no existe', async () => {
-    await expect(cargarCatalogo('nadie')).rejects.toThrow();
+    await expect(loadCatalog('nadie')).rejects.toThrow();
   });
 });

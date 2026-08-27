@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { CatalogUnavailableError } from '@rr/providers/catalog';
-import type { ProductoNormalizado } from '@rr/domain/product';
+import type { NormalizedProduct } from '@rr/domain/product';
 import { ProviderError } from '@rr/domain/types';
 
 const obtenerCatalogoMock = vi.fn();
@@ -9,7 +9,7 @@ const getPricesMock = vi.fn();
 
 vi.mock('@rr/providers/catalog', async () => {
   const actual = await vi.importActual<typeof import('@rr/providers/catalog')>('@rr/providers/catalog');
-  return { ...actual, obtenerCatalogo: () => obtenerCatalogoMock() };
+  return { ...actual, getCatalog: () => obtenerCatalogoMock() };
 });
 
 vi.mock('@rr/providers/intcomex', () => ({
@@ -18,8 +18,8 @@ vi.mock('@rr/providers/intcomex', () => ({
   intcomex: {
     nombre: 'intcomex',
     maxSkusPorLote: 100,
-    estaConfigurado: () => true,
-    cargarCatalogo: async () => [],
+    isConfigured: () => true,
+    loadCatalog: async () => [],
     getPrecios: (skus: string[]) => getPricesMock(skus),
     getPrecio: async () => {
       throw new Error('no usado');
@@ -30,7 +30,7 @@ vi.mock('@rr/providers/intcomex', () => ({
 const { default: productHandler } = await import('../api/product.js');
 const { default: facetasHandler } = await import('../api/facetas.js');
 
-const PRODUCTO: ProductoNormalizado = {
+const PRODUCTO: NormalizedProduct = {
   sku: 'HP1',
   mpn: '2N6G5LT',
   nombre: 'HP ProBook 640 G8 - Notebook - 14"',

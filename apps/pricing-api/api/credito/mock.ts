@@ -52,8 +52,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  const cuerpo = parsearCuerpo(req.body);
-  if (!cuerpo) {
+  const body = parsearCuerpo(req.body);
+  if (!body) {
     res.status(400).json({
       error: 'bad_request',
       detail: 'El cuerpo debe ser un objeto JSON con los campos rut y total_clp',
@@ -61,21 +61,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  const rutCrudo = cuerpo.rut;
-  if (typeof rutCrudo !== 'string' || normalizarRut(rutCrudo) === '') {
+  const rawRut = body.rut;
+  if (typeof rawRut !== 'string' || normalizarRut(rawRut) === '') {
     res.status(400).json({
       error: 'bad_request',
       detail: 'El campo rut es obligatorio y debe ser un string no vacio',
     });
     return;
   }
-  const rut = normalizarRut(rutCrudo);
+  const rut = normalizarRut(rawRut);
 
   // Estricto a proposito: el resto de la API cotiza en USD y este endpoint
   // recibe CLP. Coercionar un "1500" que en realidad eran dolares aprobaria un
   // credito por 8.000 veces menos de lo que corresponde.
-  const totalClp = cuerpo.total_clp;
-  if (typeof totalClp !== 'number' || !Number.isInteger(totalClp) || totalClp <= 0) {
+  const requestedClp = body.total_clp;
+  if (typeof requestedClp !== 'number' || !Number.isInteger(requestedClp) || requestedClp <= 0) {
     res.status(400).json({
       error: 'bad_request',
       detail:
@@ -84,8 +84,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  const disponibleClp = LINEA_CREDITO_CLP - UTILIZADO_CLP;
-  const aprobado = totalClp <= disponibleClp;
+  const availableClp = LINEA_CREDITO_CLP - UTILIZADO_CLP;
+  const aprobado = requestedClp <= availableClp;
   const motivo: Motivo = aprobado ? 'dentro_de_linea' : 'excede_linea';
 
   res.status(200).json({
@@ -95,10 +95,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     habilitado: true,
     linea_credito_clp: LINEA_CREDITO_CLP,
     utilizado_clp: UTILIZADO_CLP,
-    disponible_clp: disponibleClp,
-    solicitado_clp: totalClp,
+    disponible_clp: availableClp,
+    solicitado_clp: requestedClp,
     aprobado,
     motivo,
-    faltante_clp: aprobado ? 0 : totalClp - disponibleClp,
+    faltante_clp: aprobado ? 0 : requestedClp - availableClp,
   });
 }

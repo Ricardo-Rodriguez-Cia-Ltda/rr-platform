@@ -1,12 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { isAuthorized } from '../auth.js';
-import { CatalogUnavailableError, obtenerCatalogo } from '@rr/providers/catalog';
-import { calcularFacetas } from '@rr/domain/search';
-import type { Proveedor } from '@rr/domain/types';
-import { resolverOResponder } from './guards.js';
+import { CatalogUnavailableError, getCatalog } from '@rr/providers/catalog';
+import { computeFacets } from '@rr/domain/search';
+import type { Provider } from '@rr/domain/types';
+import { resolveOrRespond } from './guards.js';
 import { firstString, type Handler } from './types.js';
 
-export function crearHandlerFacetas(proveedor: Proveedor): Handler {
+export function createFacetsHandler(provider: Provider): Handler {
   return async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
     if (req.method && req.method !== 'GET') {
       res.status(405).json({ error: 'method_not_allowed', detail: 'Use GET' });
@@ -17,9 +17,9 @@ export function crearHandlerFacetas(proveedor: Proveedor): Handler {
       return;
     }
 
-    let catalogo;
+    let catalog;
     try {
-      catalogo = obtenerCatalogo(proveedor.nombre);
+      catalog = getCatalog(provider.nombre);
     } catch (error) {
       if (error instanceof CatalogUnavailableError) {
         res.status(503).json({
@@ -31,8 +31,8 @@ export function crearHandlerFacetas(proveedor: Proveedor): Handler {
       throw error;
     }
 
-    const facetas = calcularFacetas(catalogo);
-    res.status(200).json({ total_productos: catalogo.length, ...facetas });
+    const facets = computeFacets(catalog);
+    res.status(200).json({ total_productos: catalog.length, ...facets });
   };
 }
 
@@ -43,7 +43,7 @@ export function crearHandlerFacetas(proveedor: Proveedor): Handler {
  * La api key se valida antes de resolver el proveedor: un cliente sin
  * autenticar no debe poder enumerar que proveedores existen probando nombres.
  */
-export function crearHandlerFacetasPorRuta(): Handler {
+export function createFacetsByRouteHandler(): Handler {
   return async function handler(req, res) {
     if (req.method && req.method !== 'GET') {
       res.status(405).json({ error: 'method_not_allowed', detail: 'Use GET' });
@@ -54,9 +54,9 @@ export function crearHandlerFacetasPorRuta(): Handler {
       return;
     }
 
-    const proveedor = resolverOResponder(firstString(req.query.proveedor), res);
-    if (!proveedor) return;
+    const provider = resolveOrRespond(firstString(req.query.proveedor), res);
+    if (!provider) return;
 
-    await crearHandlerFacetas(proveedor)(req, res);
+    await createFacetsHandler(provider)(req, res);
   };
 }

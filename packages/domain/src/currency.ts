@@ -9,9 +9,9 @@
  * No se traduce nada mas que la forma: si un proveedor empieza a cotizar en
  * otra moneda, su codigo pasa tal cual en mayusculas y se nota.
  */
-export function normalizarMoneda(cruda: string | null | undefined): string {
-  const limpia = (cruda ?? '').trim().toUpperCase();
-  if (!limpia) return 'USD';
+export function normalizeCurrency(raw: string | null | undefined): string {
+  const clean = (raw ?? '').trim().toUpperCase();
+  if (!clean) return 'USD';
   // Intcomex abrevia el dolar como "US"; el resto del mundo usa "USD".
-  return limpia === 'US' ? 'USD' : limpia;
+  return clean === 'US' ? 'USD' : clean;
 }

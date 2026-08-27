@@ -1,5 +1,5 @@
-import { crearHandlerProducto } from '../src/handlers/product.js';
-import { PROVEEDORES } from '@rr/providers';
+import { createProductHandler } from '../src/handlers/product.js';
+import { PROVIDERS } from '@rr/providers';
 
 // Alias historico: el agente Rayo apunta aca y no debe enterarse del cambio.
-export default crearHandlerProducto(PROVEEDORES.intcomex);
+export default createProductHandler(PROVIDERS.intcomex);

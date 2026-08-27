@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
-  olvidarToken,
+  forgetToken,
   cargarCatalogoIngram,
   getPrice,
   getPrices,
   ingram,
-  normalizarProducto,
-  type ProductoIngram,
+  normalizeProduct,
+  type IngramProduct,
 } from '@rr/providers/ingram';
 import { ProviderError } from '@rr/domain/types';
 
@@ -17,7 +17,7 @@ import { ProviderError } from '@rr/domain/types';
 // Chile queda sin verificar hasta tener credenciales.
 const CATALOGO = JSON.parse(readFileSync('packages/providers/tests/fixtures/ingram-catalog.json', 'utf8')) as {
   recordsFound: number;
-  catalog: ProductoIngram[];
+  catalog: IngramProduct[];
 };
 const PRECIOS = JSON.parse(
   readFileSync('packages/providers/tests/fixtures/ingram-priceandavailability.json', 'utf8'),
@@ -46,7 +46,7 @@ beforeEach(() => {
   vi.stubEnv('INGRAM_TOKEN_URL', 'https://ingram.test/oauth/oauth30/token');
   // Sin pausa entre paginas: el ritmo real se verifica aparte.
   vi.stubEnv('INGRAM_MS_ENTRE_PAGINAS', '0');
-  olvidarToken();
+  forgetToken();
 });
 
 afterEach(() => {
@@ -54,21 +54,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('estaConfigurado', () => {
+describe('isConfigured', () => {
   it('es false mientras no lleguen las llaves de Ingram', () => {
     vi.stubEnv('INGRAM_CLIENT_ID', '');
-    expect(ingram.estaConfigurado()).toBe(false);
+    expect(ingram.isConfigured()).toBe(false);
   });
 
   // El numero de cliente no es opcional: sin el, Ingram rechaza toda consulta
   // de catalogo y precio aunque el token sea valido.
   it('es false si falta el numero de cliente', () => {
     vi.stubEnv('INGRAM_CUSTOMER_NUMBER', '');
-    expect(ingram.estaConfigurado()).toBe(false);
+    expect(ingram.isConfigured()).toBe(false);
   });
 
   it('es true con client id, secret y numero de cliente', () => {
-    expect(ingram.estaConfigurado()).toBe(true);
+    expect(ingram.isConfigured()).toBe(true);
   });
 });
 
@@ -153,9 +153,9 @@ describe('token OAuth', () => {
   });
 });
 
-describe('normalizarProducto', () => {
+describe('normalizeProduct', () => {
   it('usa vendorPartNumber como MPN, no el codigo interno de Ingram', () => {
-    expect(normalizarProducto(CATALOGO.catalog[0])).toEqual({
+    expect(normalizeProduct(CATALOGO.catalog[0])).toEqual({
       sku: '1A8249',
       mpn: 'SDSQUNC-016G-AN6IA',
       nombre: 'CLASS 10 100MB/S UHS-I CARD',
@@ -169,21 +169,21 @@ describe('normalizarProducto', () => {
   // "IM::Physical" es un prefijo interno de Ingram; el tipo util es
   // productType ("LCD Monitors"), que en esta fixture viene vacio.
   it('toma el tipo de productType y no del type interno', () => {
-    expect(normalizarProducto({ ingramPartNumber: 'X', productType: 'LCD Monitors', type: 'IM::Physical' }).tipo).toBe(
+    expect(normalizeProduct({ ingramPartNumber: 'X', productType: 'LCD Monitors', type: 'IM::Physical' }).tipo).toBe(
       'LCD Monitors',
     );
   });
 
   it('trata un vendorPartNumber vacio como ausencia de MPN', () => {
-    expect(normalizarProducto({ ingramPartNumber: 'X', vendorPartNumber: '  ' }).mpn).toBeNull();
+    expect(normalizeProduct({ ingramPartNumber: 'X', vendorPartNumber: '  ' }).mpn).toBeNull();
   });
 });
 
 describe('cargarCatalogoIngram', () => {
   it('recorre las paginas hasta la primera vacia', async () => {
-    const pagina = (n: number, items: ProductoIngram[]) =>
+    const pagina = (n: number, items: IngramProduct[]) =>
       json({ recordsFound: 3, pageSize: 100, pageNumber: n, catalog: items });
-    const producto = (sku: string): ProductoIngram => ({
+    const producto = (sku: string): IngramProduct => ({
       ingramPartNumber: sku,
       vendorPartNumber: `V-${sku}`,
       description: `Producto ${sku}`,

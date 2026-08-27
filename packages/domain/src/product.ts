@@ -1,6 +1,6 @@
-import { tokenizar } from './text.js';
+import { tokenize } from './text.js';
 
-export interface ProductoNormalizado {
+export interface NormalizedProduct {
   /** Identificador del proveedor. NO es comparable entre proveedores. */
   sku: string;
   /** Part number del fabricante: la unica pista comun entre distribuidores. */
@@ -17,8 +17,8 @@ export interface ProductoNormalizado {
  * 2N6G5LT-ABM, "2N6G5LT ABM"). Se compacta a solo letras y numeros para que
  * las variantes colapsen en la misma clave.
  */
-export function compactarMpn(mpn: string | null): string {
-  return tokenizar(mpn ?? '').join('');
+export function compactMpn(mpn: string | null): string {
+  return tokenize(mpn ?? '').join('');
 }
 
 /**
@@ -57,14 +57,14 @@ const ALIAS_MARCA: [prefijo: string, canonica: string][] = [
  * Se toma la primera palabra, que es donde vive el fabricante, y los alias de
  * arriba cubren los pocos casos que ni asi coinciden.
  */
-export function marcaCanonica(marca: string | null): string {
-  const normalizada = tokenizar(marca ?? '').join(' ');
-  if (!normalizada) return '';
+export function canonicalBrand(marca: string | null): string {
+  const normalized = tokenize(marca ?? '').join(' ');
+  if (!normalized) return '';
 
-  for (const [prefijo, canonica] of ALIAS_MARCA) {
-    if (normalizada === prefijo || normalizada.startsWith(`${prefijo} `)) return canonica;
+  for (const [prefix, canonical] of ALIAS_MARCA) {
+    if (normalized === prefix || normalized.startsWith(`${prefix} `)) return canonical;
   }
-  return normalizada.split(' ')[0];
+  return normalized.split(' ')[0];
 }
 
 /**
@@ -79,9 +79,9 @@ export function marcaCanonica(marca: string | null): string {
  * colision es real: tres adaptadores de Trendnet, Eufy y MSI comparten el
  * part number 98PT0G1299, y sin la marca se cotizaria uno por otro.
  */
-export function claveUnion(producto: ProductoNormalizado): string | null {
-  const mpn = compactarMpn(producto.mpn);
-  const marca = marcaCanonica(producto.marca);
+export function unionKey(product: NormalizedProduct): string | null {
+  const mpn = compactMpn(product.mpn);
+  const marca = canonicalBrand(product.marca);
   if (!mpn || !marca) return null;
   return `${mpn}|${marca}`;
 }

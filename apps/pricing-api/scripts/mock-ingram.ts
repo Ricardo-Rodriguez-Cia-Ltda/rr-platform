@@ -38,25 +38,25 @@ const server = createServer(async (req, res) => {
   }
 
   // Toda ruta de negocio exige el Bearer y las cabeceras obligatorias.
-  const faltan = ['authorization', 'im-customernumber', 'im-countrycode', 'im-correlationid'].filter(
+  const missing = ['authorization', 'im-customernumber', 'im-countrycode', 'im-correlationid'].filter(
     (h) => !req.headers[h],
   );
-  if (faltan.length > 0) {
+  if (missing.length > 0) {
     res.statusCode = 401;
-    res.end(JSON.stringify({ error: `faltan cabeceras: ${faltan.join(', ')}` }));
+    res.end(JSON.stringify({ error: `faltan cabeceras: ${missing.join(', ')}` }));
     return;
   }
 
   if (url.pathname === '/resellers/v6/catalog') {
     const pageSize = Number(url.searchParams.get('pageSize') ?? 25);
     const pageNumber = Number(url.searchParams.get('pageNumber') ?? 1);
-    const desde = (pageNumber - 1) * pageSize;
+    const offset = (pageNumber - 1) * pageSize;
     res.end(
       JSON.stringify({
         recordsFound: CATALOGO.length,
         pageSize,
         pageNumber,
-        catalog: CATALOGO.slice(desde, desde + pageSize),
+        catalog: CATALOGO.slice(offset, offset + pageSize),
       }),
     );
     return;
@@ -64,23 +64,23 @@ const server = createServer(async (req, res) => {
 
   if (url.pathname === '/resellers/v6/catalog/priceandavailability') {
     llamadasPA += 1;
-    const cuerpo = await new Promise<string>((resolve) => {
+    const body = await new Promise<string>((resolve) => {
       let d = '';
       req.on('data', (c) => (d += c));
       req.on('end', () => resolve(d));
     });
-    const { products } = JSON.parse(cuerpo) as {
+    const { products } = JSON.parse(body) as {
       products: { ingramPartNumber?: string; vendorPartNumber?: string; upc?: string }[];
     };
 
     res.end(
       JSON.stringify(
         products.map((p, i) => {
-          const encontrado =
+          const found =
             CATALOGO.find((c) => c.ingramPartNumber === p.ingramPartNumber) ??
             CATALOGO.find((c) => c.vendorPartNumber === p.vendorPartNumber) ??
             CATALOGO.find((c) => c.upcCode === p.upc);
-          if (!encontrado) {
+          if (!found) {
             return {
               index: i,
               productStatusCode: 'E',
@@ -88,13 +88,13 @@ const server = createServer(async (req, res) => {
               ingramPartNumber: p.ingramPartNumber,
             };
           }
-          const n = Number(encontrado.ingramPartNumber.slice(2));
+          const n = Number(found.ingramPartNumber.slice(2));
           return {
             index: i,
-            ingramPartNumber: encontrado.ingramPartNumber,
-            vendorPartNumber: encontrado.vendorPartNumber,
-            description: encontrado.description,
-            vendorName: encontrado.vendorName,
+            ingramPartNumber: found.ingramPartNumber,
+            vendorPartNumber: found.vendorPartNumber,
+            description: found.description,
+            vendorName: found.vendorName,
             availability: { available: n % 4 !== 0, totalAvailability: n % 4 === 0 ? 0 : n },
             pricing: { currencyCode: 'USD', retailPrice: 100 + n, customerPrice: 80 + n },
           };

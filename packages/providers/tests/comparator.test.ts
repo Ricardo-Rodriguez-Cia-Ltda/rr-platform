@@ -1,22 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  catalogosNoDisponibles,
-  claveDeSku,
-  compararPorClave,
-  hayAlgunCatalogo,
-  resolverClaves,
+  unavailableCatalogs,
+  skuKey,
+  compareByKey,
+  hasAnyCatalog,
+  resolveKeys,
 } from '@rr/providers/comparator';
-import type { ProductoNormalizado } from '@rr/domain/product';
-import type { PriceInfo, Proveedor } from '@rr/domain/types';
+import type { NormalizedProduct } from '@rr/domain/product';
+import type { PriceInfo, Provider } from '@rr/domain/types';
 import { ProviderError } from '@rr/domain/types';
 
-const catalogos = new Map<string, ProductoNormalizado[]>();
+const catalogos = new Map<string, NormalizedProduct[]>();
 
 vi.mock('../src/catalog.js', async () => {
   const actual = await vi.importActual<typeof import('../src/catalog.js')>('../src/catalog.js');
   return {
     ...actual,
-    obtenerCatalogo: (proveedor: string) => {
+    getCatalog: (proveedor: string) => {
       const c = catalogos.get(proveedor);
       if (!c) throw new actual.CatalogUnavailableError();
       return c;
@@ -24,7 +24,7 @@ vi.mock('../src/catalog.js', async () => {
   };
 });
 
-function producto(campos: Partial<ProductoNormalizado>): ProductoNormalizado {
+function producto(campos: Partial<NormalizedProduct>): NormalizedProduct {
   return {
     sku: 'SKU',
     mpn: 'MPN1',
@@ -37,17 +37,17 @@ function producto(campos: Partial<ProductoNormalizado>): ProductoNormalizado {
   };
 }
 
-/** Proveedor de mentira: el comparador no debe saber de ninguno en particular. */
+/** Provider de mentira: el comparador no debe saber de ninguno en particular. */
 function proveedorFalso(
   nombre: string,
   precios: Record<string, PriceInfo>,
   opciones: { configurado?: boolean; falla?: Error } = {},
-): Proveedor {
+): Provider {
   return {
     nombre,
     maxSkusPorLote: 50,
-    estaConfigurado: () => opciones.configurado ?? true,
-    cargarCatalogo: async () => [],
+    isConfigured: () => opciones.configurado ?? true,
+    loadCatalog: async () => [],
     getPrecios: async (skus: string[]) => {
       if (opciones.falla) throw opciones.falla;
       const m = new Map<string, PriceInfo>();
@@ -70,7 +70,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('compararPorClave', () => {
+describe('compareByKey', () => {
   it('devuelve las ofertas ordenadas por precio', async () => {
     catalogos.set('a', [producto({ sku: 'A1' })]);
     catalogos.set('b', [producto({ sku: 'B1' })]);
@@ -79,7 +79,7 @@ describe('compararPorClave', () => {
       b: proveedorFalso('b', { B1: { price: 120, currency: 'USD', inStock: 2 } }),
     };
 
-    const r = await compararPorClave(CLAVE, registro);
+    const r = await compareByKey(CLAVE, registro);
 
     expect(r.ofertas.map((o) => o.proveedor)).toEqual(['b', 'a']);
     expect(r.mejor).toMatchObject({ proveedor: 'b', precio: 120, criterio: 'mas_barato_con_stock' });
@@ -95,7 +95,7 @@ describe('compararPorClave', () => {
       b: proveedorFalso('b', { B1: { price: 100, currency: 'USD', inStock: 0 } }),
     };
 
-    const r = await compararPorClave(CLAVE, registro);
+    const r = await compareByKey(CLAVE, registro);
 
     expect(r.mejor).toMatchObject({ proveedor: 'a', precio: 130, criterio: 'mas_barato_con_stock' });
     // La oferta sin stock igual se informa: el agente puede querer encargarla.
@@ -112,7 +112,7 @@ describe('compararPorClave', () => {
       b: proveedorFalso('b', { B1: { price: 100, currency: 'USD', inStock: 0 } }),
     };
 
-    const r = await compararPorClave(CLAVE, registro);
+    const r = await compareByKey(CLAVE, registro);
 
     expect(r.mejor).toMatchObject({ proveedor: 'b', precio: 100, criterio: 'mas_barato_sin_stock' });
   });
@@ -127,7 +127,7 @@ describe('compararPorClave', () => {
       b: proveedorFalso('b', {}, { falla: new ProviderError('upstream', 'se cayo') }),
     };
 
-    const r = await compararPorClave(CLAVE, registro);
+    const r = await compareByKey(CLAVE, registro);
 
     expect(r.mejor).toMatchObject({ proveedor: 'a' });
     expect(r.incompleta).toEqual([
@@ -142,7 +142,7 @@ describe('compararPorClave', () => {
       b: proveedorFalso('b', {}),
     };
 
-    const r = await compararPorClave(CLAVE, registro);
+    const r = await compareByKey(CLAVE, registro);
 
     expect(r.incompleta).toEqual([
       { proveedor: 'b', error: 'catalogo_no_disponible', detail: expect.any(String) },
@@ -158,7 +158,7 @@ describe('compararPorClave', () => {
       b: sinLlaves,
     };
 
-    const r = await compararPorClave(CLAVE, registro);
+    const r = await compareByKey(CLAVE, registro);
 
     expect(r.incompleta[0]).toMatchObject({ proveedor: 'b', error: 'proveedor_no_configurado' });
     expect(espia).not.toHaveBeenCalled();
@@ -172,7 +172,7 @@ describe('compararPorClave', () => {
       b: proveedorFalso('b', {}),
     };
 
-    const r = await compararPorClave(CLAVE, registro);
+    const r = await compareByKey(CLAVE, registro);
 
     expect(r.incompleta).toEqual([
       { proveedor: 'b', error: 'sin_precio', detail: expect.any(String) },
@@ -186,7 +186,7 @@ describe('compararPorClave', () => {
     catalogos.set('a', [producto({ sku: 'A1' })]);
     const registro = { a: proveedorFalso('a', { A1: { price: 0, currency: 'USD', inStock: 0 } }) };
 
-    const r = await compararPorClave(CLAVE, registro);
+    const r = await compareByKey(CLAVE, registro);
 
     expect(r.mejor).toBeNull();
     expect(r.ofertas).toEqual([]);
@@ -203,7 +203,7 @@ describe('compararPorClave', () => {
       b: proveedorFalso('b', { B1: { price: 100, currency: 'USD', inStock: 0 } }),
     };
 
-    const r = await compararPorClave(CLAVE, registro);
+    const r = await compareByKey(CLAVE, registro);
 
     expect(r.mejor).toMatchObject({ proveedor: 'b', precio: 100 });
   });
@@ -218,7 +218,7 @@ describe('compararPorClave', () => {
       b: proveedorFalso('b', { B9: { price: 10, currency: 'USD', inStock: 1 } }),
     };
 
-    const r = await compararPorClave(CLAVE, registro);
+    const r = await compareByKey(CLAVE, registro);
 
     expect(r.ofertas.map((o) => o.proveedor)).toEqual(['a']);
     expect(r.incompleta).toEqual([]);
@@ -227,7 +227,7 @@ describe('compararPorClave', () => {
   it('sin ninguna oferta devuelve mejor en null pero conserva incompleta', async () => {
     const registro = { a: proveedorFalso('a', {}) };
 
-    const r = await compararPorClave(CLAVE, registro);
+    const r = await compareByKey(CLAVE, registro);
 
     expect(r.mejor).toBeNull();
     expect(r.ofertas).toEqual([]);
@@ -244,7 +244,7 @@ describe('compararPorClave', () => {
       }),
     };
 
-    const r = await compararPorClave(CLAVE, registro);
+    const r = await compareByKey(CLAVE, registro);
 
     expect(r.ofertas).toHaveLength(1);
     expect(r.ofertas[0]).toMatchObject({ sku: 'A2', precio: 110 });
@@ -254,7 +254,7 @@ describe('compararPorClave', () => {
     catalogos.set('a', [producto({ sku: 'A1', mpn: 'MPN1', marca: 'HP', nombre: 'Notebook HP' })]);
     const registro = { a: proveedorFalso('a', { A1: { price: 1, currency: 'USD', inStock: 1 } }) };
 
-    const r = await compararPorClave(CLAVE, registro);
+    const r = await compareByKey(CLAVE, registro);
 
     expect(r).toMatchObject({ clave: CLAVE, mpn: 'MPN1', marca: 'HP', nombre: 'Notebook HP' });
   });
@@ -268,7 +268,7 @@ describe('compararPorClave', () => {
       nuevo: proveedorFalso('nuevo', { N1: { price: 90, currency: 'USD', inStock: 3 } }),
     };
 
-    const r = await compararPorClave(CLAVE, registro);
+    const r = await compareByKey(CLAVE, registro);
 
     expect(r.mejor).toMatchObject({ proveedor: 'nuevo', precio: 90 });
   });
@@ -280,17 +280,17 @@ describe('compararPorClave', () => {
     proveedor.maxSkusPorLote = 10;
     const espia = vi.spyOn(proveedor, 'getPrecios');
 
-    await compararPorClave(CLAVE, { a: proveedor });
+    await compareByKey(CLAVE, { a: proveedor });
 
     expect(espia.mock.calls[0][0]).toHaveLength(10);
   });
 });
 
-describe('resolverClaves', () => {
+describe('resolveKeys', () => {
   it('encuentra la clave de un MPN presente en los catalogos', () => {
     catalogos.set('a', [producto({ sku: 'A1', mpn: '2N6G5LT#ABM', marca: 'HP' })]);
 
-    expect(resolverClaves('2n6g5lt-abm', undefined, { a: proveedorFalso('a', {}) })).toEqual([
+    expect(resolveKeys('2n6g5lt-abm', undefined, { a: proveedorFalso('a', {}) })).toEqual([
       '2n6g5ltabm|hp',
     ]);
   });
@@ -298,14 +298,14 @@ describe('resolverClaves', () => {
   it('devuelve vacio si ningun proveedor lo tiene', () => {
     catalogos.set('a', [producto({ sku: 'A1', mpn: 'OTRO', marca: 'HP' })]);
 
-    expect(resolverClaves('NOEXISTE', undefined, { a: proveedorFalso('a', {}) })).toEqual([]);
+    expect(resolveKeys('NOEXISTE', undefined, { a: proveedorFalso('a', {}) })).toEqual([]);
   });
 
   it('junta la misma clave aunque cada proveedor escriba la marca distinto', () => {
     catalogos.set('a', [producto({ sku: 'A1', mpn: 'BVG700I-MSX', marca: 'APC' })]);
     catalogos.set('b', [producto({ sku: 'B1', mpn: 'BVG700IMSX', marca: 'AMERICAN POWER' })]);
 
-    const claves = resolverClaves('BVG700I-MSX', undefined, {
+    const claves = resolveKeys('BVG700I-MSX', undefined, {
       a: proveedorFalso('a', {}),
       b: proveedorFalso('b', {}),
     });
@@ -321,7 +321,7 @@ describe('resolverClaves', () => {
       producto({ sku: 'A2', mpn: '98PT0G1299', marca: 'MSI' }),
     ]);
 
-    expect(resolverClaves('98PT0G1299', undefined, { a: proveedorFalso('a', {}) })).toHaveLength(2);
+    expect(resolveKeys('98PT0G1299', undefined, { a: proveedorFalso('a', {}) })).toHaveLength(2);
   });
 
   it('la marca desambigua y deja una sola clave', () => {
@@ -330,7 +330,7 @@ describe('resolverClaves', () => {
       producto({ sku: 'A2', mpn: '98PT0G1299', marca: 'MSI' }),
     ]);
 
-    expect(resolverClaves('98PT0G1299', 'MSI', { a: proveedorFalso('a', {}) })).toEqual([
+    expect(resolveKeys('98PT0G1299', 'MSI', { a: proveedorFalso('a', {}) })).toEqual([
       '98pt0g1299|msi',
     ]);
   });
@@ -338,7 +338,7 @@ describe('resolverClaves', () => {
   it('ignora los catalogos que no estan cargados en vez de fallar', () => {
     catalogos.set('a', [producto({ sku: 'A1', mpn: 'MPN1', marca: 'HP' })]);
 
-    const claves = resolverClaves('MPN1', undefined, {
+    const claves = resolveKeys('MPN1', undefined, {
       a: proveedorFalso('a', {}),
       b: proveedorFalso('b', {}),
     });
@@ -349,19 +349,19 @@ describe('resolverClaves', () => {
   it('devuelve vacio para un MPN sin caracteres utiles', () => {
     catalogos.set('a', [producto({ sku: 'A1' })]);
 
-    expect(resolverClaves('---', undefined, { a: proveedorFalso('a', {}) })).toEqual([]);
+    expect(resolveKeys('---', undefined, { a: proveedorFalso('a', {}) })).toEqual([]);
   });
 });
 
-describe('catalogosNoDisponibles', () => {
-  // resolverClaves salta en silencio los catalogos sin cargar; esta funcion
+describe('unavailableCatalogs', () => {
+  // resolveKeys salta en silencio los catalogos sin cargar; esta funcion
   // es como el llamador se entera de a quien se salteo, para no afirmar
   // "nadie lo vende" cuando en realidad no se pudo preguntar a todos.
   it('lista los proveedores cuyo catalogo no cargo', () => {
     catalogos.set('a', [producto({ sku: 'A1' })]);
     const registro = { a: proveedorFalso('a', {}), b: proveedorFalso('b', {}) };
 
-    expect(catalogosNoDisponibles(registro)).toEqual([
+    expect(unavailableCatalogs(registro)).toEqual([
       { proveedor: 'b', error: 'catalogo_no_disponible', detail: expect.any(String) },
     ]);
   });
@@ -371,7 +371,7 @@ describe('catalogosNoDisponibles', () => {
     catalogos.set('b', [producto({ sku: 'B1' })]);
 
     expect(
-      catalogosNoDisponibles({ a: proveedorFalso('a', {}), b: proveedorFalso('b', {}) }),
+      unavailableCatalogs({ a: proveedorFalso('a', {}), b: proveedorFalso('b', {}) }),
     ).toEqual([]);
   });
 
@@ -383,27 +383,27 @@ describe('catalogosNoDisponibles', () => {
     const sinLlaves = proveedorFalso('b', {}, { configurado: false });
     const registro = { a: proveedorFalso('a', {}), b: sinLlaves };
 
-    expect(catalogosNoDisponibles(registro)).toEqual([
+    expect(unavailableCatalogs(registro)).toEqual([
       { proveedor: 'b', error: 'proveedor_no_configurado', detail: expect.any(String) },
     ]);
   });
 });
 
-describe('claveDeSku', () => {
+describe('skuKey', () => {
   it('devuelve la clave del producto que ese proveedor identifica con el SKU', () => {
     catalogos.set('a', [producto({ sku: 'A1', mpn: 'MPN1', marca: 'HP' })]);
 
-    expect(claveDeSku('a', 'A1')).toEqual({ estado: 'ok', clave: 'mpn1|hp' });
+    expect(skuKey('a', 'A1')).toEqual({ estado: 'ok', clave: 'mpn1|hp' });
   });
 
   it('distingue el catalogo sin cargar', () => {
-    expect(claveDeSku('a', 'A1')).toEqual({ estado: 'catalogo_no_disponible' });
+    expect(skuKey('a', 'A1')).toEqual({ estado: 'catalogo_no_disponible' });
   });
 
   it('distingue el SKU que ese proveedor no conoce', () => {
     catalogos.set('a', [producto({ sku: 'A1' })]);
 
-    expect(claveDeSku('a', 'NOEXISTE')).toEqual({ estado: 'sku_desconocido' });
+    expect(skuKey('a', 'NOEXISTE')).toEqual({ estado: 'sku_desconocido' });
   });
 
   // Sin MPN o sin marca el producto no se puede comparar. Decirlo es mejor que
@@ -411,19 +411,19 @@ describe('claveDeSku', () => {
   it('distingue el producto que no tiene clave de union', () => {
     catalogos.set('a', [producto({ sku: 'A1', mpn: null })]);
 
-    expect(claveDeSku('a', 'A1')).toEqual({ estado: 'no_comparable' });
+    expect(skuKey('a', 'A1')).toEqual({ estado: 'no_comparable' });
   });
 });
 
-describe('hayAlgunCatalogo', () => {
+describe('hasAnyCatalog', () => {
   it('es false cuando ningun proveedor cargo su catalogo', () => {
-    expect(hayAlgunCatalogo({ a: proveedorFalso('a', {}) })).toBe(false);
+    expect(hasAnyCatalog({ a: proveedorFalso('a', {}) })).toBe(false);
   });
 
   it('es true con que uno lo tenga', () => {
     catalogos.set('a', [producto({ sku: 'A1' })]);
 
-    expect(hayAlgunCatalogo({ a: proveedorFalso('a', {}), b: proveedorFalso('b', {}) })).toBe(true);
+    expect(hasAnyCatalog({ a: proveedorFalso('a', {}), b: proveedorFalso('b', {}) })).toBe(true);
   });
 });
 
@@ -439,7 +439,7 @@ describe('stock desconocido', () => {
       b: proveedorFalso('b', { B1: { price: 100, currency: 'USD', inStock: null } }),
     };
 
-    const r = await compararPorClave(CLAVE, registro);
+    const r = await compareByKey(CLAVE, registro);
 
     expect(r.mejor).toMatchObject({ proveedor: 'a', criterio: 'mas_barato_con_stock' });
   });
@@ -454,7 +454,7 @@ describe('stock desconocido', () => {
       b: proveedorFalso('b', { B1: { price: 200, currency: 'USD', inStock: null } }),
     };
 
-    const r = await compararPorClave(CLAVE, registro);
+    const r = await compareByKey(CLAVE, registro);
 
     expect(r.mejor).toMatchObject({ proveedor: 'b', criterio: 'stock_desconocido' });
   });
@@ -467,7 +467,7 @@ describe('stock desconocido', () => {
       b: proveedorFalso('b', { B1: { price: 100, currency: 'USD', inStock: null } }),
     };
 
-    const r = await compararPorClave(CLAVE, registro);
+    const r = await compareByKey(CLAVE, registro);
 
     expect(r.mejor).toMatchObject({ proveedor: 'b', criterio: 'stock_desconocido' });
   });
@@ -476,7 +476,7 @@ describe('stock desconocido', () => {
     catalogos.set('a', [producto({ sku: 'A1' })]);
     const registro = { a: proveedorFalso('a', { A1: { price: 130, currency: 'USD', inStock: 0 } }) };
 
-    const r = await compararPorClave(CLAVE, registro);
+    const r = await compareByKey(CLAVE, registro);
 
     expect(r.mejor).toMatchObject({ criterio: 'mas_barato_sin_stock' });
   });

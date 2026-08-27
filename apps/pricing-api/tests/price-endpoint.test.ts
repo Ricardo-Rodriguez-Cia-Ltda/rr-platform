@@ -8,8 +8,8 @@ vi.mock('@rr/providers/intcomex', () => ({
   intcomex: {
     nombre: 'intcomex',
     maxSkusPorLote: 100,
-    estaConfigurado: () => true,
-    cargarCatalogo: async () => [],
+    isConfigured: () => true,
+    loadCatalog: async () => [],
     getPrecios: async () => new Map(),
     getPrecio: (query: unknown) => getPriceMock(query),
   },

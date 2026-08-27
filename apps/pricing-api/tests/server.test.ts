@@ -18,7 +18,7 @@ const CATALOGO = [
 
 vi.mock('@rr/providers/catalog', async () => {
   const actual = await vi.importActual<typeof import('@rr/providers/catalog')>('@rr/providers/catalog');
-  return { ...actual, obtenerCatalogo: () => CATALOGO };
+  return { ...actual, getCatalog: () => CATALOGO };
 });
 
 vi.mock('@rr/providers/intcomex', () => ({
@@ -26,8 +26,8 @@ vi.mock('@rr/providers/intcomex', () => ({
   intcomex: {
     nombre: 'intcomex',
     maxSkusPorLote: 100,
-    estaConfigurado: () => true,
-    cargarCatalogo: async () => [],
+    isConfigured: () => true,
+    loadCatalog: async () => [],
     getPrecios: async () => new Map([['HP1', { price: 1000, currency: 'us', inStock: 5 }]]),
     getPrecio: (query: unknown) => getPriceMock(query),
   },

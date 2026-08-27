@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { CatalogUnavailableError } from '@rr/providers/catalog';
-import type { ProductoNormalizado } from '@rr/domain/product';
+import type { NormalizedProduct } from '@rr/domain/product';
 import { ProviderError } from '@rr/domain/types';
 
 // Contrato transversal de errores.
@@ -18,7 +18,7 @@ const getPriceMock = vi.fn();
 
 vi.mock('@rr/providers/catalog', async () => {
   const actual = await vi.importActual<typeof import('@rr/providers/catalog')>('@rr/providers/catalog');
-  return { ...actual, obtenerCatalogo: () => obtenerCatalogoMock() };
+  return { ...actual, getCatalog: () => obtenerCatalogoMock() };
 });
 
 vi.mock('@rr/providers/intcomex', () => ({
@@ -26,13 +26,13 @@ vi.mock('@rr/providers/intcomex', () => ({
   intcomex: {
     nombre: 'intcomex',
     maxSkusPorLote: 100,
-    estaConfigurado: () =>
+    isConfigured: () =>
       Boolean(
         process.env.INTCOMEX_API_KEY &&
           process.env.INTCOMEX_ACCESS_KEY &&
           process.env.INTCOMEX_BASE_URL,
       ),
-    cargarCatalogo: async () => [],
+    loadCatalog: async () => [],
     getPrecios: (skus: string[]) => getPricesMock(skus),
     getPrecio: (query: unknown) => getPriceMock(query),
   },
@@ -53,7 +53,7 @@ type Handler = (req: VercelRequest, res: VercelResponse) => Promise<void>;
 const SECRETO = 'k3y-de-prueba-no-filtrar';
 const AUTH = { 'x-api-key': SECRETO };
 
-function producto(sku: string, nombre: string): ProductoNormalizado {
+function producto(sku: string, nombre: string): NormalizedProduct {
   return {
     sku,
     mpn: `MPN-${sku}`,

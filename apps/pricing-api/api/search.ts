@@ -1,5 +1,5 @@
-import { crearHandlerBusqueda } from '../src/handlers/search.js';
-import { PROVEEDORES } from '@rr/providers';
+import { createSearchHandler } from '../src/handlers/search.js';
+import { PROVIDERS } from '@rr/providers';
 
 // Alias historico: el agente Rayo apunta aca y no debe enterarse del cambio.
-export default crearHandlerBusqueda(PROVEEDORES.intcomex);
+export default createSearchHandler(PROVIDERS.intcomex);

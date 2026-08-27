@@ -1,3 +1,3 @@
-import { crearHandlerBusquedaPorRuta } from '../../src/handlers/search.js';
+import { createSearchByRouteHandler } from '../../src/handlers/search.js';
 
-export default crearHandlerBusquedaPorRuta();
+export default createSearchByRouteHandler();

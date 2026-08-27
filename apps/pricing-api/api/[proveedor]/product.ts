@@ -1,3 +1,3 @@
-import { crearHandlerProductoPorRuta } from '../../src/handlers/product.js';
+import { createProductByRouteHandler } from '../../src/handlers/product.js';
 
-export default crearHandlerProductoPorRuta();
+export default createProductByRouteHandler();

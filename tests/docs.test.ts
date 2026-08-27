@@ -169,7 +169,7 @@ describe('docs/api sigue el codigo: nombres de campo de las respuestas', () => {
     },
   );
 
-  it.each(camposDeInterfaz(readFileSync('packages/domain/src/search.ts', 'utf8'), 'Facetas'))(
+  it.each(camposDeInterfaz(readFileSync('packages/domain/src/search.ts', 'utf8'), 'Facets'))(
     "la faceta '%s' esta documentada",
     (campo) => {
       expect(DOCS).toContain(campo);
@@ -201,7 +201,7 @@ describe('docs/api sigue el codigo: constantes citadas', () => {
     ['LIMITE_POR_DEFECTO', constante(codigoSearch, 'LIMITE_POR_DEFECTO')],
     ['MAX_CANDIDATOS_SIN_FILTROS', constante(codigoSearch, 'MAX_CANDIDATOS_SIN_FILTROS')],
     ['MAX_CANDIDATOS_CON_FILTROS', constante(codigoSearch, 'MAX_CANDIDATOS_CON_FILTROS')],
-    ['MAX_SKUS_POR_LLAMADA', constante(codigoIntcomex, 'MAX_SKUS_POR_LLAMADA')],
+    ['MAX_SKUS_PER_CALL', constante(codigoIntcomex, 'MAX_SKUS_PER_CALL')],
   ];
 
   // Se exige que el numero aparezca destacado (negrita o codigo), no suelto en
@@ -259,8 +259,8 @@ describe('openapi.yaml es internamente consistente', () => {
   // path esta suite queda en verde con el agente sin poder usar el proveedor
   // nuevo en el endpoint del precio oficial.
   it('todos los enum inline de proveedores coinciden con el registro', async () => {
-    const { PROVEEDORES } = await import('@rr/providers');
-    const registro = Object.keys(PROVEEDORES).sort();
+    const { PROVIDERS } = await import('@rr/providers');
+    const registro = Object.keys(PROVIDERS).sort();
 
     // Cualquier enum inline de 2+ valores que sean todos proveedores reales
     // es, por definicion, una lista de "los proveedores": tiene que

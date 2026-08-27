@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import type { ProductoNormalizado } from '@rr/domain/product';
+import type { NormalizedProduct } from '@rr/domain/product';
 
 const obtenerCatalogoMock = vi.fn();
 const getPreciosMock = vi.fn();
 
 vi.mock('@rr/providers/catalog', async () => {
   const actual = await vi.importActual<typeof import('@rr/providers/catalog')>('@rr/providers/catalog');
-  return { ...actual, obtenerCatalogo: () => obtenerCatalogoMock() };
+  return { ...actual, getCatalog: () => obtenerCatalogoMock() };
 });
 
 vi.mock('@rr/providers/intcomex', () => ({
@@ -16,13 +16,13 @@ vi.mock('@rr/providers/intcomex', () => ({
   intcomex: {
     nombre: 'intcomex',
     maxSkusPorLote: 100,
-    estaConfigurado: () =>
+    isConfigured: () =>
       Boolean(
         process.env.INTCOMEX_API_KEY &&
           process.env.INTCOMEX_ACCESS_KEY &&
           process.env.INTCOMEX_BASE_URL,
       ),
-    cargarCatalogo: async () => [],
+    loadCatalog: async () => [],
     getPrecios: (skus: string[]) => getPreciosMock(skus),
     getPrecio: async () => {
       throw new Error('no usado');
@@ -35,7 +35,7 @@ const { default: porRutaSearch } = await import('../api/[proveedor]/search.js');
 const { default: porRutaProduct } = await import('../api/[proveedor]/product.js');
 const { default: porRutaFacetas } = await import('../api/[proveedor]/facetas.js');
 
-function producto(sku: string, nombre: string): ProductoNormalizado {
+function producto(sku: string, nombre: string): NormalizedProduct {
   return {
     sku,
     mpn: `MPN-${sku}`,

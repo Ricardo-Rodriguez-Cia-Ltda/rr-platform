@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { proveedoresConfigurados, refrescarTodos } from '@rr/domain/refresh';
+import { configuredProviders, refreshAll } from '@rr/domain/refresh';
 
 beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
-describe('refrescarTodos', () => {
+describe('refreshAll', () => {
   // Que un proveedor este caido no puede dejar sin catalogo a los demas: hoy
   // server.ts carga uno solo y un throw ahi mata el refresco entero.
   it('carga los demas proveedores aunque uno falle', async () => {
@@ -15,7 +15,7 @@ describe('refrescarTodos', () => {
       return [];
     });
 
-    await refrescarTodos(['ingram', 'intcomex'], cargar);
+    await refreshAll(['ingram', 'intcomex'], cargar);
 
     expect(cargar).toHaveBeenCalledTimes(2);
     expect(cargar).toHaveBeenCalledWith('intcomex');
@@ -23,7 +23,7 @@ describe('refrescarTodos', () => {
 
   it('no rechaza aunque fallen todos', async () => {
     const cargar = vi.fn().mockRejectedValue(new Error('todo caido'));
-    await expect(refrescarTodos(['a', 'b'], cargar)).resolves.toBeUndefined();
+    await expect(refreshAll(['a', 'b'], cargar)).resolves.toBeUndefined();
   });
 
   it('avisa solo por los proveedores que fallaron', async () => {
@@ -33,7 +33,7 @@ describe('refrescarTodos', () => {
     });
     const alFallar = vi.fn();
 
-    await refrescarTodos(['ingram', 'intcomex'], cargar, alFallar);
+    await refreshAll(['ingram', 'intcomex'], cargar, alFallar);
 
     expect(alFallar).toHaveBeenCalledTimes(1);
     expect(alFallar).toHaveBeenCalledWith('ingram', expect.any(Error));
@@ -45,7 +45,7 @@ describe('refrescarTodos', () => {
     const boom = new Error('exceso de llamadas');
     const alFallar = vi.fn();
 
-    await refrescarTodos(['tecnoglobal'], vi.fn().mockRejectedValue(boom), alFallar);
+    await refreshAll(['tecnoglobal'], vi.fn().mockRejectedValue(boom), alFallar);
 
     expect(alFallar).toHaveBeenCalledWith('tecnoglobal', boom);
   });
@@ -61,26 +61,26 @@ describe('refrescarTodos', () => {
       return [];
     });
 
-    await refrescarTodos(['a', 'b', 'c'], cargar);
+    await refreshAll(['a', 'b', 'c'], cargar);
 
     expect(pico).toBeGreaterThan(1);
   });
 });
 
-describe('proveedoresConfigurados', () => {
+describe('configuredProviders', () => {
   // Ingram y cualquier proveedor nuevo viven sin credenciales hasta que TI las
   // entrega. Intentar refrescarlos igual llena el log de fallas esperadas y
   // agenda un reintento cada 5 minutos que nunca va a funcionar.
   it('deja fuera a los proveedores sin credenciales', () => {
     const registro = {
-      listo: { estaConfigurado: () => true },
-      pendiente: { estaConfigurado: () => false },
+      listo: { isConfigured: () => true },
+      pendiente: { isConfigured: () => false },
     };
 
-    expect(proveedoresConfigurados(registro)).toEqual(['listo']);
+    expect(configuredProviders(registro)).toEqual(['listo']);
   });
 
   it('devuelve vacio si no hay ninguno configurado', () => {
-    expect(proveedoresConfigurados({ a: { estaConfigurado: () => false } })).toEqual([]);
+    expect(configuredProviders({ a: { isConfigured: () => false } })).toEqual([]);
   });
 });

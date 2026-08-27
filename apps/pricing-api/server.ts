@@ -4,10 +4,10 @@ import { fileURLToPath } from 'node:url';
 // catalogos se comparten y bajarlos de nuevo cuesta cuota en Tecnoglobal.
 process.env.CATALOG_CACHE_DIR ??= fileURLToPath(new URL('../../cache', import.meta.url));
 
-import { cargarCatalogo } from '@rr/providers/catalog';
-import { PROVEEDORES } from '@rr/providers';
-import { MENSAJE_CUOTA } from '@rr/providers/tecnoglobal';
-import { proveedoresConfigurados, refrescarTodos } from '@rr/domain/refresh';
+import { loadCatalog } from '@rr/providers/catalog';
+import { PROVIDERS } from '@rr/providers';
+import { QUOTA_MESSAGE } from '@rr/providers/tecnoglobal';
+import { configuredProviders, refreshAll } from '@rr/domain/refresh';
 import { createApp } from './src/app.js';
 
 const port = Number(process.env.PORT ?? 3000);
@@ -33,26 +33,26 @@ const REINTENTO_MS = 5 * 60 * 1000;
 const REINTENTO_CUOTA_MS = 30 * 60 * 1000;
 
 function esCuotaAgotada(error: unknown): boolean {
-  return error instanceof Error && error.message.includes(MENSAJE_CUOTA);
+  return error instanceof Error && error.message.includes(QUOTA_MESSAGE);
 }
 
 // El reintento se agenda solo para el proveedor que fallo: reintentar los tres
 // porque uno se cayo multiplica llamadas a proveedores que ya respondieron bien.
-function reintentar(proveedor: string, error: unknown): void {
-  const espera = esCuotaAgotada(error) ? REINTENTO_CUOTA_MS : REINTENTO_MS;
-  console.log(`[catalog] ${proveedor}: reintento en ${Math.round(espera / 60000)} min`);
+function reintentar(provider: string, error: unknown): void {
+  const delay = esCuotaAgotada(error) ? REINTENTO_CUOTA_MS : REINTENTO_MS;
+  console.log(`[catalog] ${provider}: reintento en ${Math.round(delay / 60000)} min`);
   setTimeout(() => {
-    void refrescarTodos([proveedor], cargarCatalogo, reintentar);
-  }, espera).unref();
+    void refreshAll([provider], loadCatalog, reintentar);
+  }, delay).unref();
 }
 
 function refrescar(): void {
-  const nombres = proveedoresConfigurados(PROVEEDORES);
-  const pendientes = Object.keys(PROVEEDORES).filter((n) => !nombres.includes(n));
-  if (pendientes.length > 0) {
-    console.log(`[catalog] sin credenciales, no se refrescan: ${pendientes.join(', ')}`);
+  const names = configuredProviders(PROVIDERS);
+  const pending = Object.keys(PROVIDERS).filter((n) => !names.includes(n));
+  if (pending.length > 0) {
+    console.log(`[catalog] sin credenciales, no se refrescan: ${pending.join(', ')}`);
   }
-  void refrescarTodos(nombres, cargarCatalogo, reintentar);
+  void refreshAll(names, loadCatalog, reintentar);
 }
 
 refrescar();

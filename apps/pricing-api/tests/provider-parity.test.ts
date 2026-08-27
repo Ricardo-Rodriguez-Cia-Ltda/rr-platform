@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { PROVEEDORES } from '@rr/providers';
-import { normalizarProducto as normalizarIngram } from '@rr/providers/ingram';
-import { normalizarProducto as normalizarIntcomex } from '@rr/providers/intcomex';
-import { normalizarProducto as normalizarTecnoglobal } from '@rr/providers/tecnoglobal';
-import { claveUnion } from '@rr/domain/product';
-import type { ProductoNormalizado } from '@rr/domain/product';
+import { PROVIDERS } from '@rr/providers';
+import { normalizeProduct as normalizarIngram } from '@rr/providers/ingram';
+import { normalizeProduct as normalizarIntcomex } from '@rr/providers/intcomex';
+import { normalizeProduct as normalizarTecnoglobal } from '@rr/providers/tecnoglobal';
+import { unionKey } from '@rr/domain/product';
+import type { NormalizedProduct } from '@rr/domain/product';
 
 // Paridad de contrato entre proveedores.
 //
@@ -18,13 +18,13 @@ const obtenerCatalogoMock = vi.fn();
 
 vi.mock('@rr/providers/catalog', async () => {
   const actual = await vi.importActual<typeof import('@rr/providers/catalog')>('@rr/providers/catalog');
-  return { ...actual, obtenerCatalogo: () => obtenerCatalogoMock() };
+  return { ...actual, getCatalog: () => obtenerCatalogoMock() };
 });
 
 const { default: porRutaProduct } = await import('../api/[proveedor]/product.js');
 const { default: porRutaFacetas } = await import('../api/[proveedor]/facetas.js');
 
-const PRODUCTO: ProductoNormalizado = {
+const PRODUCTO: NormalizedProduct = {
   sku: 'SKU1',
   mpn: 'MPN1',
   nombre: 'Producto de prueba',
@@ -67,13 +67,13 @@ function makeRes(): VercelResponse & { statusCode: number; body: any } {
   return res;
 }
 
-const NOMBRES = Object.keys(PROVEEDORES);
+const NOMBRES = Object.keys(PROVIDERS);
 
 beforeEach(() => {
   vi.stubEnv('API_SECRET_KEY', 'test-secret');
   obtenerCatalogoMock.mockReset().mockReturnValue([PRODUCTO]);
-  for (const proveedor of Object.values(PROVEEDORES)) {
-    vi.spyOn(proveedor, 'estaConfigurado').mockReturnValue(true);
+  for (const proveedor of Object.values(PROVIDERS)) {
+    vi.spyOn(proveedor, 'isConfigured').mockReturnValue(true);
     vi.spyOn(proveedor, 'getPrecios').mockResolvedValue(
       new Map([['SKU1', { price: 100, currency: 'USD', inStock: 3 }]]),
     );
@@ -109,7 +109,7 @@ describe('paridad de contrato entre proveedores', () => {
   // Cada proveedor trae su propia respuesta cruda. El catalogo, el buscador y
   // la comparacion futura leen los campos por nombre: uno que normalice a otra
   // forma los rompe en silencio.
-  const NORMALIZADORES: [string, () => ProductoNormalizado][] = [
+  const NORMALIZADORES: [string, () => NormalizedProduct][] = [
     [
       'intcomex',
       () =>
@@ -151,8 +151,8 @@ describe('paridad de contrato entre proveedores', () => {
     expect(NORMALIZADORES.map(([n]) => n).sort()).toEqual(NOMBRES.sort());
   });
 
-  it.each(NORMALIZADORES)('%s normaliza a la forma comun de ProductoNormalizado', (_n, normalizar) => {
-    const producto = normalizar();
+  it.each(NORMALIZADORES)('%s normaliza a la forma comun de NormalizedProduct', (_n, normalize) => {
+    const producto = normalize();
     expect(Object.keys(producto).sort()).toEqual([...Object.keys(PRODUCTO)].sort());
     expect(producto).toMatchObject({
       sku: 'SKU1',
@@ -167,12 +167,12 @@ describe('paridad de contrato entre proveedores', () => {
   // El "mejor precio" empareja por MPN + marca. Si dos proveedores producen
   // claves distintas para el mismo producto, la comparacion nunca los junta.
   it('el mismo producto en los tres proveedores produce la misma clave de union', () => {
-    const claves = new Set(NORMALIZADORES.map(([, normalizar]) => claveUnion(normalizar())));
+    const claves = new Set(NORMALIZADORES.map(([, normalize]) => unionKey(normalize())));
     expect(claves.size).toBe(1);
     expect([...claves][0]).not.toBeNull();
   });
 
   it.each(NOMBRES)('%s declara un tope de lote propio y positivo', (nombre) => {
-    expect(PROVEEDORES[nombre].maxSkusPorLote).toBeGreaterThan(0);
+    expect(PROVIDERS[nombre].maxSkusPorLote).toBeGreaterThan(0);
   });
 });

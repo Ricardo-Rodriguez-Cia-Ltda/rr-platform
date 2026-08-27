@@ -35,13 +35,13 @@ interface RespuestaFacetas {
 
 const response = await fetch(`${BASE}/facetas`, { headers: { 'x-api-key': apiKey } });
 if (!response.ok) {
-  const cuerpo = await response.text().catch(() => '');
-  console.error(`GET ${BASE}/facetas respondio HTTP ${response.status}`, cuerpo.slice(0, 300));
+  const body = await response.text().catch(() => '');
+  console.error(`GET ${BASE}/facetas respondio HTTP ${response.status}`, body.slice(0, 300));
   process.exit(1);
 }
 
-const facetas = (await response.json()) as RespuestaFacetas;
-if (!facetas.marca?.length || !facetas.categoria?.length) {
+const facets = (await response.json()) as RespuestaFacetas;
+if (!facets.marca?.length || !facets.categoria?.length) {
   console.error('La respuesta de /facetas vino sin marcas o sin categorias; no se sobrescribe nada');
   process.exit(1);
 }
@@ -52,15 +52,15 @@ function tabla(items: Conteo[]): string {
   );
 }
 
-const generadoEn = new Date().toISOString().slice(0, 10);
+const generatedAt = new Date().toISOString().slice(0, 10);
 
-const contenido = `# Vocabulario del catálogo
+const content = `# Vocabulario del catálogo
 
 > **Archivo generado.** No editar a mano: se sobrescribe con
 > \`npm run docs:vocabulario\`.
 >
-> Generado el ${generadoEn} desde \`${BASE}/facetas\` · ${facetas.total_productos} productos
-> · ${facetas.marca.length} marcas · ${facetas.categoria.length} categorías.
+> Generado el ${generatedAt} desde \`${BASE}/facetas\` · ${facets.total_productos} productos
+> · ${facets.marca.length} marcas · ${facets.categoria.length} categorías.
 
 Los parámetros \`marca\` y \`categoria\` de \`GET /search\` son filtros **exactos**
 (la comparación ignora tildes y mayúsculas, nada más). Solo los valores de estas
@@ -70,16 +70,16 @@ largo, singular por plural— devuelve vacío.
 Esta lista está pensada para inyectarse en el system prompt de un agente, para
 que sepa traducir lo que pide el cliente al vocabulario real del catálogo.
 
-## Categorías (${facetas.categoria.length})
+## Categorías (${facets.categoria.length})
 
-${tabla(facetas.categoria)}
+${tabla(facets.categoria)}
 
-## Marcas (${facetas.marca.length})
+## Marcas (${facets.marca.length})
 
-${tabla(facetas.marca)}
+${tabla(facets.marca)}
 `;
 
-writeFileSync(DESTINO, contenido);
+writeFileSync(DESTINO, content);
 console.log(
-  `${DESTINO} actualizado: ${facetas.categoria.length} categorías, ${facetas.marca.length} marcas, ${facetas.total_productos} productos.`,
+  `${DESTINO} actualizado: ${facets.categoria.length} categorías, ${facets.marca.length} marcas, ${facets.total_productos} productos.`,
 );

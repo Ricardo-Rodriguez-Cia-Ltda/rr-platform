@@ -3,13 +3,13 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  _resetFotoParaTests,
+  _resetSnapshotForTests,
   cargarCatalogoTecnoglobal,
   getPrice,
   getPrices,
-  normalizarProducto,
+  normalizeProduct,
   tecnoglobal,
-  type ProductoTecnoglobal,
+  type TecnoglobalProduct,
 } from '@rr/providers/tecnoglobal';
 import { ProviderError } from '@rr/domain/types';
 
@@ -18,11 +18,11 @@ import { ProviderError } from '@rr/domain/types';
 // cuando el producto no tiene codigo.
 const RESPUESTA = JSON.parse(
   readFileSync('packages/providers/tests/fixtures/tecnoglobal-price.json', 'utf8'),
-) as { products: ProductoTecnoglobal[] };
+) as { products: TecnoglobalProduct[] };
 
 const PRODUCTOS = RESPUESTA.products;
 
-function respuesta(body: unknown, status = 200): Response {
+function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status });
 }
 
@@ -32,9 +32,9 @@ function respuesta(body: unknown, status = 200): Response {
 function fetchQueResuelvePorFoto(): ReturnType<typeof vi.fn> {
   return vi.fn(async (url: URL) => {
     const ultimo = url.pathname.split('/').pop()!;
-    if (ultimo === 'price') return respuesta(RESPUESTA);
+    if (ultimo === 'price') return response(RESPUESTA);
     const producto = PRODUCTOS.find((p) => p.codigoTg === ultimo);
-    return respuesta({ error: false, products: producto ? [producto] : [] });
+    return response({ error: false, products: producto ? [producto] : [] });
   });
 }
 
@@ -48,7 +48,7 @@ beforeEach(() => {
   vi.stubEnv('TECNOGLOBAL_USER', 'usuario');
   vi.stubEnv('TECNOGLOBAL_PASSWORD', '0123456789abcdef0123456789abcdef');
   vi.stubEnv('TECNOGLOBAL_BASE_URL', 'http://tecnoglobal.test/stock/v1/');
-  _resetFotoParaTests();
+  _resetSnapshotForTests();
 });
 
 afterEach(() => {
@@ -56,34 +56,34 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('estaConfigurado', () => {
+describe('isConfigured', () => {
   it('es false sin credenciales', () => {
     vi.stubEnv('TECNOGLOBAL_USER', '');
-    expect(tecnoglobal.estaConfigurado()).toBe(false);
+    expect(tecnoglobal.isConfigured()).toBe(false);
   });
 
   it('es true con usuario y clave', () => {
-    expect(tecnoglobal.estaConfigurado()).toBe(true);
+    expect(tecnoglobal.isConfigured()).toBe(true);
   });
 });
 
 describe('autenticacion', () => {
   it('manda Basic con la clave tal cual la entrega TI, sin volver a hashearla', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(respuesta(RESPUESTA));
+    const fetchMock = vi.fn().mockResolvedValue(response(RESPUESTA));
     vi.stubGlobal('fetch', fetchMock);
 
     await cargarCatalogoTecnoglobal();
 
     const [url, init] = fetchMock.mock.calls[0];
     expect((url as URL).href).toBe('http://tecnoglobal.test/stock/v1/price');
-    const esperado = Buffer.from('usuario:0123456789abcdef0123456789abcdef').toString('base64');
-    expect((init as RequestInit).headers).toMatchObject({ Authorization: `Basic ${esperado}` });
+    const expected = Buffer.from('usuario:0123456789abcdef0123456789abcdef').toString('base64');
+    expect((init as RequestInit).headers).toMatchObject({ Authorization: `Basic ${expected}` });
   });
 });
 
-describe('normalizarProducto', () => {
+describe('normalizeProduct', () => {
   it('mapea los campos de Tecnoglobal a la forma comun', () => {
-    expect(normalizarProducto(PRODUCTOS[0])).toEqual({
+    expect(normalizeProduct(PRODUCTOS[0])).toEqual({
       sku: 'KN3-661',
       mpn: 'SDS3/128GB',
       nombre: 'Memoria 128GB SD XC Canvas Select Plus Gen3 150MB/',
@@ -95,19 +95,19 @@ describe('normalizarProducto', () => {
   });
 
   it('deja la subcategoria vacia cuando no viene', () => {
-    expect(normalizarProducto({ codigoTg: 'X1' }).subcategorias).toEqual([]);
+    expect(normalizeProduct({ codigoTg: 'X1' }).subcategorias).toEqual([]);
   });
 
   // El MPN es la unica clave de union entre distribuidores: una cadena vacia
   // colandose como MPN emparejaria productos sin relacion.
   it('trata un pnFabricante vacio como ausencia de MPN', () => {
-    expect(normalizarProducto({ codigoTg: 'X1', pnFabricante: '   ' }).mpn).toBeNull();
+    expect(normalizeProduct({ codigoTg: 'X1', pnFabricante: '   ' }).mpn).toBeNull();
   });
 });
 
 describe('cargarCatalogoTecnoglobal', () => {
   it('normaliza el catalogo completo', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(respuesta(RESPUESTA)));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(RESPUESTA)));
 
     const catalogo = await cargarCatalogoTecnoglobal();
 
@@ -118,7 +118,7 @@ describe('cargarCatalogoTecnoglobal', () => {
   it('rechaza una respuesta sin productos en vez de dejar el catalogo vacio', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(respuesta({ error: false, message: 'Articulos no fueron encontrados' })),
+      vi.fn().mockResolvedValue(response({ error: false, message: 'Articulos no fueron encontrados' })),
     );
 
     await expect(cargarCatalogoTecnoglobal()).rejects.toThrow();
@@ -135,7 +135,7 @@ describe('cargarCatalogoTecnoglobal', () => {
   it('trata error:true como falla aunque el status sea 200', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(respuesta({ error: true, message: 'Credenciales invalidas' })),
+      vi.fn().mockResolvedValue(response({ error: true, message: 'Credenciales invalidas' })),
     );
 
     await expect(cargarCatalogoTecnoglobal()).rejects.toThrow(/Credenciales invalidas/);
@@ -157,7 +157,7 @@ describe('getPrices', () => {
     const fetchMock = vi.fn(async (url: URL) => {
       const sku = url.pathname.split('/').pop()!;
       const producto = PRODUCTOS.find((p) => p.codigoTg === sku);
-      return respuesta({ error: false, products: producto ? [producto] : [] });
+      return response({ error: false, products: producto ? [producto] : [] });
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -175,7 +175,7 @@ describe('getPrices', () => {
       vi.fn(async (url: URL) => {
         const sku = url.pathname.split('/').pop()!;
         const producto = PRODUCTOS.find((p) => p.codigoTg === sku);
-        return respuesta(
+        return response(
           producto
             ? { error: false, products: [producto] }
             : { error: false, message: 'Articulos no fueron encontrados' },
@@ -191,7 +191,7 @@ describe('getPrices', () => {
   it('conserva el stock en cero en vez de descartar el producto', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => respuesta({ error: false, products: [PRODUCTOS[1]] })),
+      vi.fn(async () => response({ error: false, products: [PRODUCTOS[1]] })),
     );
 
     const precios = await getPrices(['TM0-943']);
@@ -234,7 +234,7 @@ describe('getPrices', () => {
       vi.fn(async (url: URL) => {
         if (primera) {
           primera = false;
-          return respuesta(RESPUESTA);
+          return response(RESPUESTA);
         }
         return new Response(
           JSON.stringify({ error: true, message: 'Excede la cantidad máx. de consultas' }),
@@ -254,7 +254,7 @@ describe('getPrices', () => {
 describe('getPrice', () => {
   it('cotiza por SKU contra el endpoint directo', async () => {
     const fetchMock = vi.fn(async (_url: URL) =>
-      respuesta({ error: false, products: [PRODUCTOS[0]] }),
+      response({ error: false, products: [PRODUCTOS[0]] }),
     );
     vi.stubGlobal('fetch', fetchMock);
 
@@ -301,7 +301,7 @@ describe('getPrice', () => {
   it('devuelve not_found cuando el SKU no existe', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => respuesta({ error: false, message: 'Articulos no fueron encontrados' })),
+      vi.fn(async () => response({ error: false, message: 'Articulos no fueron encontrados' })),
     );
 
     await expect(getPrice({ sku: 'NO-EXISTE' })).rejects.toMatchObject({ kind: 'not_found' });
@@ -390,8 +390,8 @@ describe('una respuesta vacia no queda cacheada como foto', () => {
   it('no deja vigente una foto sin productos', async () => {
     const fetchMock = vi.fn(async (url: URL) =>
       url.pathname.endsWith('/v1/price')
-        ? respuesta({ error: false, message: 'Articulos no fueron encontrados' })
-        : respuesta({ error: false, products: [] }),
+        ? response({ error: false, message: 'Articulos no fueron encontrados' })
+        : response({ error: false, products: [] }),
     );
     vi.stubGlobal('fetch', fetchMock);
 
@@ -409,7 +409,7 @@ describe('una respuesta vacia no queda cacheada como foto', () => {
 // el volcado completo y, con la cuota gastada, respondia 502.
 describe('la foto sobrevive a un reinicio', () => {
   it('la persiste en disco al descargarla', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => respuesta(RESPUESTA)));
+    vi.stubGlobal('fetch', vi.fn(async () => response(RESPUESTA)));
     await cargarCatalogoTecnoglobal();
 
     const ruta = join(process.env.CATALOG_CACHE_DIR!, 'tecnoglobal-precios.json');
@@ -419,13 +419,13 @@ describe('la foto sobrevive a un reinicio', () => {
   });
 
   it('cotiza desde la foto de disco tras reiniciar, sin volver a descargar', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => respuesta(RESPUESTA)));
+    vi.stubGlobal('fetch', vi.fn(async () => response(RESPUESTA)));
     await cargarCatalogoTecnoglobal();
 
     // Reinicio: se pierde la memoria, queda el disco.
-    _resetFotoParaTests();
+    _resetSnapshotForTests();
 
-    const fetchMock = vi.fn(async () => respuesta(RESPUESTA));
+    const fetchMock = vi.fn(async () => response(RESPUESTA));
     vi.stubGlobal('fetch', fetchMock);
     const grande = [...PRODUCTOS.map((p) => p.codigoTg), 'X1', 'X2', 'X3'];
 
@@ -435,9 +435,9 @@ describe('la foto sobrevive a un reinicio', () => {
 
   // El caso que provoco el 502: foto de disco vencida y cuota agotada.
   it('con la foto de disco vencida y la cuota agotada, cotiza igual', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => respuesta(RESPUESTA)));
+    vi.stubGlobal('fetch', vi.fn(async () => response(RESPUESTA)));
     await cargarCatalogoTecnoglobal();
-    _resetFotoParaTests();
+    _resetSnapshotForTests();
 
     vi.stubEnv('TECNOGLOBAL_PRECIOS_TTL_MS', '0');
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -459,7 +459,7 @@ describe('la foto sobrevive a un reinicio', () => {
 
   it('ignora una foto de disco corrupta en vez de arrastrar el error', async () => {
     writeFileSync(join(process.env.CATALOG_CACHE_DIR!, 'tecnoglobal-precios.json'), 'no json');
-    vi.stubGlobal('fetch', vi.fn(async () => respuesta(RESPUESTA)));
+    vi.stubGlobal('fetch', vi.fn(async () => response(RESPUESTA)));
 
     const grande = [...PRODUCTOS.map((p) => p.codigoTg), 'X1', 'X2', 'X3'];
     expect((await getPrices(grande)).size).toBe(PRODUCTOS.length);
