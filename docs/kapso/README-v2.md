@@ -205,6 +205,9 @@ ORDER BY updated_at DESC;
      de Resend → Resend devuelve 4xx con un mensaje al respecto en `error`.
    - Timeout o corte de red hacia `api.resend.com` → `error` trae el
      mensaje de la excepción, no una respuesta HTTP.
+
+**Límite de tiempo para recuperar:** la recuperación está acotada por la validez de la cotización. Con `COTIZACION_VALID_HOURS=3`, tienes tres horas desde que se generó para reintentar. Pasado ese plazo, `emitir-ordenes-compra` devuelve **HTTP 409** (`"La cotización expiró; debe recalcularse."`) sin tocar la base D1 ni intentar ningún envío más. Si ves un 409, la cotización venció: no hay remedio reinventando. Toca recalcular la cotización (paso anterior) y hacer que el cliente la confirme de nuevo; las órdenes contra la cotización vieja están cerradas.
+
 3. **Reintentar es seguro:** repetir el mismo `invoke` con el mismo
    `quote_id`/`version` no reenvía las órdenes que ya quedaron `sent` (esas
    vuelven `duplicate` sin tocar Resend), pero sí reintenta las que quedaron
