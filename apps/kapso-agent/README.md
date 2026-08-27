@@ -43,7 +43,7 @@ falta.
 | Function | Secreto | Origen del valor |
 |---|---|---|
 | `buscar-productos-v2` | `API_PRECIOS_KEY` | `API_SECRET_KEY` de `.env.local` (el mismo header `x-api-key` que usa `captador-precios-proveedores`) |
-| `buscar-productos-v2` | `MARGEN` | Constante `VALORES.MARGEN` en `scripts/deploy-functions.ts` (hoy `0.13`) |
+| `buscar-productos-v2` | `MARGEN` | Constante `VALUES.MARGEN` en `scripts/deploy-functions.ts` (hoy `0.13`) |
 | `generar-cotizacion-v2` | `API_PRECIOS_KEY` | Igual que arriba |
 | `generar-cotizacion-v2` | `MARGEN` | Igual que arriba |
 | `generar-cotizacion-v2` | `TIPO_CAMBIO_CLP_USD` | `process.env.TIPO_CAMBIO_CLP_USD` si existe, si no `950` (fallback en el script) |
@@ -104,7 +104,7 @@ directamente:
 
 ```
 scripts/deploy-functions.ts
-  const VALORES: Record<string, string> = {
+  const VALUES: Record<string, string> = {
     ...
     MARGEN: '0.13',
     ...
@@ -121,7 +121,7 @@ hace falta redeploy del código: un secreto se cambia sin tocar el Worker.
 único dentro de la function y **rechaza** un nombre que ya existe (no lo
 sobrescribe), y `DELETE /functions/{id}/secrets/{name}` borra por nombre.
 Así que cambiar un valor es necesariamente borrar y volver a crear, y eso es
-lo que hace `sincronizarSecreto()` en `scripts/deploy-functions.ts`:
+lo que hace `syncSecret()` en `scripts/deploy-functions.ts`:
 
 1. `GET /functions/{id}/secrets` para saber qué nombres ya existen (la API
    devuelve solo `{name, type}`, nunca valores).
