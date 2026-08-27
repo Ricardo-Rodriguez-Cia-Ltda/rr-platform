@@ -25,9 +25,13 @@ async function esperarDespliegue(id: string, intentos = 10, esperaMs = 1500): Pr
 // devuelve solo `{name, type}`, nunca valores. Consecuencia: cambiar el valor
 // de un secreto es borrarlo y crearlo de nuevo, y lo unico verificable despues
 // es que el nombre este presente.
+// La respuesta real es `{ data: { secrets: [{ name, type }] } }` (verificado
+// contra la cuenta; el OpenAPI publicado sugiere una lista pelada). Se aceptan
+// las dos formas para no volver a caerse si la envuelven distinto.
 async function nombresDeSecretos(id: string): Promise<Set<string>> {
-  const { data } = await kapso<{ data: Secreto[] }>(`/functions/${id}/secrets`);
-  return new Set((data ?? []).map((s) => s.name));
+  const { data } = await kapso<{ data: Secreto[] | { secrets?: Secreto[] } }>(`/functions/${id}/secrets`);
+  const lista = Array.isArray(data) ? data : data?.secrets ?? [];
+  return new Set(lista.map((s) => s.name));
 }
 
 async function cargarSecreto(id: string, nombre: string, valor: string): Promise<void> {
