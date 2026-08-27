@@ -9,12 +9,14 @@
 //   API_BASE=http://127.0.0.1:3000/api npm run docs:vocabulario
 
 import { writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const BASE = (process.env.API_BASE ?? 'https://api.pyxis-latam.cl/rr/captador-precios').replace(
   /\/+$/,
   '',
 );
-const DESTINO = 'docs/api/vocabulario.md';
+// Absoluta: el script corre con el directorio de trabajo en apps/pricing-api.
+const DESTINO = fileURLToPath(new URL('../../../docs/api/vocabulario.md', import.meta.url));
 
 const apiKey = process.env.API_SECRET_KEY;
 if (!apiKey) {
