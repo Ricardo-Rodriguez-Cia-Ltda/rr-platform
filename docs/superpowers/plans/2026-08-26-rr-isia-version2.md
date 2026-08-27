@@ -1656,7 +1656,9 @@ async function main() {
     } else {
       const { data } = await kapso<{ data: Funcion }>('/functions', {
         metodo: 'POST',
-        cuerpo: { function: { name: nombre, slug: nombre, code: codigo, function_type: 'cloudflare_worker' } },
+        // El slug lleva espacio de nombres propio: la function v1 `buscar-productos`
+        // tiene slug `buscar-productos-v2`, y Kapso exige slugs unicos.
+        cuerpo: { function: { name: nombre, slug: `isia-v2-${nombre.replace(/-v2$/, '')}`, code: codigo, function_type: 'cloudflare_worker' } },
       });
       id = data.id;
       console.log(`creada       ${nombre}`);
