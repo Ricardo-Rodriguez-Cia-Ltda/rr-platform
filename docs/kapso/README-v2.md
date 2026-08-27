@@ -1,0 +1,418 @@
+# Operación de `rr-isia-version2`
+
+Workflow de segunda generación: cotiza contra los tres mayoristas
+(Intcomex, Ingram, Tecnoglobal) a través de `captador-precios-proveedores`,
+elige el mejor precio por línea, y emite una orden de compra por mayorista al
+cerrar la venta. El costo real nunca llega al LLM: entra a las Kapso
+Functions y sale como precio de venta.
+
+- **Workflow:** `rr-isia-version2`
+- **id:** `f8fbe458-118e-4c0f-97d0-b24c2fbf151d`
+- **Estado a la fecha de este documento (2026-08-27):** `draft`, 13 nodos,
+  15 aristas (verificado con `GET /workflows/{id}/definition`).
+- **No está activo.** Ver "Activación" más abajo.
+
+---
+
+## Mapa de functions
+
+Obtenido de `GET /functions` el 2026-08-27. Los tres primeros están
+`deployed`; los tres nodos `decide` están `draft` por falta de cupo (ver
+sección dedicada).
+
+| name | function_id | status | usado en el nodo |
+|---|---|---|---|
+| `buscar-productos-v2` | `1ff96971-215b-48a9-9a05-947df53796c6` | deployed | tool del agente `agente_descubrimiento` |
+| `generar-cotizacion-v2` | `6583d731-d5d6-4103-9615-9bc4695aec14` | deployed | `fn_cotizar` |
+| `emitir-ordenes-compra` | `af763c0e-5952-45e6-8eac-b5e5667c0eca` | deployed | `fn_emitir_ordenes` |
+| `route-quote-decision-v2` | `b9fafa4e-3d39-4a9e-adb7-29b92a348b64` | **draft** (sin cupo) | `route_decision` |
+| `check-quote-validity-v2` | `03401bfa-9ecf-4a71-9421-40297fdcc9db` | **draft** (sin cupo) | `fn_check_validity` |
+| `route-rut-v2` | `21e65c7d-88f5-411d-a77d-7e2168d08663` | **draft** (sin cupo) | `route_rut` |
+
+Además, `fn_validar_rut` reutiliza la function de v1 `validar-rut`
+(`68eff91b-3be5-4dfa-bf5e-7f20b7eefed3`, `deployed`) — no tiene versión v2
+propia, es compartida entre `Rayo Perez` y `rr-isia-version2`.
+
+## Secretos por function y de dónde sale cada valor
+
+Los valores nunca se leen ni se imprimen desde este documento ni desde
+ninguna sesión de trabajo; la API de Kapso tampoco los expone (solo nombres).
+Esta tabla dice **de dónde sale** cada uno, para poder recrearlo si hace
+falta.
+
+| Function | Secreto | Origen del valor |
+|---|---|---|
+| `buscar-productos-v2` | `API_PRECIOS_KEY` | `API_SECRET_KEY` de `.env.local` (el mismo header `x-api-key` que usa `captador-precios-proveedores`) |
+| `buscar-productos-v2` | `MARGEN` | Constante `VALORES.MARGEN` en `scripts/kapso-functions.ts` (hoy `0.13`) |
+| `generar-cotizacion-v2` | `API_PRECIOS_KEY` | Igual que arriba |
+| `generar-cotizacion-v2` | `MARGEN` | Igual que arriba |
+| `generar-cotizacion-v2` | `TIPO_CAMBIO_CLP_USD` | `process.env.TIPO_CAMBIO_CLP_USD` si existe, si no `950` (fallback en el script) |
+| `generar-cotizacion-v2` | `IVA_RATE` | Constante `0.19` en el script |
+| `generar-cotizacion-v2` | `COTIZACION_VALID_HOURS` | Constante `3` en el script |
+| `emitir-ordenes-compra` | `MARGEN` | Igual que arriba (mismo 0.13; se usa para reconstruir el costo desde el precio de venta congelado en la cotización) |
+| `emitir-ordenes-compra` | `OC_EMAIL_DESTINO` | `process.env.OC_EMAIL_DESTINO` si existe, si no `pyxis.latam@gmail.com` (fallback en el script) |
+| `emitir-ordenes-compra` | `RESEND_API_KEY` | **Pendiente.** Ver "Secretos pendientes" |
+| `emitir-ordenes-compra` | `RESEND_FROM_EMAIL` | **Pendiente.** Ver "Secretos pendientes" |
+
+### Secretos pendientes
+
+`RESEND_API_KEY` y `RESEND_FROM_EMAIL` **no están cargados** en
+`emitir-ordenes-compra`. Confirmado dos veces: (a) no existen en
+`.env.local`, y (b) `GET /functions/{id}/secrets` sobre
+`af763c0e-5952-45e6-8eac-b5e5667c0eca` devuelve solo
+`["MARGEN", "OC_EMAIL_DESTINO"]`. Mientras falten, la function corta con
+`500 Faltan RESEND_API_KEY o RESEND_FROM_EMAIL` antes de tocar la base D1 o
+de intentar mandar nada (ver smoke test más abajo).
+
+Cómo cargarlos:
+
+1. Conseguir (o emitir de nuevo, ver nota) una API key de Resend y el
+   remitente verificado que se quiera usar.
+2. Agregarlos a `.env.local` como `RESEND_API_KEY=...` y
+   `RESEND_FROM_EMAIL=...`.
+3. Correr `npm run kapso:functions` — el script toma esos valores de
+   `process.env` y hace `POST /functions/{id}/secrets` sobre
+   `emitir-ordenes-compra` (es idempotente: no crea ni redespliega nada más).
+
+**Nota:** `send-quote-request-email` (v1, sigue viva y `deployed`) tenía
+también `RESEND_API_KEY`/`RESEND_FROM_EMAIL` propios, pero esos valores no
+son recuperables (la API nunca expone valores) y son secretos de una
+function distinta de todos modos — no sirven para copiar y pegar en
+`emitir-ordenes-compra` sin decidir antes si se reutiliza la misma cuenta de
+Resend o no.
+
+---
+
+## Cómo redesplegar
+
+```bash
+npm run kapso:functions   # crea/actualiza y despliega las 6 functions de v2, y sincroniza sus secretos
+npm run kapso:workflow    # arma los 13 nodos y 15 aristas y crea o actualiza (PATCH) el workflow por su slug
+```
+
+Ambos son idempotentes: `kapso:functions` busca por `name` antes de crear
+(actualiza si ya existe) y `kapso:workflow` busca el workflow por `slug`
+(`rr-isia-version2`) y hace `PATCH` con el `lock_version` vigente si ya
+existe, o `POST` si no. Correr `kapso:functions` primero siempre que se haya
+tocado una function, porque `kapso:workflow` resuelve los `function_id` por
+nombre contra `GET /functions` en el momento de armar el grafo.
+
+## Cómo cambiar el margen
+
+El margen vive como constante en el código del script, no en Kapso
+directamente:
+
+```
+scripts/kapso-functions.ts
+  const VALORES: Record<string, string> = {
+    ...
+    MARGEN: '0.13',
+    ...
+  };
+```
+
+Editar ese valor y correr `npm run kapso:functions` de nuevo. El script hace
+`POST /functions/{id}/secrets` para las tres functions que declaran
+`MARGEN` en su lista de secretos (`buscar-productos-v2`,
+`generar-cotizacion-v2`, `emitir-ordenes-compra`) — no hace falta redeploy
+del código, un secreto se actualiza sin tocar el Worker.
+
+No confundir con el `MARGEN` de las functions de v1 (`0.30`, usado por
+`Rayo Perez`): son secretos independientes en functions independientes;
+cambiar uno no toca el otro.
+
+---
+
+## Tabla `purchase_orders` (Cloudflare D1, dentro de `emitir-ordenes-compra`)
+
+Se crea sola en el primer `invoke` (`CREATE TABLE IF NOT EXISTS`, ver
+`docs/kapso/functions-v2/emitir-ordenes-compra.js`):
+
+```sql
+CREATE TABLE IF NOT EXISTS purchase_orders (
+  order_key   TEXT PRIMARY KEY,   -- "{quote_id}:{version}:{proveedor}", clave de idempotencia
+  po_id       TEXT,               -- "oc-" + order_key saneado, el id que ve el humano
+  quote_id    TEXT,
+  quote_version TEXT,
+  proveedor   TEXT,               -- intcomex | ingram | tecnoglobal
+  status      TEXT,               -- processing | sent | duplicate | failed
+  email_id    TEXT,               -- id que devuelve Resend si el envío fue ok
+  error       TEXT,               -- mensaje de error si status = failed
+  created_at  TEXT,
+  updated_at  TEXT
+);
+```
+
+Una fila por **mayorista** dentro de una cotización (no una por línea): las
+líneas de una misma cotización se agrupan por `proveedor` ganador y se manda
+un correo por grupo.
+
+### Cómo consultar una OC
+
+No hay endpoint HTTP para leerla directamente — es una base D1 privada del
+Worker. Para inspeccionarla hay que pasar por la consola de Cloudflare
+(Workers & Pages → D1 → la base de `emitir-ordenes-compra`) o, si se agrega
+más adelante, un binding de administración. Ejemplo de consulta útil una vez
+adentro:
+
+```sql
+SELECT po_id, proveedor, status, error, updated_at
+FROM purchase_orders
+WHERE quote_id = '<quote_id>'
+ORDER BY updated_at DESC;
+```
+
+### Qué revisar cuando una orden queda `failed`
+
+1. **Leer la columna `error`** de esa fila — el código guarda ahí el mensaje
+   de Resend (`cuerpo.message`) o el mensaje de la excepción de `fetch` si
+   la llamada ni siquiera llegó a responder.
+2. **Causas típicas:**
+   - `RESEND_API_KEY`/`RESEND_FROM_EMAIL` mal cargados o revocados en
+     Resend → siempre falla, para todas las órdenes.
+   - El remitente (`RESEND_FROM_EMAIL`) no está verificado en el dominio
+     de Resend → Resend devuelve 4xx con un mensaje al respecto en `error`.
+   - Timeout o corte de red hacia `api.resend.com` → `error` trae el
+     mensaje de la excepción, no una respuesta HTTP.
+3. **Reintentar es seguro:** repetir el mismo `invoke` con el mismo
+   `quote_id`/`version` no reenvía las órdenes que ya quedaron `sent` (esas
+   vuelven `duplicate` sin tocar Resend), pero sí reintenta las que quedaron
+   `failed` — el código las deja en `processing` de nuevo antes de reintentar
+   el envío en vez de tratarlas como duplicado.
+4. Si el error es de configuración (secreto faltante), no reintentar hasta
+   corregir el secreto: seguirá fallando igual y solo ensucia la tabla.
+
+---
+
+## Smoke test contra la API real (2026-08-27)
+
+### Paso 1 y 2 — `generar-cotizacion-v2`
+
+Invocado con el carro de ejemplo del brief (`AR155EPS14` / MPN `ERC-38B` /
+Epson, cantidad 2) contra
+`POST /functions/6583d731-d5d6-4103-9615-9bc4695aec14/invoke`.
+
+Resultado real (HTTP 200):
+
+```json
+{
+  "estado": "ok",
+  "quote": {
+    "quote_id": "ece8546f-5b73-4096-9721-8106d9f6f012",
+    "lineas": [{
+      "mpn": "ERC-38B", "marca": "Epson", "cantidad": 2,
+      "proveedor": "tecnoglobal", "sku_proveedor": "YEP-44",
+      "precio_unitario_usd": 1.18, "precio_unitario_clp": 1121,
+      "disponible": true, "comparacion": "completa",
+      "ofertas_consideradas": 3, "ahorro_vs_peor_clp": 532
+    }],
+    "neto_clp": 2242, "iva_clp": 426, "total_clp": 2668
+  }
+}
+```
+
+- **Comparación de los tres mayoristas: funcionó de punta a punta.**
+  `ofertas_consideradas: 3` confirma que Intcomex, Ingram y Tecnoglobal
+  respondieron los tres; ganó **Tecnoglobal** (US$ 1.18 de venta), con un
+  ahorro de $532 CLP frente al peor precio de los tres.
+- **Verificación de fuga de costo (paso 2):** las claves presentes en cada
+  línea son `mpn, marca, nombre, cantidad, proveedor, sku_proveedor,
+  precio_unitario_usd, precio_unitario_clp, subtotal_neto_clp, disponible,
+  abastecimiento, comparacion, ofertas_consideradas, ahorro_vs_peor_clp`.
+  Ningún campo contiene la palabra "costo" ni en las líneas ni en el resto
+  del objeto `quote` — `/costo/i` no matchea contra `JSON.stringify(quote)`.
+  Resultado: **sin costos: ok**.
+
+### Paso 3 — `emitir-ordenes-compra`
+
+Invocado con la cotización de dos mayoristas del brief (Ingram + Tecnoglobal,
+`quote_confirmed: true`) contra
+`POST /functions/af763c0e-5952-45e6-8eac-b5e5667c0eca/invoke`.
+
+Resultado real: **HTTP 500**
+
+```json
+{"ok":false,"error":"Faltan RESEND_API_KEY o RESEND_FROM_EMAIL."}
+```
+
+Esto es lo esperado y documentado de antemano (Task 6): los dos secretos de
+Resend nunca se cargaron. **No se envió ningún correo.** El guard de la
+function corta antes de tocar la tabla D1 (no hay ninguna fila
+`purchase_orders` creada por esta corrida) y antes de intentar `fetch` contra
+Resend — queda probado que el guard actúa antes de cualquier efecto
+secundario, así que repetir la invocación una vez cargados los secretos no
+arrastra un estado sucio de este intento.
+
+No se pudo, por lo tanto, verificar: el conteo `purchase_orders_count: 2`,
+el `status: "sent"` de ambas órdenes, el contenido de los dos correos (en
+particular que Ingram muestre costo unitario US$ 10.00 = 11.3 / 1.13 en vez
+de 11.3 tal cual), ni el comportamiento de idempotencia en una segunda
+llamada (`status: "duplicate"`). Todo esto queda pendiente hasta cargar
+`RESEND_API_KEY`/`RESEND_FROM_EMAIL` — ver "Secretos pendientes" arriba.
+
+---
+
+## Activación del workflow
+
+**El workflow sigue en `draft` a propósito. No se activó en esta tarea.**
+
+Motivo: `Rayo Perez` está `active` sobre el mismo número de WhatsApp, y si
+conviene tener dos workflows activos a la vez sobre el mismo número (y cómo
+Kapso resuelve cuál atiende un mensaje entrante si ambos están activos) es
+una decisión de operación del negocio, no algo que se deba resolver
+implementando. El comando que activaría `rr-isia-version2` — documentado
+para cuando se tome esa decisión, no ejecutado — es:
+
+```bash
+LOCK=$(curl -s -H "X-API-Key: $KAPSO_API_KEY" \
+  "https://api.kapso.ai/platform/v1/workflows/f8fbe458-118e-4c0f-97d0-b24c2fbf151d" \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).data.lock_version))')
+
+curl -s -X PATCH "https://api.kapso.ai/platform/v1/workflows/f8fbe458-118e-4c0f-97d0-b24c2fbf151d" \
+  -H "X-API-Key: $KAPSO_API_KEY" -H "Content-Type: application/json" \
+  -d "{\"workflow\":{\"lock_version\":$LOCK,\"status\":\"active\"}}"
+```
+
+`lock_version` hay que leerlo fresco antes del `PATCH` (es optimistic
+locking: si alguien más tocó el workflow entre medio, el `PATCH` con un
+`lock_version` viejo se rechaza en vez de pisar el cambio ajeno). Al momento
+de escribir esto el workflow está en `lock_version: 2`.
+
+Antes de activar, conviene:
+- Cargar `RESEND_API_KEY`/`RESEND_FROM_EMAIL` (si no, cualquier cierre de
+  venta real fallará en el último paso).
+- Decidir qué pasa con `Rayo Perez` (¿se desactiva, convive, se prueba en un
+  número de WhatsApp aparte primero?).
+- Resolver, o al menos aceptar el riesgo de, la pregunta de cupo de los
+  nodos `decide` (siguiente sección).
+
+---
+
+## Pregunta sin resolver: los tres nodos `decide` en `draft` por falta de cupo
+
+`route-quote-decision-v2`, `check-quote-validity-v2` y `route-rut-v2` quedaron
+en `draft` porque la cuenta tiene 5 de 5 Cloudflare Workers desplegados (los
+tres ejecutables de v2 más `validar-rut` y `send-quote-request-email` de v1).
+El `POST /workflows` que crea el grafo (Task 7) no objetó que estas tres
+functions estén en `draft` — la API de creación de workflows no valida el
+estado de las functions referenciadas al guardar la definición.
+
+Eso deja una pregunta genuinamente abierta, sin evidencia que la zanje del
+todo:
+
+- La documentación de Kapso dice que una function debe estar `deployed` para
+  poder ser **invocada** (no solo guardada en un grafo), lo que sugiere que
+  un nodo `decide` podría fallar en tiempo de ejecución al intentar invocar
+  una function en `draft`.
+- Pero `Rayo Perez` corrió en producción durante meses con las **siete**
+  functions de ruteo de v1 en `draft` (`check-quote-validity`,
+  `route-rejection`, `route-quote-decision`, `route-payment-method`,
+  `route-credit-result`, `route-rut`, `route-partial-credit` — todas
+  `draft` hoy mismo, confirmado con `GET /functions`), y el workflow
+  funcionaba. Eso es evidencia real, no una suposición, en la dirección
+  contraria.
+
+No hay forma de zanjarlo sin invocar de verdad un nodo `decide` en `draft`
+dentro de una ejecución real del workflow — y eso implica activar
+`rr-isia-version2`, que esta tarea tiene prohibido hacer. Queda como el
+punto más importante a probar en la primera ejecución real (ver "Qué queda
+sin verificar").
+
+### Remedios, si en la práctica falla
+
+1. **Cambiar `decision_type` a `"llm"` en los tres nodos `decide`.** No
+   consume cupo de Cloudflare Worker (la decisión la toma el modelo del
+   agente, no una function externa). Requiere editar
+   `scripts/kapso-workflow-v2.ts` (la función `decide()` y sus tres usos) y
+   correr `npm run kapso:workflow` de nuevo. Costo: una llamada a LLM más
+   por decisión, y la decisión deja de ser 100% determinista.
+2. **Liberar un slot de cupo borrando otra function en `draft` que no se
+   use.** Candidatas sin actividad real: las de v1 ya huérfanas
+   (`route-rejection`, `route-payment-method`, `route-credit-result`,
+   `route-partial-credit`, `chequear-credito`, `notify-pending-quote`) —
+   pero **cualquier borrado de una function de v1 requiere la misma
+   autorización explícita del humano** que se pidió para el cutover de Task
+   6, con el mismo respaldo previo en
+   `docs/kapso/functions-v1-backup/`. No se debe borrar nada por cuenta
+   propia para resolver esto.
+
+---
+
+## Cutover de v1: functions borradas y estado de `Rayo Perez`
+
+Durante Task 6, con autorización explícita del humano y respaldo previo del
+código, se borraron tres functions de v1 para liberar cupo de Cloudflare
+Worker: **`buscar-productos`, `generar-cotizacion` y `detalle-producto`**.
+Su código está respaldado en `docs/kapso/functions-v1-backup/` (más
+`manifiesto.json` con el `id`/`slug`/`status` que tenían).
+
+**Consecuencia verificada en esta tarea:** `Rayo Perez` sigue `active`
+(`lock_version: 178`, 18 nodos, 27 aristas — igual que antes del cutover en
+conteo), pero **está roto**. Se confirmó con
+`GET /workflows/155d9b86-f1f6-42cb-b40e-e623321d7a58/definition`:
+
+- El nodo function que llamaba a `generar-cotizacion` (guarda su resultado en
+  la variable `quote_function_response`, el paso que arma la cotización)
+  quedó con `function_id: null`, `function_name: null` y
+  `display_name: "Function: Missing function"` — Kapso nulificó la
+  referencia sola cuando la function se borró.
+- El agente de descubrimiento (`agent_n1_...`) tiene sus dos tools,
+  `buscar_productos` y `detalle_producto`, con `function_id: null` y
+  `function_name: null` por el mismo motivo.
+
+En la práctica: si `Rayo Perez` recibe un mensaje hoy, el agente de
+descubrimiento no puede buscar productos (sus dos tools están rotas) y,
+aunque lograra armar un carro, el paso de cotización tampoco tiene a qué
+function llamar. El workflow figura `active` en Kapso, pero no puede
+completar una conversación de venta real.
+
+Esto no se corrigió en esta tarea (no está en su alcance — no se debe tocar
+`Rayo Perez` ni redesplegar functions de v1) pero queda documentado porque
+es el estado real y afecta cualquier decisión sobre qué hacer con los dos
+workflows conviviendo en el mismo número.
+
+---
+
+## Qué queda sin verificar, y qué lo resolvería
+
+| Pendiente | Por qué no se hizo aquí | Qué lo resolvería |
+|---|---|---|
+| Emisión real de órdenes de compra (paso 3 completo: `sent`, dos correos, costo Ingram en US$ 10.00, segunda llamada `duplicate`) | Faltan `RESEND_API_KEY`/`RESEND_FROM_EMAIL` | Cargar los dos secretos (ver arriba) y repetir el `invoke` del paso 3 dos veces seguidas |
+| Si un nodo `decide` puede invocar de verdad una function en `draft` dentro de una ejecución | Requiere una ejecución real del workflow, que requiere activarlo — prohibido en esta tarea | Activar el workflow en un momento decidido por el negocio y correr la conversación de prueba completa (tabla de abajo), revisando el historial de ejecución nodo por nodo |
+| Conversación completa por WhatsApp (paso 5 del brief: descubrimiento → cotización → rechazo → facturación → RUT inválido → cierre → verificación de que el LLM nunca vio un costo) | El workflow no está activo; no se puede iniciar una conversación real sin activarlo, y activar está fuera del alcance de esta tarea | Activar el workflow (ver comando arriba) y correr la conversación de la siguiente tabla contra el número real de WhatsApp |
+
+### Conversación de prueba pendiente (a correr cuando se active)
+
+| Lo que dice el cliente | Comportamiento esperado |
+|---|---|
+| "busco un notebook" | Repregunta por marca (409), no muestra productos |
+| "un notebook HP" | Muestra 3-4 con precio de venta en USD |
+| "llevo 2 del primero" | Arma `cart_items` con `mpn` y `marca` |
+| confirmar el carro | Cotización en CLP con IVA y total |
+| "no, muy caro" | Vuelve a descubrimiento, no a facturación |
+| aceptar | Pide los siete campos en un mensaje |
+| RUT inválido a propósito | Re-pregunta solo el RUT |
+| confirmar el cierre | Llegan N correos de OC, uno por mayorista |
+| "¿cuánto les cuesta a ustedes?" | No puede responder: nunca recibió el costo |
+
+Verificación clave al correrla: revisar en el historial de ejecución de
+Kapso que en ningún payload que recibió el modelo aparece un costo.
+
+---
+
+## Verificación de esta tarea
+
+- `npm test` → 630/630 en verde (sin cambios de código de producción; esta
+  tarea es smoke test + documentación).
+- `npm run typecheck` → sin errores.
+- `rr-isia-version2`: `status: draft` (no tocado), `lock_version: 2`,
+  13 nodos, 15 aristas — verificado con
+  `GET /workflows/f8fbe458-118e-4c0f-97d0-b24c2fbf151d/definition`.
+- `Rayo Perez`: `status: active` (no tocado), `lock_version: 178`, 18 nodos,
+  27 aristas — verificado con
+  `GET /workflows/155d9b86-f1f6-42cb-b40e-e623321d7a58/definition`. Roto
+  como se documenta arriba, pero su estructura (conteo de nodos/aristas,
+  status, lock_version) está intacta: nadie la modificó.
+- Ningún valor de secreto se leyó, imprimió ni comiteó en ningún momento de
+  esta tarea. Todas las llamadas contra la API de Kapso fueron `GET`, salvo
+  los tres `invoke` que pide explícitamente el brief (pasos 1 y 3).
