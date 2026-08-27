@@ -6,7 +6,7 @@
 // la forma del tenant. Cuando lleguen las credenciales, sirve para comparar
 // esta respuesta simulada con la de verdad.
 //
-// Uso: levantarlo con `npx tsx scripts/mock-ingram.ts` y arrancar el servidor
+// Uso: levantarlo con `npx tsx apps/pricing-api/scripts/mock-ingram.ts` y arrancar el servidor
 // con INGRAM_BASE_URL=http://127.0.0.1:4010,
 // INGRAM_TOKEN_URL=http://127.0.0.1:4010/oauth/oauth30/token y cualquier valor
 // en INGRAM_CLIENT_ID, INGRAM_CLIENT_SECRET e INGRAM_CUSTOMER_NUMBER.
