@@ -210,12 +210,34 @@ ORDER BY updated_at DESC;
    vuelven `duplicate` sin tocar Resend), pero sí reintenta las que quedaron
    `failed` — el código las deja en `processing` de nuevo antes de reintentar
    el envío en vez de tratarlas como duplicado.
-4. Si el error es de configuración (secreto faltante), no reintentar hasta
+
+   También reintenta una fila que quedó **trabada en `processing`** con
+   `updated_at` de hace más de 10 minutos: eso es una corrida que murió entre
+   el `INSERT` y el `UPDATE` terminal (límite de CPU del Worker, reintento del
+   nodo), no una orden enviada. Antes esas filas se saltaban como `duplicate`
+   para siempre y `purchase_orders_ok` daba `true` por una orden que nunca
+   salió. Una `processing` reciente sigue tratándose como duplicado: es una
+   corrida en curso.
+
+4. **Una orden `failed` sin fila en la tabla** significa que el `INSERT` de
+   reserva falló por algo que no era la clave duplicada (D1 caída, tabla
+   bloqueada). En ese caso la function aborta esa orden a propósito y no manda
+   el correo: sin fila persistida no hay idempotencia, y seguir haría que cada
+   reintento le mandara al mayorista otra copia de la misma orden. Reintentar
+   una vez que D1 responda resuelve el caso.
+5. Si el error es de configuración (secreto faltante), no reintentar hasta
    corregir el secreto: seguirá fallando igual y solo ensucia la tabla.
 
 ---
 
 ## Smoke test contra la API real (2026-08-27)
+
+> **Nota:** este smoke test se corrió contra el código anterior a la tanda de
+> arreglos de la revisión final. Lo que registra sigue siendo válido como
+> evidencia de que la comparación entre los tres mayoristas funciona de punta a
+> punta, pero `emitir-ordenes-compra` ahora corta antes con un 409 si la
+> cotización expiró, y el payload de ejemplo que se usó no traía `valid_until`.
+> Al repetirlo hay que mandar una cotización vigente.
 
 ### Paso 1 y 2 — `generar-cotizacion-v2`
 
