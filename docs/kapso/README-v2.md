@@ -111,11 +111,36 @@ scripts/kapso-functions.ts
   };
 ```
 
-Editar ese valor y correr `npm run kapso:functions` de nuevo. El script hace
-`POST /functions/{id}/secrets` para las tres functions que declaran
-`MARGEN` en su lista de secretos (`buscar-productos-v2`,
-`generar-cotizacion-v2`, `emitir-ordenes-compra`) — no hace falta redeploy
-del código, un secreto se actualiza sin tocar el Worker.
+Editar ese valor y correr `npm run kapso:functions` de nuevo, para las tres
+functions que declaran `MARGEN` en su lista de secretos
+(`buscar-productos-v2`, `generar-cotizacion-v2`, `emitir-ordenes-compra`). No
+hace falta redeploy del código: un secreto se cambia sin tocar el Worker.
+
+**Cómo lo hace el script, y por qué así.** La API de Kapso no tiene `PUT` ni
+`PATCH` de secretos. `POST /functions/{id}/secrets` exige que el nombre sea
+único dentro de la function y **rechaza** un nombre que ya existe (no lo
+sobrescribe), y `DELETE /functions/{id}/secrets/{name}` borra por nombre.
+Así que cambiar un valor es necesariamente borrar y volver a crear, y eso es
+lo que hace `sincronizarSecreto()` en `scripts/kapso-functions.ts`:
+
+1. `GET /functions/{id}/secrets` para saber qué nombres ya existen (la API
+   devuelve solo `{name, type}`, nunca valores).
+2. Si el nombre no existe → `POST` (la salida dice `creado`).
+3. Si existe → `DELETE` y después `POST` (la salida dice `reemplazado`).
+4. Al terminar, otro `GET` verifica que cada nombre que se intentó cargar
+   siga presente. Si alguno no volvió —el `DELETE` pasó y el `POST` falló—
+   aparece en `SECRETOS PENDIENTES` del resumen con el texto
+   "NO figura en la function; cargarlo a mano en la UI de Kapso".
+
+Consecuencia operativa: hay una ventana de milisegundos, entre el `DELETE` y
+el `POST`, en que la function corre sin ese secreto. Con el workflow en
+`draft` es irrelevante; con el workflow activo conviene hacerlo en un momento
+de poco tráfico. Y la verificación es por **nombre**: que el valor nuevo sea
+el correcto no es observable desde la API, solo que el secreto existe.
+
+Antes de este arreglo el script se tragaba el rechazo por nombre duplicado y
+salía con código 0 sin haber cambiado nada: el margen viejo seguía corriendo
+y el resumen decía que todo salió bien.
 
 No confundir con el `MARGEN` de las functions de v1, usadas por
 `Rayo Perez`: son secretos independientes en functions independientes;
@@ -405,6 +430,7 @@ workflows conviviendo en el mismo número.
 
 | Pendiente | Por qué no se hizo aquí | Qué lo resolvería |
 |---|---|---|
+| Ramificar el cierre según `purchase_orders_ok` | La arista `fn_emitir_ordenes → send_confirmacion` es incondicional y no hay cupo de Cloudflare Worker para un nodo `decide` más. El mensaje de `send_confirmacion` es hoy **deliberadamente genérico** ("dejamos tu pedido con el equipo comercial", no "quedó cursado") justamente porque sale igual con un 400, con un 500 por secretos faltantes, y con `ok: true` pero todas las órdenes en `failed` | Un nodo `decide` extra entre `fn_emitir_ordenes` y el cierre, con dos salidas (`ok` / `con_problemas`) y un `send_text` por rama. Con `decision_type: "llm"` no consume cupo de Worker; con `decision_type: "function"` hay que liberar un slot antes (ver la sección de cupo). Recién entonces el mensaje puede volver a afirmar que el pedido quedó cursado |
 | Emisión real de órdenes de compra (paso 3 completo: `sent`, dos correos, costo Ingram en US$ 10.00, segunda llamada `duplicate`) | Faltan `RESEND_API_KEY`/`RESEND_FROM_EMAIL` | Cargar los dos secretos (ver arriba) y repetir el `invoke` del paso 3 dos veces seguidas |
 | Si un nodo `decide` puede invocar de verdad una function en `draft` dentro de una ejecución | Requiere una ejecución real del workflow, que requiere activarlo — prohibido en esta tarea | Activar el workflow en un momento decidido por el negocio y correr la conversación de prueba completa (tabla de abajo), revisando el historial de ejecución nodo por nodo |
 | Conversación completa por WhatsApp (paso 5 del brief: descubrimiento → cotización → rechazo → facturación → RUT inválido → cierre → verificación de que el LLM nunca vio un costo) | El workflow no está activo; no se puede iniciar una conversación real sin activarlo, y activar está fuera del alcance de esta tarea | Activar el workflow (ver comando arriba) y correr la conversación de la siguiente tabla contra el número real de WhatsApp |

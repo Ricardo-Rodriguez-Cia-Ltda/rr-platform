@@ -3,6 +3,7 @@ import { kapso } from './kapso.js';
 
 interface Funcion { id: string; name: string; }
 interface FuncionEstado { id: string; status: string; }
+interface Secreto { name: string; type?: string; }
 
 // El POST /deploy responde antes de que Kapso termine de propagar el estado
 // "deployed" (se confirmo en la practica: justo despues de un deploy exitoso,
@@ -18,8 +19,44 @@ async function esperarDespliegue(id: string, intentos = 10, esperaMs = 1500): Pr
   return false;
 }
 
+// La API de Kapso no tiene PUT ni PATCH de secretos: `POST /secrets` exige que
+// el nombre sea unico dentro de la function (lo rechaza si ya existe, no lo
+// sobrescribe) y `DELETE /secrets/{name}` borra por nombre. `GET /secrets`
+// devuelve solo `{name, type}`, nunca valores. Consecuencia: cambiar el valor
+// de un secreto es borrarlo y crearlo de nuevo, y lo unico verificable despues
+// es que el nombre este presente.
+async function nombresDeSecretos(id: string): Promise<Set<string>> {
+  const { data } = await kapso<{ data: Secreto[] }>(`/functions/${id}/secrets`);
+  return new Set((data ?? []).map((s) => s.name));
+}
+
+async function cargarSecreto(id: string, nombre: string, valor: string): Promise<void> {
+  await kapso(`/functions/${id}/secrets`, { metodo: 'POST', cuerpo: { secret: { name: nombre, value: valor } } });
+}
+
+// Devuelve que se hizo, para que el resumen pueda decir la verdad. Si el
+// secreto ya existia hay una ventana entre el DELETE y el POST en la que la
+// function se queda sin el: por eso el llamador verifica al final con un GET y
+// grita si algun nombre no volvio.
+async function sincronizarSecreto(
+  id: string,
+  nombre: string,
+  valor: string,
+  existentes: Set<string>,
+): Promise<'creado' | 'reemplazado'> {
+  if (!existentes.has(nombre)) {
+    await cargarSecreto(id, nombre, valor);
+    return 'creado';
+  }
+  await kapso(`/functions/${id}/secrets/${nombre}`, { metodo: 'DELETE' });
+  await cargarSecreto(id, nombre, valor);
+  return 'reemplazado';
+}
+
 // Las functions de v2 y los secretos que necesita cada una. El margen de 13%
-// vive aqui: las de v1 siguen en 0.30 y no se tocan.
+// vive aqui. Las de v1 tienen sus propios secretos, en functions propias, y no
+// se tocan: el `0.30` que aparece en el codigo de v1 es su valor por defecto,
+// no una lectura del secreto real (la API nunca expone valores).
 const FUNCIONES = [
   { nombre: 'buscar-productos-v2', secretos: ['API_PRECIOS_KEY', 'MARGEN'] },
   { nombre: 'generar-cotizacion-v2', secretos: ['API_PRECIOS_KEY', 'MARGEN', 'TIPO_CAMBIO_CLP_USD', 'IVA_RATE', 'COTIZACION_VALID_HOURS'] },
@@ -143,20 +180,38 @@ async function main() {
     if (!desplegada) {
       for (const secreto of secretos) pendientes.push(`${nombre}: ${secreto} (function sin desplegar o sin confirmar)`);
     } else {
+      const previos = await nombresDeSecretos(id);
+      const intentados: string[] = [];
+
       for (const secreto of secretos) {
         const valor = VALORES[secreto];
         // RESEND_API_KEY y RESEND_FROM_EMAIL no viven en .env.local, y la API de
-        // Kapso solo lista los nombres de los secretos de v1, nunca sus valores.
-        // Se avisa y se sigue: abortar dejaria el despliegue a medias.
-        if (!valor) { pendientes.push(`${nombre}: ${secreto}`); continue; }
-        await kapso(`/functions/${id}/secrets`, { metodo: 'POST', cuerpo: { secret: { name: secreto, value: valor } } })
-          .catch((error: Error) => {
-            // Solo un secreto que ya existe no es un fallo real: se deja el
-            // valor vigente. Todo lo demas se propaga — una regex que
-            // tragaba cualquier 422 escondia errores reales (por ejemplo,
-            // intentar setear un secreto en una function sin desplegar).
-            if (!/already/i.test(error.message)) throw error;
-          });
+        // Kapso nunca devuelve valores. Se avisa y se sigue: abortar dejaria el
+        // despliegue a medias.
+        if (!valor) {
+          pendientes.push(`${nombre}: ${secreto} (sin valor de origen; queda como estuviera)`);
+          continue;
+        }
+        intentados.push(secreto);
+        try {
+          const accion = await sincronizarSecreto(id, secreto, valor, previos);
+          console.log(`  secreto ${secreto}: ${accion}`);
+        } catch (error) {
+          // Si el fallo fue despues del DELETE, el secreto quedo borrado. El
+          // GET de verificacion de abajo lo detecta y lo dice con esas
+          // palabras: lo que no puede pasar es que esto se vea como exito.
+          const mensaje = error instanceof Error ? error.message : String(error);
+          pendientes.push(`${nombre}: ${secreto} (no se pudo cargar → ${mensaje})`);
+        }
+      }
+
+      // Verificacion: lo unico observable es el nombre, pero un nombre que no
+      // volvio despues de un reemplazo es un secreto perdido, y hay que verlo.
+      const finales = intentados.length > 0 ? await nombresDeSecretos(id) : previos;
+      for (const secreto of intentados) {
+        if (!finales.has(secreto)) {
+          pendientes.push(`${nombre}: ${secreto} (NO figura en la function; cargarlo a mano en la UI de Kapso)`);
+        }
       }
     }
     }
