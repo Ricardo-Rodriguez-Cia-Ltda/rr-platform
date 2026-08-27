@@ -15,7 +15,7 @@ if (-not (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Securit
   exit 1
 }
 
-$proj = Split-Path -Parent $PSScriptRoot
+$proj = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $cloudflared = "C:\Program Files (x86)\cloudflared\cloudflared.exe"
 $configTunel = Join-Path $env:USERPROFILE ".cloudflared\config.yml"
 $npm = "C:\Program Files\nodejs\npm.cmd"

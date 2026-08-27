@@ -7,7 +7,7 @@ if (-not (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole([Securit
   Write-Host "ERROR: requiere Administrador."; exit 1
 }
 
-$proj = Split-Path -Parent $PSScriptRoot
+$proj = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
 Write-Host "1) Deteniendo procesos sueltos (node y cloudflared)..."
 Get-Process node, cloudflared -ErrorAction SilentlyContinue | ForEach-Object {
