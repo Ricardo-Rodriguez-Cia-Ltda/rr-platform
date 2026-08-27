@@ -78,7 +78,7 @@ La referencia completa vive en [`docs/api/`](docs/api/) y está escrita para ser
 | [`docs/api/README.md`](docs/api/README.md) | Referencia narrativa: cada endpoint, cada código de error, cómo funciona el ranking, cuándo reintentar y cuándo no. |
 | [`docs/api/openapi.yaml`](docs/api/openapi.yaml) | El mismo contrato, machine-readable (OpenAPI 3.1). |
 | [`docs/api/vocabulario.md`](docs/api/vocabulario.md) | Marcas y categorías reales del catálogo. Generado con `npm run docs:vocabulario`. |
-| [`docs/kapso/README.md`](docs/kapso/README.md) | Cómo conectar todo esto al agente de WhatsApp aplicando el margen fuera del modelo. |
+| [`apps/kapso-agent/README-v1.md`](apps/kapso-agent/README-v1.md) | Cómo conectar todo esto al agente de WhatsApp aplicando el margen fuera del modelo. |
 
 Resumen de endpoints (todos con `x-api-key`):
 

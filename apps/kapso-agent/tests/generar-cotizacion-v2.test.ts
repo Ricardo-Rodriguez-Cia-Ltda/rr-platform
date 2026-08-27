@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cargarHandler, peticion } from './cargar.js';
+import { cargarHandler, peticion } from './load.js';
 
-const handler = cargarHandler('docs/kapso/functions-v2/generar-cotizacion-v2.js');
-const mejorOk = JSON.parse(readFileSync('tests/fixtures/mejor-precio-ok.json', 'utf8'));
-const ambiguo = JSON.parse(readFileSync('tests/fixtures/mejor-precio-ambiguo.json', 'utf8'));
+const handler = cargarHandler('apps/kapso-agent/functions/generar-cotizacion-v2.js');
+const mejorOk = JSON.parse(readFileSync('apps/kapso-agent/tests/fixtures/mejor-precio-ok.json', 'utf8'));
+const ambiguo = JSON.parse(readFileSync('apps/kapso-agent/tests/fixtures/mejor-precio-ambiguo.json', 'utf8'));
 
 const env = {
   API_PRECIOS_KEY: 'clave',

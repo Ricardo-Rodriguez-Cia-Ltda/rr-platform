@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cargarHandler, peticion } from './cargar.js';
+import { cargarHandler, peticion } from './load.js';
 
-const handler = cargarHandler('docs/kapso/functions-v2/emitir-ordenes-compra.js');
+const handler = cargarHandler('apps/kapso-agent/functions/emitir-ordenes-compra.js');
 
 const MINUTO = 60_000;
 

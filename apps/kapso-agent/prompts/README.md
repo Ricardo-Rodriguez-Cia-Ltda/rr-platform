@@ -2,11 +2,11 @@
 
 Un directorio por nodo `agent`, una versión por archivo. El texto que se
 despliega vive entre `<!-- PROMPT:INICIO -->` y `<!-- PROMPT:FIN -->`; todo lo
-demás es documentación para nosotros. `scripts/kapso-workflow-v2.ts` sube
+demás es documentación para nosotros. `scripts/deploy-workflow.ts` sube
 **solo ese bloque** — el error de v1, donde se pegó el archivo entero, no se
 repite.
 
-**Diseño:** [`../../superpowers/specs/2026-08-26-rr-isia-version2-design.md`](../../superpowers/specs/2026-08-26-rr-isia-version2-design.md)
+**Diseño:** [`../../../docs/superpowers/specs/2026-08-26-rr-isia-version2-design.md`](../../../docs/superpowers/specs/2026-08-26-rr-isia-version2-design.md)
 
 ## Índice
 

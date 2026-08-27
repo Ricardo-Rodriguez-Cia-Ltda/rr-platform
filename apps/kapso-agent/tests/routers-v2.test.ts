@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { cargarHandler, peticion } from './cargar.js';
+import { cargarHandler, peticion } from './load.js';
 
-const decision = cargarHandler('docs/kapso/functions-v2/route-quote-decision-v2.js');
-const validez = cargarHandler('docs/kapso/functions-v2/check-quote-validity-v2.js');
-const rut = cargarHandler('docs/kapso/functions-v2/route-rut-v2.js');
+const decision = cargarHandler('apps/kapso-agent/functions/route-quote-decision-v2.js');
+const validez = cargarHandler('apps/kapso-agent/functions/check-quote-validity-v2.js');
+const rut = cargarHandler('apps/kapso-agent/functions/route-rut-v2.js');
 
 async function rutear(handler: ReturnType<typeof cargarHandler>, vars: unknown, edges: string[]) {
   const res = await handler(peticion({ execution_context: { vars }, available_edges: edges }), {});

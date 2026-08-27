@@ -12,8 +12,8 @@
     "check": "npm run check -w @rr/pricing-api",
     "docs:vocabulario": "npm run docs:vocabulario -w @rr/pricing-api",
     "serve": "npm run serve -w @rr/pricing-api",
-    "kapso:functions": "tsx --env-file=.env.local scripts/kapso-functions.ts",
-    "kapso:workflow": "tsx --env-file=.env.local scripts/kapso-workflow-v2.ts"
+    "kapso:functions": "npm run deploy:functions -w @rr/kapso-agent",
+    "kapso:workflow": "npm run deploy:workflow -w @rr/kapso-agent"
   },
   "devDependencies": {
     "@types/node": "^22",

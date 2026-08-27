@@ -1,5 +1,9 @@
 import { readFileSync } from 'node:fs';
-import { kapso } from './kapso.js';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { kapso } from './client.js';
+
+const RAIZ_APP = fileURLToPath(new URL('..', import.meta.url));
 
 interface Funcion { id: string; name: string; }
 interface FuncionEstado { id: string; status: string; }
@@ -120,7 +124,7 @@ async function main() {
 
   try {
     for (const { nombre, secretos } of FUNCIONES) {
-    const codigo = readFileSync(`docs/kapso/functions-v2/${nombre}.js`, 'utf8');
+    const codigo = readFileSync(join(RAIZ_APP, 'functions', `${nombre}.js`), 'utf8');
     const previa = existentes.find((f) => f.name === nombre);
 
     // El slug vive en un espacio de nombres propio (isia-v2-*) porque al menos

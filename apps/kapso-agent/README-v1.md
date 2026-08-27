@@ -33,11 +33,11 @@ Opcional: `API_PRECIOS_URL` si algún día cambia el dominio (por defecto usa el
 
 ## Paso 2 — Crear la Function `buscar_productos`
 
-Kapso → **Functions → New**, nombre `buscar_productos`, y pegar el contenido de [`buscar-productos.js`](buscar-productos.js). Deploy.
+Kapso → **Functions → New**, nombre `buscar_productos`, y pegar el contenido de [`buscar-productos-source.js`](functions-v1-backup/buscar-productos-source.js). Deploy.
 
 ## Paso 3 — Crear la Function `detalle_producto`
 
-Igual que la anterior, con [`detalle-producto.js`](detalle-producto.js).
+Igual que la anterior, con [`detalle-producto-source.js`](functions-v1-backup/detalle-producto-source.js).
 
 ## Paso 4 — Adjuntar ambas como tools del Agent node
 
@@ -93,7 +93,7 @@ En el **Agent node** → Function tools, agregar las dos funciones con estos esq
 
 > Este paso quedó desactualizado cuando el flujo se dividió en seis nodos
 > `agent`. Los prompts vigentes de cada nodo están en
-> [`prompts/`](prompts/) — uno por agente, versionados. Lo que sigue es el
+> [`prompts-v1/`](prompts-v1/) — uno por agente, versionados. Lo que sigue es el
 > prompt del agente único original, que se conserva porque explica de dónde
 > salen las reglas de catálogo.
 
@@ -154,7 +154,7 @@ Para que el agente traduzca lo que pide el cliente a filtros reales, hay que
 incluir en el prompt las marcas y categorías que Intcomex realmente usa: el
 filtro es exacto, y "Hewlett-Packard" no existe en el catálogo (es "HP").
 
-La lista vive en [`../api/vocabulario.md`](../api/vocabulario.md), con los
+La lista vive en [`docs/api/vocabulario.md`](../../docs/api/vocabulario.md), con los
 conteos de cada valor para decidir qué incluir. Se regenera desde la API:
 
 ```bash

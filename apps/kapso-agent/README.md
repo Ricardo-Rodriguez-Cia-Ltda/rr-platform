@@ -43,7 +43,7 @@ falta.
 | Function | Secreto | Origen del valor |
 |---|---|---|
 | `buscar-productos-v2` | `API_PRECIOS_KEY` | `API_SECRET_KEY` de `.env.local` (el mismo header `x-api-key` que usa `captador-precios-proveedores`) |
-| `buscar-productos-v2` | `MARGEN` | Constante `VALORES.MARGEN` en `scripts/kapso-functions.ts` (hoy `0.13`) |
+| `buscar-productos-v2` | `MARGEN` | Constante `VALORES.MARGEN` en `scripts/deploy-functions.ts` (hoy `0.13`) |
 | `generar-cotizacion-v2` | `API_PRECIOS_KEY` | Igual que arriba |
 | `generar-cotizacion-v2` | `MARGEN` | Igual que arriba |
 | `generar-cotizacion-v2` | `TIPO_CAMBIO_CLP_USD` | `process.env.TIPO_CAMBIO_CLP_USD` si existe, si no `950` (fallback en el script) |
@@ -103,7 +103,7 @@ El margen vive como constante en el código del script, no en Kapso
 directamente:
 
 ```
-scripts/kapso-functions.ts
+scripts/deploy-functions.ts
   const VALORES: Record<string, string> = {
     ...
     MARGEN: '0.13',
@@ -121,7 +121,7 @@ hace falta redeploy del código: un secreto se cambia sin tocar el Worker.
 único dentro de la function y **rechaza** un nombre que ya existe (no lo
 sobrescribe), y `DELETE /functions/{id}/secrets/{name}` borra por nombre.
 Así que cambiar un valor es necesariamente borrar y volver a crear, y eso es
-lo que hace `sincronizarSecreto()` en `scripts/kapso-functions.ts`:
+lo que hace `sincronizarSecreto()` en `scripts/deploy-functions.ts`:
 
 1. `GET /functions/{id}/secrets` para saber qué nombres ya existen (la API
    devuelve solo `{name, type}`, nunca valores).
@@ -145,7 +145,7 @@ y el resumen decía que todo salió bien.
 No confundir con el `MARGEN` de las functions de v1, usadas por
 `Rayo Perez`: son secretos independientes en functions independientes;
 cambiar uno no toca el otro. El `0.30` que aparece en el código de v1
-(`env.MARGEN ?? "0.30"`, en `docs/kapso/functions-v1-backup/*.js`) es solo
+(`env.MARGEN ?? "0.30"`, en `apps/kapso-agent/functions-v1-backup/*.js`) es solo
 el **valor por defecto que usa el código si el secreto no está cargado**,
 no una lectura del secreto real: la API de Kapso nunca expone valores de
 secretos, solo sus nombres, así que no hay forma de confirmar qué valor
@@ -157,7 +157,7 @@ a la consola de Kapso.
 ## Tabla `purchase_orders` (Cloudflare D1, dentro de `emitir-ordenes-compra`)
 
 Se crea sola en el primer `invoke` (`CREATE TABLE IF NOT EXISTS`, ver
-`docs/kapso/functions-v2/emitir-ordenes-compra.js`):
+`apps/kapso-agent/functions/emitir-ordenes-compra.js`):
 
 ```sql
 CREATE TABLE IF NOT EXISTS purchase_orders (
@@ -379,7 +379,7 @@ sin verificar").
 1. **Cambiar `decision_type` a `"llm"` en los tres nodos `decide`.** No
    consume cupo de Cloudflare Worker (la decisión la toma el modelo del
    agente, no una function externa). Requiere editar
-   `scripts/kapso-workflow-v2.ts` (la función `decide()` y sus tres usos) y
+   `scripts/deploy-workflow.ts` (la función `decide()` y sus tres usos) y
    correr `npm run kapso:workflow` de nuevo. Costo: una llamada a LLM más
    por decisión, y la decisión deja de ser 100% determinista.
 2. **Liberar un slot de cupo borrando otra function en `draft` que no se
@@ -411,7 +411,7 @@ sin verificar").
    En cualquier caso, **cualquier borrado de una function de v1 requiere la
    misma autorización explícita del humano** que se pidió para el cutover de
    Task 6, con el mismo respaldo previo en
-   `docs/kapso/functions-v1-backup/`. No se debe borrar nada por cuenta
+   `apps/kapso-agent/functions-v1-backup/`. No se debe borrar nada por cuenta
    propia para resolver esto.
 
 ---
@@ -421,7 +421,7 @@ sin verificar").
 Durante Task 6, con autorización explícita del humano y respaldo previo del
 código, se borraron tres functions de v1 para liberar cupo de Cloudflare
 Worker: **`buscar-productos`, `generar-cotizacion` y `detalle-producto`**.
-Su código está respaldado en `docs/kapso/functions-v1-backup/` (más
+Su código está respaldado en `apps/kapso-agent/functions-v1-backup/` (más
 `manifiesto.json` con el `id`/`slug`/`status` que tenían).
 
 **Consecuencia verificada en esta tarea:** `Rayo Perez` sigue `active`

@@ -1,5 +1,9 @@
 import { readFileSync, readdirSync } from 'node:fs';
-import { kapso } from './kapso.js';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { kapso } from './client.js';
+
+const RAIZ_APP = fileURLToPath(new URL('..', import.meta.url));
 
 interface Funcion { id: string; name: string; }
 interface Workflow { id: string; name: string; slug: string; }
@@ -11,15 +15,15 @@ const MODELO = '8c6d57df-3f07-4290-b8a5-38047608c4df';  // claude-haiku-4-5, el 
 // es la cabecera del archivo, y `tests/prompts.test.ts` ya garantiza que hay
 // como maximo una vigente por agente.
 function archivoVigente(agente: string): string {
-  const dir = `docs/kapso/prompts-v2/${agente}`;
+  const dir = join(RAIZ_APP, 'prompts', agente);
   const vigentes = readdirSync(dir)
     .filter((n) => /^v-\d+\.md$/.test(n))
-    .filter((n) => /\| \*\*Estado\*\* \| vigente \|/.test(readFileSync(`${dir}/${n}`, 'utf8')));
+    .filter((n) => /\| \*\*Estado\*\* \| vigente \|/.test(readFileSync(join(dir, n), 'utf8')));
 
   if (vigentes.length !== 1) {
     throw new Error(`${agente} tiene ${vigentes.length} versiones vigentes; tiene que haber exactamente una`);
   }
-  return `${dir}/${vigentes[0]}`;
+  return join(dir, vigentes[0]);
 }
 
 // Solo el bloque delimitado va al system_prompt. La cabecera y las notas de

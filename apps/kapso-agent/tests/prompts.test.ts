@@ -1,12 +1,12 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-// Los prompts de docs/kapso/prompts/ se despliegan copiando y pegando en Kapso.
+// Los prompts de apps/kapso-agent/prompts/ se despliegan copiando y pegando en Kapso.
 // El riesgo no es que el texto sea malo, es no saber cual esta arriba: en
 // prompts-rayo/ quedaron un v-02 marcado "vigente" y un v-03 sin estado, y no
 // hay forma de saber cual corria. Esto verifica el formato, no la prosa.
 
-const RAICES = ['docs/kapso/prompts', 'docs/kapso/prompts-v2'];
+const RAICES = ['apps/kapso-agent/prompts-v1', 'apps/kapso-agent/prompts'];
 const ESTADOS = ['vigente', 'reemplazado', 'borrador'];
 
 const AGENTES = RAICES.flatMap((raiz) =>
@@ -35,7 +35,7 @@ function campo(contenido: string, nombre: string): string | undefined {
 
 const TODAS = AGENTES.flatMap((a) => versionesDe(a).map((v) => ({ ...v, agente: a })));
 
-describe('estructura de docs/kapso/prompts', () => {
+describe('estructura de apps/kapso-agent/prompts', () => {
   it('hay al menos un agente con versiones', () => {
     expect(TODAS.length).toBeGreaterThan(0);
   });
@@ -107,10 +107,10 @@ describe('un solo vigente por agente', () => {
     expect(vigentes.map((v) => v.archivo).length).toBeLessThanOrEqual(1);
   });
 
-  // En v2 no alcanza con "como maximo una": `scripts/kapso-workflow-v2.ts`
+  // En v2 no alcanza con "como maximo una": `scripts/deploy-workflow.ts`
   // elige el archivo a desplegar por esa marca, asi que cero vigentes rompe el
   // despliegue igual que dos.
-  it.each(AGENTES.filter((a) => a.startsWith('docs/kapso/prompts-v2/')))(
+  it.each(AGENTES.filter((a) => a.startsWith('apps/kapso-agent/prompts/')))(
     '%s tiene exactamente una version vigente, que es la que se despliega',
     (agente) => {
       const vigentes = versionesDe(agente).filter((v) => campo(v.contenido, 'Estado') === 'vigente');
@@ -134,7 +134,7 @@ describe('un solo vigente por agente', () => {
 // evita perderla en la proxima version es una prueba que la busque.
 describe('reglas de v2 que no se pueden perder al subir una version', () => {
   it('el prompt vigente de agente_presentacion cubre la cotizacion ausente', () => {
-    const dir = 'docs/kapso/prompts-v2/agente-presentacion';
+    const dir = 'apps/kapso-agent/prompts/agente-presentacion';
     const vigente = versionesDe(dir).find((v) => campo(v.contenido, 'Estado') === 'vigente');
     if (!vigente) throw new Error(`${dir} no tiene version vigente`);
 

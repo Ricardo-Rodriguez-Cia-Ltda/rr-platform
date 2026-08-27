@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cargarHandler, peticion } from './cargar.js';
+import { cargarHandler, peticion } from './load.js';
 
-const handler = cargarHandler('docs/kapso/functions-v2/buscar-productos-v2.js');
-const busqueda = JSON.parse(readFileSync('tests/fixtures/search-intcomex.json', 'utf8'));
+const handler = cargarHandler('apps/kapso-agent/functions/buscar-productos-v2.js');
+const busqueda = JSON.parse(readFileSync('apps/kapso-agent/tests/fixtures/search-intcomex.json', 'utf8'));
 const env = { API_PRECIOS_KEY: 'clave', MARGEN: '0.13' };
 
 function responderCon(payload: unknown, status = 200) {
