@@ -32,7 +32,7 @@ export function compactMpn(mpn: string | null): string {
  * "hewlett packard enterprise" lleva las tres palabras a proposito: HP Inc. y
  * Hewlett Packard Enterprise son empresas distintas.
  */
-const ALIAS_MARCA: [prefijo: string, canonica: string][] = [
+const BRAND_ALIASES: [prefix: string, canonical: string][] = [
   ['hewlett packard enterprise', 'hpe'],
   ['american power', 'apc'],
   // Adquisiciones: un distribuidor lista la marca comprada y otro la dueña, y
@@ -61,7 +61,7 @@ export function canonicalBrand(marca: string | null): string {
   const normalized = tokenize(marca ?? '').join(' ');
   if (!normalized) return '';
 
-  for (const [prefix, canonical] of ALIAS_MARCA) {
+  for (const [prefix, canonical] of BRAND_ALIASES) {
     if (normalized === prefix || normalized.startsWith(`${prefix} `)) return canonical;
   }
   return normalized.split(' ')[0];

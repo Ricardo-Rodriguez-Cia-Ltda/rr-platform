@@ -12,11 +12,11 @@
  * rondan 1,5-2 s. Veinte segundos deja margen de sobra para un dia malo del
  * proveedor y sigue muy por debajo de lo que alguien espera un mensaje.
  */
-const TIMEOUT_MS_POR_DEFECTO = 20_000;
+const DEFAULT_TIMEOUT_MS = 20_000;
 
 export function providerTimeout(): number {
   const raw = Number(process.env.PROVEEDOR_TIMEOUT_MS);
-  return Number.isFinite(raw) && raw > 0 ? raw : TIMEOUT_MS_POR_DEFECTO;
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TIMEOUT_MS;
 }
 
 /**

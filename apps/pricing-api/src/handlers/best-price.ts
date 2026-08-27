@@ -12,7 +12,7 @@ import { resolveOrRespond } from './guards.js';
 import { firstString, type Handler } from './types.js';
 
 /** La marca que sigue al separador de la clave de union. */
-function marcaDeClave(clave: string): string {
+function brandFromKey(clave: string): string {
   return clave.split('|')[1] ?? clave;
 }
 
@@ -77,7 +77,7 @@ export function createBestPriceHandler(): Handler {
         res.status(409).json({
           error: 'ambiguo',
           detail: `El MPN ${mpn} existe bajo ${keys.length} marcas. Repite la consulta con &marca=`,
-          marcas: keys.map(marcaDeClave),
+          marcas: keys.map(brandFromKey),
         });
         return;
       }

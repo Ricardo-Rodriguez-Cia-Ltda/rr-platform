@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cargarCatalogoIntcomex, normalizeProduct } from '@rr/providers/intcomex';
+import { loadIntcomexCatalog, normalizeProduct } from '@rr/providers/intcomex';
 
 beforeEach(() => {
   vi.stubEnv('INTCOMEX_API_KEY', 'pub');
@@ -56,12 +56,12 @@ describe('normalizeProduct', () => {
   });
 });
 
-describe('cargarCatalogoIntcomex', () => {
+describe('loadIntcomexCatalog', () => {
   it('pide getcatalog y devuelve productos ya normalizados', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([CRUDO]), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const productos = await cargarCatalogoIntcomex();
+    const productos = await loadIntcomexCatalog();
 
     expect((fetchMock.mock.calls[0][0] as URL).href).toContain('/v1/getcatalog');
     expect(productos).toHaveLength(1);
@@ -72,16 +72,16 @@ describe('cargarCatalogoIntcomex', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ Message: 'Rate limit exceeded' }), { status: 200 }),
     ));
-    await expect(cargarCatalogoIntcomex()).rejects.toThrow();
+    await expect(loadIntcomexCatalog()).rejects.toThrow();
   });
 
   it('rechaza un arreglo vacio', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('[]', { status: 200 })));
-    await expect(cargarCatalogoIntcomex()).rejects.toThrow();
+    await expect(loadIntcomexCatalog()).rejects.toThrow();
   });
 
   it('rechaza un HTTP no-ok', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('boom', { status: 500 })));
-    await expect(cargarCatalogoIntcomex()).rejects.toThrow();
+    await expect(loadIntcomexCatalog()).rejects.toThrow();
   });
 });

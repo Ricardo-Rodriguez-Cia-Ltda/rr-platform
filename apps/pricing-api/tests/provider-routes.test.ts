@@ -11,7 +11,7 @@ vi.mock('@rr/providers/catalog', async () => {
 });
 
 vi.mock('@rr/providers/intcomex', () => ({
-  cargarCatalogoIntcomex: async () => [],
+  loadIntcomexCatalog: async () => [],
   getPrices: (skus: string[]) => getPricesMock(skus),
   intcomex: {
     name: 'intcomex',

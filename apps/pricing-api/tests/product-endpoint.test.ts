@@ -14,7 +14,7 @@ vi.mock('@rr/providers/catalog', async () => {
 
 vi.mock('@rr/providers/intcomex', () => ({
   getPrices: (skus: string[]) => getPricesMock(skus),
-  cargarCatalogoIntcomex: async () => [],
+  loadIntcomexCatalog: async () => [],
   intcomex: {
     name: 'intcomex',
     maxSkusPerBatch: 100,

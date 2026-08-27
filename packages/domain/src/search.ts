@@ -24,7 +24,7 @@ const PESO_MARCA = 10;
 const PESO_DESCRIPCION = 3;
 
 
-function puntuar(
+function scoreProduct(
   product: NormalizedProduct,
   terms: string[],
   normalizedQuery: string,
@@ -72,14 +72,14 @@ export function search(catalog: NormalizedProduct[], filters: SearchFilters): Sc
     if (marca && normalize(product.marca ?? '') !== marca) continue;
     if (categoria && normalize(product.categoria ?? '') !== categoria) continue;
 
-    const score = terms.length === 0 ? 1 : puntuar(product, terms, normalizedQuery);
+    const score = terms.length === 0 ? 1 : scoreProduct(product, terms, normalizedQuery);
     if (score > 0) results.push({ product, score });
   }
 
   return results.sort((a, b) => b.score - a.score);
 }
 
-function contar(values: (string | null | undefined)[]): { valor: string; n: number }[] {
+function count(values: (string | null | undefined)[]): { valor: string; n: number }[] {
   const counts = new Map<string, number>();
   for (const valor of values) {
     if (!valor) continue;
@@ -92,7 +92,7 @@ function contar(values: (string | null | undefined)[]): { valor: string; n: numb
 
 export function computeFacets(productos: NormalizedProduct[]): Facets {
   return {
-    marca: contar(productos.map((p) => p.marca)),
-    categoria: contar(productos.map((p) => p.categoria)),
+    marca: count(productos.map((p) => p.marca)),
+    categoria: count(productos.map((p) => p.categoria)),
   };
 }

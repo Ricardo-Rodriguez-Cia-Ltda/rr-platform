@@ -22,7 +22,7 @@ vi.mock('@rr/providers/catalog', async () => {
 });
 
 vi.mock('@rr/providers/intcomex', () => ({
-  cargarCatalogoIntcomex: async () => [],
+  loadIntcomexCatalog: async () => [],
   intcomex: {
     name: 'intcomex',
     maxSkusPerBatch: 100,

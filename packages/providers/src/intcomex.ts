@@ -177,7 +177,7 @@ export function normalizeProduct(raw: IntcomexProduct): NormalizedProduct {
   };
 }
 
-export async function cargarCatalogoIntcomex(): Promise<NormalizedProduct[]> {
+export async function loadIntcomexCatalog(): Promise<NormalizedProduct[]> {
   const response = await fetchIws('getcatalog');
   if (!response.ok) {
     throw new Error(`Intcomex respondió HTTP ${response.status} al pedir el catálogo`);
@@ -198,7 +198,7 @@ export const intcomex: Provider = {
         process.env.INTCOMEX_ACCESS_KEY &&
         process.env.INTCOMEX_BASE_URL,
     ),
-  loadCatalog: cargarCatalogoIntcomex,
+  loadCatalog: loadIntcomexCatalog,
   getPrices,
   getPrice,
 };

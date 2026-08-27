@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   _resetSnapshotForTests,
-  cargarCatalogoTecnoglobal,
+  loadTecnoglobalCatalog,
   getPrice,
   getPrices,
   normalizeProduct,
@@ -72,7 +72,7 @@ describe('autenticacion', () => {
     const fetchMock = vi.fn().mockResolvedValue(response(RESPUESTA));
     vi.stubGlobal('fetch', fetchMock);
 
-    await cargarCatalogoTecnoglobal();
+    await loadTecnoglobalCatalog();
 
     const [url, init] = fetchMock.mock.calls[0];
     expect((url as URL).href).toBe('http://tecnoglobal.test/stock/v1/price');
@@ -105,11 +105,11 @@ describe('normalizeProduct', () => {
   });
 });
 
-describe('cargarCatalogoTecnoglobal', () => {
+describe('loadTecnoglobalCatalog', () => {
   it('normaliza el catalogo completo', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response(RESPUESTA)));
 
-    const catalogo = await cargarCatalogoTecnoglobal();
+    const catalogo = await loadTecnoglobalCatalog();
 
     expect(catalogo).toHaveLength(PRODUCTOS.length);
     expect(catalogo.map((p) => p.sku)).toEqual(PRODUCTOS.map((p) => p.codigoTg));
@@ -121,13 +121,13 @@ describe('cargarCatalogoTecnoglobal', () => {
       vi.fn().mockResolvedValue(response({ error: false, message: 'Articulos no fueron encontrados' })),
     );
 
-    await expect(cargarCatalogoTecnoglobal()).rejects.toThrow();
+    await expect(loadTecnoglobalCatalog()).rejects.toThrow();
   });
 
   it('propaga un HTTP no-2xx como error de proveedor', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('nope', { status: 500 })));
 
-    await expect(cargarCatalogoTecnoglobal()).rejects.toThrow(ProviderError);
+    await expect(loadTecnoglobalCatalog()).rejects.toThrow(ProviderError);
   });
 
   // El servicio devuelve 200 con error:true; confiar en el status dejaria
@@ -138,7 +138,7 @@ describe('cargarCatalogoTecnoglobal', () => {
       vi.fn().mockResolvedValue(response({ error: true, message: 'Credenciales invalidas' })),
     );
 
-    await expect(cargarCatalogoTecnoglobal()).rejects.toThrow(/Credenciales invalidas/);
+    await expect(loadTecnoglobalCatalog()).rejects.toThrow(/Credenciales invalidas/);
   });
 });
 
@@ -317,7 +317,7 @@ describe('foto del volcado completo', () => {
     const fetchMock = fetchQueResuelvePorFoto();
     vi.stubGlobal('fetch', fetchMock);
 
-    await cargarCatalogoTecnoglobal();
+    await loadTecnoglobalCatalog();
     await getPrice({ mpn: 'C31CJ57012' });
 
     const volcados = fetchMock.mock.calls.filter((c) => (c[0] as URL).pathname.endsWith('/v1/price'));
@@ -395,7 +395,7 @@ describe('una respuesta vacia no queda cacheada como foto', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(cargarCatalogoTecnoglobal()).rejects.toThrow();
+    await expect(loadTecnoglobalCatalog()).rejects.toThrow();
 
     // La siguiente cotizacion masiva vuelve a intentar la descarga en vez de
     // servir la foto vacia.
@@ -410,7 +410,7 @@ describe('una respuesta vacia no queda cacheada como foto', () => {
 describe('la foto sobrevive a un reinicio', () => {
   it('la persiste en disco al descargarla', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => response(RESPUESTA)));
-    await cargarCatalogoTecnoglobal();
+    await loadTecnoglobalCatalog();
 
     const ruta = join(process.env.CATALOG_CACHE_DIR!, 'tecnoglobal-precios.json');
     const guardada = JSON.parse(readFileSync(ruta, 'utf8'));
@@ -420,7 +420,7 @@ describe('la foto sobrevive a un reinicio', () => {
 
   it('cotiza desde la foto de disco tras reiniciar, sin volver a descargar', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => response(RESPUESTA)));
-    await cargarCatalogoTecnoglobal();
+    await loadTecnoglobalCatalog();
 
     // Reinicio: se pierde la memoria, queda el disco.
     _resetSnapshotForTests();
@@ -436,7 +436,7 @@ describe('la foto sobrevive a un reinicio', () => {
   // El caso que provoco el 502: foto de disco vencida y cuota agotada.
   it('con la foto de disco vencida y la cuota agotada, cotiza igual', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => response(RESPUESTA)));
-    await cargarCatalogoTecnoglobal();
+    await loadTecnoglobalCatalog();
     _resetSnapshotForTests();
 
     vi.stubEnv('TECNOGLOBAL_PRECIOS_TTL_MS', '0');

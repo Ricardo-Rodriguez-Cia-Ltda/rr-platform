@@ -15,7 +15,7 @@ import { ProviderError } from '@rr/domain/types';
  */
 export const QUOTA_MESSAGE = 'exceso de llamadas';
 
-const BASE_URL_POR_DEFECTO = 'http://200.6.78.34/stock/v1/';
+const DEFAULT_BASE_URL = 'http://200.6.78.34/stock/v1/';
 
 /**
  * Como se cotiza contra Tecnoglobal.
@@ -39,22 +39,22 @@ const BASE_URL_POR_DEFECTO = 'http://200.6.78.34/stock/v1/';
  *   volcado. Pedir 25 en vivo serian ~37 s de espera, inaceptable para una
  *   busqueda, y el precio definitivo igual se confirma con /product.
  */
-const UMBRAL_CONSULTA_DIRECTA = 5;
+const DIRECT_QUERY_THRESHOLD = 5;
 
 /**
  * Tope de SKUs por lote. Alto a proposito: sobre la foto no hay costo por SKU,
  * y el handler ya limita cuantos candidatos vale la pena cotizar.
  */
-const MAX_SKUS_POR_LOTE = 300;
+const MAX_SKUS_PER_BATCH = 300;
 
 /** Consultas por SKU simultaneas. Acotado para no golpear el servicio. */
-const CONCURRENCIA = 8;
+const CONCURRENCY = 8;
 
 /**
  * Cada cuanto se puede refrescar la foto. Una hora deja el precio de las
  * busquedas razonablemente fresco sin acercarse a la cuota del volcado.
  */
-const TTL_FOTO_MS_POR_DEFECTO = 60 * 60 * 1000;
+const DEFAULT_SNAPSHOT_TTL_MS = 60 * 60 * 1000;
 
 export function isConfigured(): boolean {
   return Boolean(process.env.TECNOGLOBAL_USER && process.env.TECNOGLOBAL_PASSWORD);
@@ -75,7 +75,7 @@ function autorizacion(): string {
 }
 
 export async function fetchStock(path: string): Promise<Response> {
-  const rawBaseUrl = process.env.TECNOGLOBAL_BASE_URL || BASE_URL_POR_DEFECTO;
+  const rawBaseUrl = process.env.TECNOGLOBAL_BASE_URL || DEFAULT_BASE_URL;
   const baseUrl = rawBaseUrl.endsWith('/') ? rawBaseUrl : `${rawBaseUrl}/`;
   const authHeader = autorizacion();
 
@@ -104,7 +104,7 @@ export interface TecnoglobalProduct {
   stockDisp?: number | null;
 }
 
-interface RespuestaTecnoglobal {
+interface TecnoglobalResponse {
   error?: boolean;
   message?: string;
   products?: TecnoglobalProduct[];
@@ -117,12 +117,12 @@ interface RespuestaTecnoglobal {
  * la presencia de `products` alcanzan por si solos: hay que mirar `error` y el
  * mensaje.
  */
-async function leerProductos(response: Response): Promise<TecnoglobalProduct[]> {
+async function readProducts(response: Response): Promise<TecnoglobalProduct[]> {
   const text = await response.text().catch(() => '');
 
-  let data: RespuestaTecnoglobal | null = null;
+  let data: TecnoglobalResponse | null = null;
   try {
-    data = JSON.parse(text) as RespuestaTecnoglobal;
+    data = JSON.parse(text) as TecnoglobalResponse;
   } catch {
     data = null;
   }
@@ -145,7 +145,7 @@ async function leerProductos(response: Response): Promise<TecnoglobalProduct[]> 
   return Array.isArray(data.products) ? data.products : [];
 }
 
-function esCuotaExcedida(data: RespuestaTecnoglobal | null): boolean {
+function esCuotaExcedida(data: TecnoglobalResponse | null): boolean {
   return /excede la cantidad/i.test(data?.message ?? '');
 }
 
@@ -153,7 +153,7 @@ function esCuotaExcedida(data: RespuestaTecnoglobal | null): boolean {
  * El UPC viaja como "0" cuando el producto no tiene codigo asignado; dejarlo
  * pasar convertiria a "0" en la clave que empareja productos sin relacion.
  */
-function upcValido(upc: string | null | undefined): string | null {
+function validUpc(upc: string | null | undefined): string | null {
   const clean = (upc ?? '').trim();
   return clean && clean !== '0' ? clean : null;
 }
@@ -170,7 +170,7 @@ export function normalizeProduct(raw: TecnoglobalProduct): NormalizedProduct {
   };
 }
 
-function aPrecio(raw: TecnoglobalProduct): PriceInfo | null {
+function toPriceInfo(raw: TecnoglobalProduct): PriceInfo | null {
   if (raw.precio == null) return null;
   return {
     price: raw.precio,
@@ -223,11 +223,11 @@ function loadSnapshotFromDisk(): Snapshot | null {
 
 function snapshotTtl(): number {
   const raw = Number(process.env.TECNOGLOBAL_PRECIOS_TTL_MS);
-  return Number.isFinite(raw) && raw >= 0 ? raw : TTL_FOTO_MS_POR_DEFECTO;
+  return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_SNAPSHOT_TTL_MS;
 }
 
 async function downloadCatalog(): Promise<Snapshot> {
-  const productos = await leerProductos(await fetchStock('price'));
+  const productos = await readProducts(await fetchStock('price'));
   // Una respuesta sin productos no se guarda: dejaria una foto vacia vigente
   // durante toda su vida util, y cotizar contra ella devuelve "sin precio"
   // para todo el catalogo sin que nada parezca haber fallado.
@@ -269,33 +269,33 @@ export function _resetSnapshotForTests(): void {
   downloadInProgress = null;
 }
 
-export async function cargarCatalogoTecnoglobal(): Promise<NormalizedProduct[]> {
+export async function loadTecnoglobalCatalog(): Promise<NormalizedProduct[]> {
   // El refresco diario del catalogo trae exactamente el mismo cuerpo que usan
   // los precios, asi que deja la foto lista y evita una segunda descarga.
   const { productos } = await downloadCatalog();
   return productos.map(normalizeProduct);
 }
 
-async function consultarPorSku(sku: string): Promise<TecnoglobalProduct | null> {
-  const productos = await leerProductos(await fetchStock(`price/${encodeURIComponent(sku)}`));
+async function querySku(sku: string): Promise<TecnoglobalProduct | null> {
+  const productos = await readProducts(await fetchStock(`price/${encodeURIComponent(sku)}`));
   return productos.find((p) => p.codigoTg === sku) ?? null;
 }
 
-async function preciosEnVivo(skus: string[]): Promise<Map<string, PriceInfo>> {
+async function livePrices(skus: string[]): Promise<Map<string, PriceInfo>> {
   const prices = new Map<string, PriceInfo>();
   const pending = [...skus];
 
   async function worker(): Promise<void> {
     for (let sku = pending.shift(); sku !== undefined; sku = pending.shift()) {
-      const raw = await consultarPorSku(sku);
+      const raw = await querySku(sku);
       if (!raw) continue;
-      const price = aPrecio(raw);
+      const price = toPriceInfo(raw);
       if (price) prices.set(sku, price);
     }
   }
 
   await Promise.all(
-    Array.from({ length: Math.min(CONCURRENCIA, skus.length) }, () => worker()),
+    Array.from({ length: Math.min(CONCURRENCY, skus.length) }, () => worker()),
   );
   return prices;
 }
@@ -307,7 +307,7 @@ async function pricesFromSnapshot(skus: string[]): Promise<Map<string, PriceInfo
 
   for (const raw of productos) {
     if (!requested.has(raw.codigoTg)) continue;
-    const price = aPrecio(raw);
+    const price = toPriceInfo(raw);
     if (price) prices.set(raw.codigoTg, price);
   }
   return prices;
@@ -315,15 +315,15 @@ async function pricesFromSnapshot(skus: string[]): Promise<Map<string, PriceInfo
 
 export async function getPrices(skus: string[]): Promise<Map<string, PriceInfo>> {
   if (skus.length === 0) return new Map();
-  if (skus.length > MAX_SKUS_POR_LOTE) {
+  if (skus.length > MAX_SKUS_PER_BATCH) {
     throw new ProviderError(
       'upstream',
-      `Tecnoglobal se consulta de a ${MAX_SKUS_POR_LOTE} SKUs por lote`,
+      `Tecnoglobal se consulta de a ${MAX_SKUS_PER_BATCH} SKUs por lote`,
     );
   }
 
-  return skus.length <= UMBRAL_CONSULTA_DIRECTA
-    ? preciosEnVivo(skus)
+  return skus.length <= DIRECT_QUERY_THRESHOLD
+    ? livePrices(skus)
     : pricesFromSnapshot(skus);
 }
 
@@ -334,22 +334,22 @@ export async function getPrice(query: PriceQuery): Promise<PriceResult> {
   // que puede tener horas.
   let found: TecnoglobalProduct | null;
   if (query.sku) {
-    found = await consultarPorSku(query.sku);
+    found = await querySku(query.sku);
   } else {
     const { productos } = await getSnapshot();
     const inSnapshot = productos.find((c) => {
       if (query.mpn) return (c.pnFabricante ?? '').trim() === query.mpn;
-      if (query.upc) return upcValido(c.upcEan13) === query.upc;
+      if (query.upc) return validUpc(c.upcEan13) === query.upc;
       return false;
     });
-    found = inSnapshot ? await consultarPorSku(inSnapshot.codigoTg) : null;
+    found = inSnapshot ? await querySku(inSnapshot.codigoTg) : null;
   }
 
   if (!found) {
     throw new ProviderError('not_found', 'Product not found at Tecnoglobal');
   }
 
-  const priceInfo = aPrecio(found);
+  const priceInfo = toPriceInfo(found);
   if (!priceInfo) {
     throw new ProviderError('not_found', 'Tecnoglobal returned no price for this product');
   }
@@ -367,9 +367,9 @@ export async function getPrice(query: PriceQuery): Promise<PriceResult> {
 
 export const tecnoglobal: Provider = {
   name: 'tecnoglobal',
-  maxSkusPerBatch: MAX_SKUS_POR_LOTE,
+  maxSkusPerBatch: MAX_SKUS_PER_BATCH,
   isConfigured,
-  loadCatalog: cargarCatalogoTecnoglobal,
+  loadCatalog: loadTecnoglobalCatalog,
   getPrices,
   getPrice,
 };

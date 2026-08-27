@@ -11,7 +11,7 @@ const DEFAULT_TOKEN_URL = 'https://api.ingrammicro.com/oauth/oauth30/token';
 const DEFAULT_COUNTRY = 'CL';
 
 /** Tope documentado del endpoint de price & availability. */
-const MAX_SKUS_POR_LOTE = 50;
+const MAX_SKUS_PER_BATCH = 50;
 
 /**
  * Maximo que acepta el catalogo por pagina.
@@ -21,7 +21,7 @@ const MAX_SKUS_POR_LOTE = 50;
  * volcado no confia en ese numero para saber cuando termino: corta con la
  * primera pagina vacia.
  */
-const TAMANO_PAGINA = 100;
+const PAGE_SIZE = 100;
 
 /**
  * Ingram permite 60 llamadas por minuto y por endpoint, y responde 429 al
@@ -39,7 +39,7 @@ const DEFAULT_MS_BETWEEN_PAGES = 1100;
 const DEFAULT_MAX_PAGES = 500;
 
 /** Se renueva el token un poco antes de que expire, no justo al vencer. */
-const MARGEN_TOKEN_MS = 60 * 1000;
+const TOKEN_MARGIN_MS = 60 * 1000;
 
 export function isConfigured(): boolean {
   return Boolean(
@@ -50,8 +50,8 @@ export function isConfigured(): boolean {
 }
 
 interface CachedToken {
-  valor: string;
-  expiraEn: number;
+  value: string;
+  expiresAt: number;
 }
 
 let token: CachedToken | null = null;
@@ -118,15 +118,15 @@ async function requestToken(): Promise<CachedToken> {
 
   const durationMs = Number(data.expires_in) * 1000;
   return {
-    valor: data.access_token,
+    value: data.access_token,
     // Sin expires_in usable se asume vencido de inmediato: pedir un token de
     // mas es barato, usar uno vencido devuelve 401 en medio de una cotizacion.
-    expiraEn: Number.isFinite(durationMs) && durationMs > 0 ? Date.now() + durationMs : 0,
+    expiresAt: Number.isFinite(durationMs) && durationMs > 0 ? Date.now() + durationMs : 0,
   };
 }
 
 async function getToken(): Promise<string> {
-  if (token && Date.now() < token.expiraEn - MARGEN_TOKEN_MS) return token.valor;
+  if (token && Date.now() < token.expiresAt - TOKEN_MARGIN_MS) return token.value;
   if (!pendingTokenRequest) {
     pendingTokenRequest = requestToken()
       .then((fresh) => {
@@ -137,7 +137,7 @@ async function getToken(): Promise<string> {
         pendingTokenRequest = null;
       });
   }
-  return (await pendingTokenRequest).valor;
+  return (await pendingTokenRequest).value;
 }
 
 function buildHeaders(bearer: string): Record<string, string> {
@@ -260,7 +260,7 @@ export function normalizeProduct(raw: IngramProduct): NormalizedProduct {
   };
 }
 
-function msEntrePaginas(): number {
+function msBetweenPages(): number {
   const raw = Number(process.env.INGRAM_MS_ENTRE_PAGINAS);
   return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_MS_BETWEEN_PAGES;
 }
@@ -273,18 +273,18 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-function maxPaginas(): number {
+function maxPages(): number {
   const raw = Number(process.env.INGRAM_MAX_PAGINAS);
   return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_MAX_PAGES;
 }
 
-export async function cargarCatalogoIngram(): Promise<NormalizedProduct[]> {
+export async function loadIngramCatalog(): Promise<NormalizedProduct[]> {
   const productos: NormalizedProduct[] = [];
-  const limit = maxPaginas();
+  const limit = maxPages();
   let page = 1;
   let found: number | null = null;
 
-  const pause = msEntrePaginas();
+  const pause = msBetweenPages();
 
   for (; page <= limit; page += 1) {
     // La pausa va antes de cada pagina menos la primera: sin ella el volcado
@@ -293,7 +293,7 @@ export async function cargarCatalogoIngram(): Promise<NormalizedProduct[]> {
 
     const response = await readJson<CatalogPage>(
       await fetchIngram('resellers/v6/catalog', {
-        params: { pageNumber: String(page), pageSize: String(TAMANO_PAGINA) },
+        params: { pageNumber: String(page), pageSize: String(PAGE_SIZE) },
       }),
       'el catalogo',
     );
@@ -354,7 +354,7 @@ function toPriceInfo(item: IngramPriceItem): PriceInfo | null {
   return {
     price: value,
     currency: normalizeCurrency(item.pricing?.currencyCode),
-    inStock: aStock(item.availability),
+    inStock: toStock(item.availability),
   };
 }
 
@@ -367,7 +367,7 @@ function toPriceInfo(item: IngramPriceItem): PriceInfo | null {
  * Con `available: false` se devuelve 0 —es un no explicito—; con `true` sin
  * numero no se inventa una cantidad: null significa "hay, cuanto no se dice".
  */
-function aStock(availability: IngramPriceItem['availability']): number | null {
+function toStock(availability: IngramPriceItem['availability']): number | null {
   const units = availability?.totalAvailability;
   if (units != null) return units;
   if (availability?.available === false) return 0;
@@ -390,10 +390,10 @@ async function queryPrices(
 export async function getPrices(skus: string[]): Promise<Map<string, PriceInfo>> {
   const prices = new Map<string, PriceInfo>();
   if (skus.length === 0) return prices;
-  if (skus.length > MAX_SKUS_POR_LOTE) {
+  if (skus.length > MAX_SKUS_PER_BATCH) {
     throw new ProviderError(
       'upstream',
-      `Ingram accepts at most ${MAX_SKUS_POR_LOTE} SKUs per request`,
+      `Ingram accepts at most ${MAX_SKUS_PER_BATCH} SKUs per request`,
     );
   }
 
@@ -443,9 +443,9 @@ export async function getPrice(query: PriceQuery): Promise<PriceResult> {
 
 export const ingram: Provider = {
   name: 'ingram',
-  maxSkusPerBatch: MAX_SKUS_POR_LOTE,
+  maxSkusPerBatch: MAX_SKUS_PER_BATCH,
   isConfigured,
-  loadCatalog: cargarCatalogoIngram,
+  loadCatalog: loadIngramCatalog,
   getPrices,
   getPrice,
 };

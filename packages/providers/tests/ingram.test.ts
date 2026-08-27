@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   forgetToken,
-  cargarCatalogoIngram,
+  loadIngramCatalog,
   getPrice,
   getPrices,
   ingram,
@@ -179,7 +179,7 @@ describe('normalizeProduct', () => {
   });
 });
 
-describe('cargarCatalogoIngram', () => {
+describe('loadIngramCatalog', () => {
   it('recorre las paginas hasta la primera vacia', async () => {
     const pagina = (n: number, items: IngramProduct[]) =>
       json({ recordsFound: 3, pageSize: 100, pageNumber: n, catalog: items });
@@ -197,7 +197,7 @@ describe('cargarCatalogoIngram', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const catalogo = await cargarCatalogoIngram();
+    const catalogo = await loadIngramCatalog();
 
     expect(catalogo.map((p) => p.sku)).toEqual(['A1', 'A2', 'A3']);
     const paginas = fetchMock.mock.calls.slice(1).map((c) => (c[0] as URL).searchParams.get('pageNumber'));
@@ -215,7 +215,7 @@ describe('cargarCatalogoIngram', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    expect(await cargarCatalogoIngram()).toHaveLength(3);
+    expect(await loadIngramCatalog()).toHaveLength(3);
   });
 
   it('corta en la primera pagina vacia aunque recordsFound prometa mas', async () => {
@@ -225,7 +225,7 @@ describe('cargarCatalogoIngram', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const catalogo = await cargarCatalogoIngram();
+    const catalogo = await loadIngramCatalog();
 
     expect(catalogo).toHaveLength(1);
     expect(fetchMock).toHaveBeenCalledTimes(3);
@@ -243,7 +243,7 @@ describe('cargarCatalogoIngram', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const t0 = Date.now();
-    await cargarCatalogoIngram();
+    await loadIngramCatalog();
 
     // Tres paginas => dos pausas.
     expect(Date.now() - t0).toBeGreaterThanOrEqual(70);
@@ -262,7 +262,7 @@ describe('cargarCatalogoIngram', () => {
       ),
     );
 
-    await expect(cargarCatalogoIngram()).rejects.toThrow(/corto por cuota/i);
+    await expect(loadIngramCatalog()).rejects.toThrow(/corto por cuota/i);
   });
 
   it('descarta productos sin ingramPartNumber, que no se pueden cotizar', async () => {
@@ -272,7 +272,7 @@ describe('cargarCatalogoIngram', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    expect(await cargarCatalogoIngram()).toHaveLength(1);
+    expect(await loadIngramCatalog()).toHaveLength(1);
   });
 
   // Un catalogo truncado en silencio se lee como "ese producto no existe".
@@ -288,7 +288,7 @@ describe('cargarCatalogoIngram', () => {
       ),
     );
 
-    await cargarCatalogoIngram();
+    await loadIngramCatalog();
 
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('truncado'));
     errorSpy.mockRestore();
@@ -298,7 +298,7 @@ describe('cargarCatalogoIngram', () => {
     const fetchMock = conToken(json({ recordsFound: 0, catalog: [] }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(cargarCatalogoIngram()).rejects.toThrow();
+    await expect(loadIngramCatalog()).rejects.toThrow();
   });
 });
 
