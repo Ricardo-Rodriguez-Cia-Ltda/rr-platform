@@ -1,7 +1,8 @@
 {
-  "name": "scrapper-proveedores",
+  "name": "rr-platform",
   "private": true,
   "type": "module",
+  "workspaces": ["apps/*", "packages/*"],
   "engines": {
     "node": ">=20"
   },

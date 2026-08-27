@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizarMoneda } from '../lib/moneda.js';
+import { normalizarMoneda } from '@rr/domain/currency';
 
 describe('normalizarMoneda', () => {
   // El caso que motivo esto: la misma moneda con dos etiquetas en una sola

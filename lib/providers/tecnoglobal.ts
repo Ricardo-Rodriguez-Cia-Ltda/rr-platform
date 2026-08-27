@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { fetchConTimeout } from '../http.js';
-import { normalizarMoneda } from '../moneda.js';
+import { normalizarMoneda } from '@rr/domain/currency';
 import type { ProductoNormalizado } from '../producto.js';
 import type { PriceInfo, PriceQuery, PriceResult, Proveedor } from '../types.js';
 import { ProviderError } from '../types.js';
