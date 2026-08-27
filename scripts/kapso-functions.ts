@@ -40,13 +40,45 @@ const VALORES: Record<string, string> = {
   OC_EMAIL_DESTINO: process.env.OC_EMAIL_DESTINO ?? 'pyxis.latam@gmail.com',
 };
 
+function imprimirResumen(
+  ids: Record<string, string>,
+  sinCupo: string[],
+  sinConfirmar: string[],
+  pendientes: string[],
+): void {
+  // Se llama desde un `finally`, asi que corre tanto si las seis functions se
+  // procesaron bien como si la corrida revento a mitad de camino (por
+  // ejemplo, una caida de red en el POST de secretos de la cuarta). El
+  // estado acumulado hasta ese punto es lo que el operador necesita ver para
+  // saber que quedo creado y que falta, en vez de solo un stack trace.
+  console.log('\nfunction_id por nombre:');
+  console.log(JSON.stringify(ids, null, 2));
+
+  if (sinCupo.length > 0) {
+    console.log('\nSIN DESPLEGAR (sin cupo de Cloudflare Worker en el plan actual):');
+    for (const nombre of sinCupo) console.log(`  - ${nombre}`);
+  }
+
+  if (sinConfirmar.length > 0) {
+    console.log('\nSIN CONFIRMAR (el deploy se acepto pero el estado no confirmo a tiempo; revisar a mano):');
+    for (const nombre of sinConfirmar) console.log(`  - ${nombre}`);
+  }
+
+  if (pendientes.length > 0) {
+    console.log('\nSECRETOS PENDIENTES (cargar en Kapso antes de emitir ordenes):');
+    for (const pendiente of pendientes) console.log(`  - ${pendiente}`);
+  }
+}
+
 async function main() {
   const { data: existentes } = await kapso<{ data: Funcion[] }>('/functions');
   const ids: Record<string, string> = {};
   const pendientes: string[] = [];
-  const sinDesplegar: string[] = [];
+  const sinCupo: string[] = [];
+  const sinConfirmar: string[] = [];
 
-  for (const { nombre, secretos } of FUNCIONES) {
+  try {
+    for (const { nombre, secretos } of FUNCIONES) {
     const codigo = readFileSync(`docs/kapso/functions-v2/${nombre}.js`, 'utf8');
     const previa = existentes.find((f) => f.name === nombre);
 
@@ -71,6 +103,11 @@ async function main() {
       console.log(`creada       ${nombre}`);
     }
 
+    // Se registra apenas se conoce el id, no al final del todo: si algo
+    // revienta mas adelante (deploy, secretos), el resumen del `finally`
+    // igual sabe que esta function ya quedo creada/actualizada con este id.
+    ids[nombre] = id;
+
     // Kapso exige la function desplegada antes de aceptar secretos ("Function
     // must be deployed before managing secrets"), asi que el deploy va antes
     // que los secretos, al reves de como lo tenia el borrador original.
@@ -86,13 +123,18 @@ async function main() {
       if (desplegada) {
         console.log(`desplegada   ${nombre}`);
       } else {
-        console.log(`aviso        ${nombre} desplegada pero el estado tardo en confirmarse; sus secretos quedan pendientes`);
+        // El deploy se acepto, pero el estado nunca confirmo dentro del tope
+        // de espera. Es un caso distinto de "sin cupo": aca no sabemos si de
+        // verdad quedo desplegada o no, y el resumen final lo tiene que decir
+        // por separado para que alguien lo revise a mano.
+        console.log(`sin confirmar ${nombre} (el deploy se acepto pero el estado no confirmo a tiempo; sus secretos quedan pendientes)`);
+        sinConfirmar.push(nombre);
       }
     } catch (error) {
       const mensaje = error instanceof Error ? error.message : String(error);
       if (/cloudflare_worker_script_limit_exceeded/.test(mensaje)) {
         console.log(`sin cupo     ${nombre} (queda en draft; los nodos "decide" del workflow corren asi)`);
-        sinDesplegar.push(nombre);
+        sinCupo.push(nombre);
       } else {
         throw error;
       }
@@ -117,21 +159,13 @@ async function main() {
           });
       }
     }
-
-    ids[nombre] = id;
-  }
-
-  console.log('\nfunction_id por nombre:');
-  console.log(JSON.stringify(ids, null, 2));
-
-  if (sinDesplegar.length > 0) {
-    console.log('\nSIN DESPLEGAR (sin cupo de Cloudflare Worker en el plan actual):');
-    for (const nombre of sinDesplegar) console.log(`  - ${nombre}`);
-  }
-
-  if (pendientes.length > 0) {
-    console.log('\nSECRETOS PENDIENTES (cargar en Kapso antes de emitir ordenes):');
-    for (const pendiente of pendientes) console.log(`  - ${pendiente}`);
+    }
+  } finally {
+    // Se imprime pase lo que pase: si el `for` completo las seis functions o
+    // si algo revento a mitad de camino, el operador necesita ver que
+    // alcanzo a quedar creado, con que id, que quedo sin desplegar (por
+    // cupo o sin confirmar) y que secretos quedaron pendientes.
+    imprimirResumen(ids, sinCupo, sinConfirmar, pendientes);
   }
 }
 
