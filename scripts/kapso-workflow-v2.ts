@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { kapso } from './kapso.js';
 
 interface Funcion { id: string; name: string; }
@@ -6,12 +6,30 @@ interface Workflow { id: string; name: string; slug: string; }
 
 const MODELO = '8c6d57df-3f07-4290-b8a5-38047608c4df';  // claude-haiku-4-5, el mismo de v1
 
+// La version que se despliega es la que el propio directorio declara
+// `vigente`, no un `v-01` fijo: al subir un prompt lo unico que hay que tocar
+// es la cabecera del archivo, y `tests/prompts.test.ts` ya garantiza que hay
+// como maximo una vigente por agente.
+function archivoVigente(agente: string): string {
+  const dir = `docs/kapso/prompts-v2/${agente}`;
+  const vigentes = readdirSync(dir)
+    .filter((n) => /^v-\d+\.md$/.test(n))
+    .filter((n) => /\| \*\*Estado\*\* \| vigente \|/.test(readFileSync(`${dir}/${n}`, 'utf8')));
+
+  if (vigentes.length !== 1) {
+    throw new Error(`${agente} tiene ${vigentes.length} versiones vigentes; tiene que haber exactamente una`);
+  }
+  return `${dir}/${vigentes[0]}`;
+}
+
 // Solo el bloque delimitado va al system_prompt. La cabecera y las notas de
 // diseno son documentacion nuestra; en v1 se subio el archivo entero por error.
 function prompt(agente: string): string {
-  const archivo = readFileSync(`docs/kapso/prompts-v2/${agente}/v-01.md`, 'utf8');
+  const ruta = archivoVigente(agente);
+  const archivo = readFileSync(ruta, 'utf8');
   const bloque = /<!-- PROMPT:INICIO -->([\s\S]*?)<!-- PROMPT:FIN -->/.exec(archivo);
-  if (!bloque) throw new Error(`${agente}/v-01.md no tiene delimitadores de prompt`);
+  if (!bloque) throw new Error(`${ruta} no tiene delimitadores de prompt`);
+  console.log(`prompt ${agente}: ${ruta}`);
   return bloque[1].trim();
 }
 
@@ -135,7 +153,13 @@ async function main() {
         node_type: 'send_text',
         display_name: 'Confirmación',
         config: {
-          message: 'Listo, tu pedido quedó cursado 🙌 El equipo comercial te contacta para coordinar el pago y la entrega. ¡Gracias!',
+          // La arista fn_emitir_ordenes → send_confirmacion es incondicional:
+          // este texto sale igual si la emision devolvio 400, 500, o `ok: true`
+          // con todas las ordenes en `failed`. Por eso NO afirma que el pedido
+          // quedo cursado — afirma lo unico que es cierto en todos los casos.
+          // Ramificar de verdad por `purchase_orders_ok` necesita otro nodo
+          // `decide`; ver README-v2.md, seccion de pendientes.
+          message: 'Listo, dejamos tu pedido con el equipo comercial 🙌 Te contactan para confirmarlo y coordinar el pago y la entrega. ¡Gracias!',
           delay_seconds: 0,
         },
       },

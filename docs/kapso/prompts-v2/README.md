@@ -13,7 +13,7 @@ repite.
 | Directorio | Nodo | Responsabilidad | Vigente |
 |---|---|---|---|
 | [`agente-descubrimiento/`](agente-descubrimiento/) | `agente_descubrimiento` | Entiende la necesidad, busca y arma el carro | v-01 |
-| [`agente-presentacion/`](agente-presentacion/) | `agente_presentacion` | Presenta la cotización y captura la decisión | v-01 |
+| [`agente-presentacion/`](agente-presentacion/) | `agente_presentacion` | Presenta la cotización y captura la decisión | v-02 |
 | [`agente-facturacion/`](agente-facturacion/) | `agente_facturacion` | RUT y datos tributarios, en bloque | v-01 |
 | [`agente-cierre/`](agente-cierre/) | `agente_cierre` | Confirmación final antes de emitir las órdenes | v-01 |
 

@@ -107,11 +107,43 @@ describe('un solo vigente por agente', () => {
     expect(vigentes.map((v) => v.archivo).length).toBeLessThanOrEqual(1);
   });
 
+  // En v2 no alcanza con "como maximo una": `scripts/kapso-workflow-v2.ts`
+  // elige el archivo a desplegar por esa marca, asi que cero vigentes rompe el
+  // despliegue igual que dos.
+  it.each(AGENTES.filter((a) => a.startsWith('docs/kapso/prompts-v2/')))(
+    '%s tiene exactamente una version vigente, que es la que se despliega',
+    (agente) => {
+      const vigentes = versionesDe(agente).filter((v) => campo(v.contenido, 'Estado') === 'vigente');
+      expect(vigentes.map((v) => v.archivo)).toHaveLength(1);
+    },
+  );
+
   it.each(AGENTES)('%s marca su version mas alta como vigente o borrador', (agente) => {
     // Si la ultima version quedo como "reemplazado", alguien archivo la nueva y
     // no la escribio: el nodo estaria corriendo un prompt que ya declaramos viejo.
     const versiones = versionesDe(agente).sort((a, b) => a.archivo.localeCompare(b.archivo));
     const ultima = versiones[versiones.length - 1];
     expect(campo(ultima.contenido, 'Estado'), `${ultima.archivo}`).not.toBe('reemplazado');
+  });
+});
+
+// La arista `fn_cotizar → agente_presentacion` es incondicional: el nodo
+// tambien corre cuando `generar-cotizacion-v2` respondio un error. La function
+// limpia `quote_result`, y la otra mitad del arreglo es la regla del prompt que
+// impide presentar la cotizacion anterior. Vive en prosa, asi que lo unico que
+// evita perderla en la proxima version es una prueba que la busque.
+describe('reglas de v2 que no se pueden perder al subir una version', () => {
+  it('el prompt vigente de agente_presentacion cubre la cotizacion ausente', () => {
+    const dir = 'docs/kapso/prompts-v2/agente-presentacion';
+    const vigente = versionesDe(dir).find((v) => campo(v.contenido, 'Estado') === 'vigente');
+    if (!vigente) throw new Error(`${dir} no tiene version vigente`);
+
+    const cuerpo = vigente.contenido.slice(
+      vigente.contenido.indexOf('<!-- PROMPT:INICIO -->'),
+      vigente.contenido.indexOf('<!-- PROMPT:FIN -->'),
+    );
+    expect(cuerpo, 'el prompt no menciona quote_result').toContain('quote_result');
+    expect(cuerpo, 'la cotizacion ausente no deriva a una persona').toContain('handoff_to_human');
+    expect(cuerpo, 'falta la regla de que quote_result puede venir vacia').toMatch(/vac[ií]a|null/i);
   });
 });
