@@ -1,8 +1,24 @@
 const API_BASE_DEFAULT = "https://api.pyxis-latam.cl/rr/captador-precios";
 const TIMEOUT_MS = 25000;
 
+// La arista fn_cotizar → agente_presentacion es incondicional: si esta
+// function falla y no toca las variables, el agente presenta la cotizacion
+// ANTERIOR como si fuera la nueva y el cliente termina comprando otra cosa.
+// Toda salida de error borra la cotizacion vigente.
+const SIN_COTIZACION = {
+  quote_result: null,
+  quote_id: null,
+  quote_version: null,
+  quote_total_clp: null,
+  quote_valid_until: null
+};
+
 function json(payload, status = 200) {
   return new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
+}
+
+function error(payload, status) {
+  return json({ ...payload, vars: { ...SIN_COTIZACION } }, status);
 }
 
 async function consultar(base, apiKey, params) {
@@ -36,11 +52,13 @@ async function handler(request, env) {
   const horas = Number(env.COTIZACION_VALID_HOURS ?? "3");
   const base = String(env.API_PRECIOS_URL || API_BASE_DEFAULT).replace(/\/+$/, "");
 
-  if (!apiKey) return json({ estado: "error", mensaje: "La cotización no está configurada." }, 500);
-  if (![margen, tipoCambio, iva, horas].every(Number.isFinite) || margen < 0 || tipoCambio <= 0 || iva < 0 || horas <= 0) {
-    return json({ estado: "error", mensaje: "La configuración de cotización no es válida." }, 500);
+  if (!apiKey) return error({ estado: "error", mensaje: "La cotización no está configurada." }, 500);
+  // El margen tiene que ser mayor que cero: un secreto vacio coacciona a 0 y
+  // venderia a costo sin que nada lo note.
+  if (![margen, tipoCambio, iva, horas].every(Number.isFinite) || margen <= 0 || tipoCambio <= 0 || iva < 0 || horas <= 0) {
+    return error({ estado: "error", mensaje: "La configuración de cotización no es válida." }, 500);
   }
-  if (!items || items.length === 0 || items.length > 50) return json({ estado: "error", mensaje: "El carro no es válido." }, 400);
+  if (!items || items.length === 0 || items.length > 50) return error({ estado: "error", mensaje: "El carro no es válido." }, 400);
 
   const venta = (costo) => Math.round(Number(costo) * (1 + margen) * 100) / 100;
   const aClp = (usd) => Math.round(usd * tipoCambio);
@@ -54,9 +72,9 @@ async function handler(request, env) {
     const mpn = String(item.mpn ?? "").trim();
     const marca = String(item.marca ?? "").trim();
 
-    if (!sku && !mpn) return json({ estado: "error", mensaje: "Una línea no tiene identificador." }, 400);
+    if (!sku && !mpn) return error({ estado: "error", mensaje: "Una línea no tiene identificador." }, 400);
     if (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > 10000) {
-      return json({ estado: "error", mensaje: "Una línea tiene cantidad inválida." }, 400);
+      return error({ estado: "error", mensaje: "Una línea tiene cantidad inválida." }, 400);
     }
 
     let comparacion = "completa";
@@ -88,12 +106,19 @@ async function handler(request, env) {
     }
 
     if (!resultado) {
-      return json({ estado: "producto_no_disponible", sku: sku || mpn, mensaje: "Un producto ya no tiene precio vigente." }, 409);
+      return error({ estado: "producto_no_disponible", sku: sku || mpn, mensaje: "Un producto ya no tiene precio vigente." }, 409);
     }
 
     const mejor = resultado.mejor;
+    // El precio ganador se multiplica por TIPO_CAMBIO_CLP_USD, asi que tiene
+    // que venir en dolares. Si viene en otra moneda, falla cerrado: cotizar
+    // igual convertiria pesos a pesos y el cliente pagaria ~950 veces de mas.
+    if (mejor.moneda && String(mejor.moneda).toUpperCase() !== "USD") {
+      return error({ estado: "producto_no_disponible", sku: sku || mpn, mensaje: "Un producto ya no tiene precio vigente." }, 409);
+    }
+
     const precioUsd = venta(mejor.precio);
-    if (!Number.isFinite(precioUsd)) return json({ estado: "error", mensaje: "La respuesta del proveedor no es válida." }, 502);
+    if (!Number.isFinite(precioUsd)) return error({ estado: "error", mensaje: "La respuesta del proveedor no es válida." }, 502);
 
     const faltantes = Array.isArray(resultado.incompleta) ? resultado.incompleta : [];
     for (const f of faltantes) incompletos.add(String(f.proveedor));
