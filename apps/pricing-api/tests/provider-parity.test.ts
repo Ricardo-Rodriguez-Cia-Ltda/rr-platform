@@ -21,8 +21,8 @@ vi.mock('@rr/providers/catalog', async () => {
   return { ...actual, obtenerCatalogo: () => obtenerCatalogoMock() };
 });
 
-const { default: porRutaProduct } = await import('../../../apps/pricing-api/api/[proveedor]/product.js');
-const { default: porRutaFacetas } = await import('../../../apps/pricing-api/api/[proveedor]/facetas.js');
+const { default: porRutaProduct } = await import('../api/[proveedor]/product.js');
+const { default: porRutaFacetas } = await import('../api/[proveedor]/facetas.js');
 
 const PRODUCTO: ProductoNormalizado = {
   sku: 'SKU1',

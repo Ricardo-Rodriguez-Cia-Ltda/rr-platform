@@ -1,7 +1,7 @@
 # Deja la API y el tunel arrancando solos al encender el equipo.
 #
 # EJECUTAR EN POWERSHELL COMO ADMINISTRADOR:
-#   powershell -ExecutionPolicy Bypass -File scripts\install-autostart.ps1
+#   powershell -ExecutionPolicy Bypass -File infra/office-node/install-autostart.ps1
 #
 # Ambos quedan como tareas programadas "al inicio" corriendo como SYSTEM, con
 # reintento automatico. No usamos el servicio de Windows de cloudflared porque
