@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { isAuthorized } from '../auth.js';
-import { CatalogUnavailableError, obtenerCatalogo } from '@rr/domain/catalog';
+import { CatalogUnavailableError, obtenerCatalogo } from '@rr/providers/catalog';
 import { buscar, calcularFacetas, tokenizar } from '@rr/domain/search';
 import type { Proveedor } from '@rr/domain/types';
 import { ProviderError } from '@rr/domain/types';

@@ -187,7 +187,7 @@ describe('docs/api sigue el codigo: nombres de campo de las respuestas', () => {
 
 describe('docs/api sigue el codigo: constantes citadas', () => {
   const codigoSearch = FUENTES_API.find((f) => f.nombre === 'search')!.codigo;
-  const codigoIntcomex = readFileSync('lib/providers/intcomex.ts', 'utf8');
+  const codigoIntcomex = readFileSync('packages/providers/src/intcomex.ts', 'utf8');
 
   function constante(codigo: string, nombre: string): string {
     const valor = new RegExp(`const ${nombre} = (\\d+)`).exec(codigo)?.[1];
@@ -228,7 +228,7 @@ describe('docs/api sigue el codigo: constantes citadas', () => {
   });
 
   it('README.md cita la vigencia del catalogo y el reintento', () => {
-    const codigoCatalogo = readFileSync('packages/domain/src/catalog.ts', 'utf8');
+    const codigoCatalogo = readFileSync('packages/providers/src/catalog.ts', 'utf8');
     expect(codigoCatalogo).toContain('24 * 60 * 60 * 1000');
     expect(README).toContain('**24 horas**');
 
@@ -258,7 +258,7 @@ describe('openapi.yaml es internamente consistente', () => {
   // path esta suite queda en verde con el agente sin poder usar el proveedor
   // nuevo en el endpoint del precio oficial.
   it('todos los enum inline de proveedores coinciden con el registro', async () => {
-    const { PROVEEDORES } = await import('../lib/providers/index.js');
+    const { PROVEEDORES } = await import('@rr/providers');
     const registro = Object.keys(PROVEEDORES).sort();
 
     // Cualquier enum inline de 2+ valores que sean todos proveedores reales

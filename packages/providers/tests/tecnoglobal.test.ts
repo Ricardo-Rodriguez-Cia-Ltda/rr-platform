@@ -10,14 +10,14 @@ import {
   normalizarProducto,
   tecnoglobal,
   type ProductoTecnoglobal,
-} from '../lib/providers/tecnoglobal.js';
+} from '@rr/providers/tecnoglobal';
 import { ProviderError } from '@rr/domain/types';
 
 // Respuesta real de http://200.6.78.34/stock/v1/price, recortada a una muestra
 // con stock y sin stock, en oferta y no, con UPC real y con el "0" que usan
 // cuando el producto no tiene codigo.
 const RESPUESTA = JSON.parse(
-  readFileSync('tests/fixtures/tecnoglobal-price.json', 'utf8'),
+  readFileSync('packages/providers/tests/fixtures/tecnoglobal-price.json', 'utf8'),
 ) as { products: ProductoTecnoglobal[] };
 
 const PRODUCTOS = RESPUESTA.products;

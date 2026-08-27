@@ -16,12 +16,12 @@ const CATALOGO = [
   },
 ];
 
-vi.mock('@rr/domain/catalog', async () => {
-  const actual = await vi.importActual<typeof import('@rr/domain/catalog')>('@rr/domain/catalog');
+vi.mock('@rr/providers/catalog', async () => {
+  const actual = await vi.importActual<typeof import('@rr/providers/catalog')>('@rr/providers/catalog');
   return { ...actual, obtenerCatalogo: () => CATALOGO };
 });
 
-vi.mock('../lib/providers/intcomex.js', () => ({
+vi.mock('@rr/providers/intcomex', () => ({
   cargarCatalogoIntcomex: async () => [],
   intcomex: {
     nombre: 'intcomex',

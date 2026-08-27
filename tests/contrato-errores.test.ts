@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { CatalogUnavailableError } from '@rr/domain/catalog';
+import { CatalogUnavailableError } from '@rr/providers/catalog';
 import type { ProductoNormalizado } from '@rr/domain/product';
 import { ProviderError } from '@rr/domain/types';
 
@@ -16,12 +16,12 @@ const obtenerCatalogoMock = vi.fn();
 const getPricesMock = vi.fn();
 const getPriceMock = vi.fn();
 
-vi.mock('@rr/domain/catalog', async () => {
-  const actual = await vi.importActual<typeof import('@rr/domain/catalog')>('@rr/domain/catalog');
+vi.mock('@rr/providers/catalog', async () => {
+  const actual = await vi.importActual<typeof import('@rr/providers/catalog')>('@rr/providers/catalog');
   return { ...actual, obtenerCatalogo: () => obtenerCatalogoMock() };
 });
 
-vi.mock('../lib/providers/intcomex.js', () => ({
+vi.mock('@rr/providers/intcomex', () => ({
   cargarCatalogoIntcomex: async () => [],
   intcomex: {
     nombre: 'intcomex',

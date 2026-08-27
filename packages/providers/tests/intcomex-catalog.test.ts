@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cargarCatalogoIntcomex, normalizarProducto } from '../lib/providers/intcomex.js';
+import { cargarCatalogoIntcomex, normalizarProducto } from '@rr/providers/intcomex';
 
 beforeEach(() => {
   vi.stubEnv('INTCOMEX_API_KEY', 'pub');

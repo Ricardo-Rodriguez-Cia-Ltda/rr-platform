@@ -8,19 +8,19 @@ import {
   ingram,
   normalizarProducto,
   type ProductoIngram,
-} from '../lib/providers/ingram.js';
+} from '@rr/providers/ingram';
 import { ProviderError } from '@rr/domain/types';
 
 // Fixtures tomadas de la OpenAPI oficial de Ingram
 // (ingrammicro-xvantage/xi-sdk-openapispec). Verifican NUESTRA normalizacion
 // contra el contrato publicado; la forma real de la respuesta del tenant de
 // Chile queda sin verificar hasta tener credenciales.
-const CATALOGO = JSON.parse(readFileSync('tests/fixtures/ingram-catalog.json', 'utf8')) as {
+const CATALOGO = JSON.parse(readFileSync('packages/providers/tests/fixtures/ingram-catalog.json', 'utf8')) as {
   recordsFound: number;
   catalog: ProductoIngram[];
 };
 const PRECIOS = JSON.parse(
-  readFileSync('tests/fixtures/ingram-priceandavailability.json', 'utf8'),
+  readFileSync('packages/providers/tests/fixtures/ingram-priceandavailability.json', 'utf8'),
 ) as Record<string, unknown>[];
 
 function json(body: unknown, status = 200): Response {

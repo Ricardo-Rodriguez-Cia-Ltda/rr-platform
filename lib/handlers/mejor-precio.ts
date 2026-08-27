@@ -7,7 +7,7 @@ import {
   hayAlgunCatalogo,
   resolverClaves,
   type ProveedorAusente,
-} from '@rr/domain/comparator';
+} from '@rr/providers/comparator';
 import { resolverOResponder } from './guardas.js';
 import { firstString, type Handler } from './tipos.js';
 

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { fetchConTimeout } from '../http.js';
+import { fetchConTimeout } from '../../../lib/http.js';
 import { normalizarMoneda } from '@rr/domain/currency';
 import type { PriceInfo, PriceQuery, PriceResult, Proveedor } from '@rr/domain/types';
 import { ProviderError } from '@rr/domain/types';

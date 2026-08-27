@@ -3,7 +3,7 @@ import {
   buildAuthToken,
   buildSignature,
   formatUtcTimestamp,
-} from '../lib/providers/intcomex.js';
+} from '@rr/providers/intcomex';
 
 describe('formatUtcTimestamp', () => {
   it('formats as YYYY-MM-DDTHH:mm:ssZ without milliseconds', () => {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PROVEEDORES } from '../lib/providers/index.js';
+import { PROVEEDORES } from '@rr/providers';
 
 afterEach(() => {
   vi.unstubAllEnvs();

@@ -1,6 +1,6 @@
-import { cargarCatalogo } from '@rr/domain/catalog';
-import { PROVEEDORES } from './lib/providers/index.js';
-import { MENSAJE_CUOTA } from './lib/providers/tecnoglobal.js';
+import { cargarCatalogo } from '@rr/providers/catalog';
+import { PROVEEDORES } from '@rr/providers';
+import { MENSAJE_CUOTA } from '@rr/providers/tecnoglobal';
 import { proveedoresConfigurados, refrescarTodos } from '@rr/domain/refresh';
 import { createApp } from './lib/server.js';
 

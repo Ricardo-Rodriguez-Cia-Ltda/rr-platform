@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { isAuthorized } from '../lib/auth.js';
-import { PROVEEDORES } from '../lib/providers/index.js';
+import { PROVEEDORES } from '@rr/providers';
 import { ProviderError } from '@rr/domain/types';
 
 function firstString(value: string | string[] | undefined): string | undefined {

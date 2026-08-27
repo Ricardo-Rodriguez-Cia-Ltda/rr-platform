@@ -9,7 +9,7 @@ import mejorPrecioHandler from '../api/mejor-precio.js';
 import priceHandler from '../api/price.js';
 import productHandler from '../api/product.js';
 import searchHandler from '../api/search.js';
-import { PROVEEDORES } from './providers/index.js';
+import { PROVEEDORES } from '@rr/providers';
 
 // BASE_PATH lets the tunnel expose the API under a path prefix
 // (e.g. /rr/captador-precios/price) while /api/price keeps working, so the

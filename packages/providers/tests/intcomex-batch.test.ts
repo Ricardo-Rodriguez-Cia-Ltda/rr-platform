@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getPrices } from '../lib/providers/intcomex.js';
+import { getPrices } from '@rr/providers/intcomex';
 import { ProviderError } from '@rr/domain/types';
 
 const IWS_ITEMS = [

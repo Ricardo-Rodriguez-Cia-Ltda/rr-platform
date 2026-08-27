@@ -5,12 +5,12 @@ import type { ProductoNormalizado } from '@rr/domain/product';
 const obtenerCatalogoMock = vi.fn();
 const getPreciosMock = vi.fn();
 
-vi.mock('@rr/domain/catalog', async () => {
-  const actual = await vi.importActual<typeof import('@rr/domain/catalog')>('@rr/domain/catalog');
+vi.mock('@rr/providers/catalog', async () => {
+  const actual = await vi.importActual<typeof import('@rr/providers/catalog')>('@rr/providers/catalog');
   return { ...actual, obtenerCatalogo: () => obtenerCatalogoMock() };
 });
 
-vi.mock('../lib/providers/intcomex.js', () => ({
+vi.mock('@rr/providers/intcomex', () => ({
   cargarCatalogoIntcomex: async () => [],
   getPrices: (skus: string[]) => getPreciosMock(skus),
   intcomex: {

@@ -1,5 +1,5 @@
 import type { VercelResponse } from '@vercel/node';
-import { PROVEEDORES, resolverProveedor } from '../providers/index.js';
+import { PROVEEDORES, resolverProveedor } from '@rr/providers';
 import type { Proveedor } from '@rr/domain/types';
 
 /**

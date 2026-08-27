@@ -5,7 +5,7 @@ import {
   compararPorClave,
   hayAlgunCatalogo,
   resolverClaves,
-} from '@rr/domain/comparator';
+} from '@rr/providers/comparator';
 import type { ProductoNormalizado } from '@rr/domain/product';
 import type { PriceInfo, Proveedor } from '@rr/domain/types';
 import { ProviderError } from '@rr/domain/types';

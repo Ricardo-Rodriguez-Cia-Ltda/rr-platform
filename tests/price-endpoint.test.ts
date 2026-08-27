@@ -4,7 +4,7 @@ import { ProviderError } from '@rr/domain/types';
 
 const getPriceMock = vi.fn();
 
-vi.mock('../lib/providers/intcomex.js', () => ({
+vi.mock('@rr/providers/intcomex', () => ({
   intcomex: {
     nombre: 'intcomex',
     maxSkusPorLote: 100,
