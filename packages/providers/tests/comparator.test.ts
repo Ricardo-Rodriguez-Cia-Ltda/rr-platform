@@ -37,24 +37,24 @@ function producto(campos: Partial<NormalizedProduct>): NormalizedProduct {
   };
 }
 
-/** Provider de mentira: el comparador no debe saber de ninguno en particular. */
+/** Proveedor de mentira: el comparador no debe saber de ninguno en particular. */
 function proveedorFalso(
-  nombre: string,
+  name: string,
   precios: Record<string, PriceInfo>,
   opciones: { configurado?: boolean; falla?: Error } = {},
 ): Provider {
   return {
-    nombre,
-    maxSkusPorLote: 50,
+    name,
+    maxSkusPerBatch: 50,
     isConfigured: () => opciones.configurado ?? true,
     loadCatalog: async () => [],
-    getPrecios: async (skus: string[]) => {
+    getPrices: async (skus: string[]) => {
       if (opciones.falla) throw opciones.falla;
       const m = new Map<string, PriceInfo>();
       for (const sku of skus) if (precios[sku]) m.set(sku, precios[sku]);
       return m;
     },
-    getPrecio: async () => {
+    getPrice: async () => {
       throw new Error('no usado');
     },
   };
@@ -152,7 +152,7 @@ describe('compareByKey', () => {
   it('un proveedor sin credenciales aparece en incompleta y no se le pregunta', async () => {
     catalogos.set('a', [producto({ sku: 'A1' })]);
     const sinLlaves = proveedorFalso('b', {}, { configurado: false });
-    const espia = vi.spyOn(sinLlaves, 'getPrecios');
+    const espia = vi.spyOn(sinLlaves, 'getPrices');
     const registro = {
       a: proveedorFalso('a', { A1: { price: 130, currency: 'USD', inStock: 5 } }),
       b: sinLlaves,
@@ -277,8 +277,8 @@ describe('compareByKey', () => {
     const muchos = Array.from({ length: 60 }, (_, i) => producto({ sku: `A${i}` }));
     catalogos.set('a', muchos);
     const proveedor = proveedorFalso('a', { A0: { price: 5, currency: 'USD', inStock: 1 } });
-    proveedor.maxSkusPorLote = 10;
-    const espia = vi.spyOn(proveedor, 'getPrecios');
+    proveedor.maxSkusPerBatch = 10;
+    const espia = vi.spyOn(proveedor, 'getPrices');
 
     await compareByKey(CLAVE, { a: proveedor });
 

@@ -16,12 +16,12 @@ vi.mock('@rr/providers/intcomex', () => ({
   getPrices: (skus: string[]) => getPricesMock(skus),
   cargarCatalogoIntcomex: async () => [],
   intcomex: {
-    nombre: 'intcomex',
-    maxSkusPorLote: 100,
+    name: 'intcomex',
+    maxSkusPerBatch: 100,
     isConfigured: () => true,
     loadCatalog: async () => [],
-    getPrecios: (skus: string[]) => getPricesMock(skus),
-    getPrecio: async () => {
+    getPrices: (skus: string[]) => getPricesMock(skus),
+    getPrice: async () => {
       throw new Error('no usado');
     },
   },

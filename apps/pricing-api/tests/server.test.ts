@@ -24,12 +24,12 @@ vi.mock('@rr/providers/catalog', async () => {
 vi.mock('@rr/providers/intcomex', () => ({
   cargarCatalogoIntcomex: async () => [],
   intcomex: {
-    nombre: 'intcomex',
-    maxSkusPorLote: 100,
+    name: 'intcomex',
+    maxSkusPerBatch: 100,
     isConfigured: () => true,
     loadCatalog: async () => [],
-    getPrecios: async () => new Map([['HP1', { price: 1000, currency: 'us', inStock: 5 }]]),
-    getPrecio: (query: unknown) => getPriceMock(query),
+    getPrices: async () => new Map([['HP1', { price: 1000, currency: 'us', inStock: 5 }]]),
+    getPrice: (query: unknown) => getPriceMock(query),
   },
 }));
 

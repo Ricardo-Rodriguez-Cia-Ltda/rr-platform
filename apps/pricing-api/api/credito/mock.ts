@@ -20,11 +20,11 @@ function firstString(value: string | string[] | undefined): string | undefined {
 
 // Vercel entrega req.body ya parseado; el servidor local lo deja como texto
 // crudo. Devuelve null si el cuerpo no es un objeto JSON.
-function parsearCuerpo(body: unknown): Record<string, unknown> | null {
+function parseBody(body: unknown): Record<string, unknown> | null {
   if (body === undefined || body === null || body === '') return {};
   if (typeof body === 'string') {
     try {
-      return parsearCuerpo(JSON.parse(body));
+      return parseBody(JSON.parse(body));
     } catch {
       return null;
     }
@@ -37,7 +37,7 @@ function parsearCuerpo(body: unknown): Record<string, unknown> | null {
 // digitos + DV. No se valida el digito verificador: el mock no tiene padron
 // contra que comprobarlo, y rechazar aqui un RUT que el sistema real si conoce
 // seria peor que dejarlo pasar.
-function normalizarRut(rut: string): string {
+function normalizeRut(rut: string): string {
   return rut.replace(/[.\s-]/g, '').toUpperCase();
 }
 
@@ -52,7 +52,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
-  const body = parsearCuerpo(req.body);
+  const body = parseBody(req.body);
   if (!body) {
     res.status(400).json({
       error: 'bad_request',
@@ -62,14 +62,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   const rawRut = body.rut;
-  if (typeof rawRut !== 'string' || normalizarRut(rawRut) === '') {
+  if (typeof rawRut !== 'string' || normalizeRut(rawRut) === '') {
     res.status(400).json({
       error: 'bad_request',
       detail: 'El campo rut es obligatorio y debe ser un string no vacio',
     });
     return;
   }
-  const rut = normalizarRut(rawRut);
+  const rut = normalizeRut(rawRut);
 
   // Estricto a proposito: el resto de la API cotiza en USD y este endpoint
   // recibe CLP. Coercionar un "1500" que en realidad eran dolares aprobaria un

@@ -28,7 +28,7 @@ describe('intcomex.getPrice', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await intcomex.getPrecio({ sku: 'SE001MSE01' });
+    const result = await intcomex.getPrice({ sku: 'SE001MSE01' });
 
     expect(result).toEqual({
       provider: 'intcomex',
@@ -57,7 +57,7 @@ describe('intcomex.getPrice', () => {
       ),
     );
 
-    await expect(intcomex.getPrecio({ mpn: 'NOPE' })).rejects.toMatchObject({
+    await expect(intcomex.getPrice({ mpn: 'NOPE' })).rejects.toMatchObject({
       kind: 'not_found',
     });
   });
@@ -70,7 +70,7 @@ describe('intcomex.getPrice', () => {
       ),
     );
 
-    await expect(intcomex.getPrecio({ sku: 'X' })).rejects.toMatchObject({
+    await expect(intcomex.getPrice({ sku: 'X' })).rejects.toMatchObject({
       kind: 'not_found',
     });
   });
@@ -81,7 +81,7 @@ describe('intcomex.getPrice', () => {
       vi.fn().mockResolvedValue(new Response('kaboom', { status: 500 })),
     );
 
-    const error = await intcomex.getPrecio({ sku: 'X' }).catch((e: unknown) => e);
+    const error = await intcomex.getPrice({ sku: 'X' }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ProviderError);
     expect((error as ProviderError).kind).toBe('upstream');
     expect((error as ProviderError).message).not.toContain('secret-key');
@@ -95,7 +95,7 @@ describe('intcomex.getPrice', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    await intcomex.getPrecio({ sku: 'SE001MSE01' });
+    await intcomex.getPrice({ sku: 'SE001MSE01' });
 
     const [url] = fetchMock.mock.calls[0] as [URL, RequestInit];
     expect(url.href).toContain('/v1/getproduct');
@@ -104,7 +104,7 @@ describe('intcomex.getPrice', () => {
   it('throws upstream when credentials are not configured', async () => {
     vi.stubEnv('INTCOMEX_ACCESS_KEY', '');
 
-    await expect(intcomex.getPrecio({ sku: 'X' })).rejects.toMatchObject({
+    await expect(intcomex.getPrice({ sku: 'X' })).rejects.toMatchObject({
       kind: 'upstream',
     });
   });
@@ -115,7 +115,7 @@ describe('intcomex.getPrice', () => {
       vi.fn().mockResolvedValue(new Response('not json', { status: 200 })),
     );
 
-    await expect(intcomex.getPrecio({ sku: 'X' })).rejects.toMatchObject({
+    await expect(intcomex.getPrice({ sku: 'X' })).rejects.toMatchObject({
       kind: 'upstream',
     });
   });

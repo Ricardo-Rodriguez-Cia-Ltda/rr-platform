@@ -13,12 +13,12 @@ describe('registro de proveedores', () => {
   // Todo proveedor tiene que cumplir el contrato completo, o los handlers
   // genericos se rompen recien en runtime contra ese proveedor.
   it.each(Object.entries(PROVIDERS))('%s cumple la interfaz Provider', (nombre, proveedor) => {
-    expect(proveedor.nombre).toBe(nombre);
+    expect(proveedor.name).toBe(nombre);
     expect(typeof proveedor.loadCatalog).toBe('function');
-    expect(typeof proveedor.getPrecios).toBe('function');
-    expect(typeof proveedor.getPrecio).toBe('function');
+    expect(typeof proveedor.getPrices).toBe('function');
+    expect(typeof proveedor.getPrice).toBe('function');
     expect(typeof proveedor.isConfigured).toBe('function');
-    expect(proveedor.maxSkusPorLote).toBeGreaterThan(0);
+    expect(proveedor.maxSkusPerBatch).toBeGreaterThan(0);
   });
 });
 

@@ -3,7 +3,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import type { NormalizedProduct } from '@rr/domain/product';
 
 const obtenerCatalogoMock = vi.fn();
-const getPreciosMock = vi.fn();
+const getPricesMock = vi.fn();
 
 vi.mock('@rr/providers/catalog', async () => {
   const actual = await vi.importActual<typeof import('@rr/providers/catalog')>('@rr/providers/catalog');
@@ -12,10 +12,10 @@ vi.mock('@rr/providers/catalog', async () => {
 
 vi.mock('@rr/providers/intcomex', () => ({
   cargarCatalogoIntcomex: async () => [],
-  getPrices: (skus: string[]) => getPreciosMock(skus),
+  getPrices: (skus: string[]) => getPricesMock(skus),
   intcomex: {
-    nombre: 'intcomex',
-    maxSkusPorLote: 100,
+    name: 'intcomex',
+    maxSkusPerBatch: 100,
     isConfigured: () =>
       Boolean(
         process.env.INTCOMEX_API_KEY &&
@@ -23,8 +23,8 @@ vi.mock('@rr/providers/intcomex', () => ({
           process.env.INTCOMEX_BASE_URL,
       ),
     loadCatalog: async () => [],
-    getPrecios: (skus: string[]) => getPreciosMock(skus),
-    getPrecio: async () => {
+    getPrices: (skus: string[]) => getPricesMock(skus),
+    getPrice: async () => {
       throw new Error('no usado');
     },
   },
@@ -81,7 +81,7 @@ beforeEach(() => {
   vi.stubEnv('INTCOMEX_ACCESS_KEY', 'secret');
   vi.stubEnv('INTCOMEX_BASE_URL', 'https://x/');
   obtenerCatalogoMock.mockReset().mockReturnValue(CATALOGO);
-  getPreciosMock
+  getPricesMock
     .mockReset()
     .mockResolvedValue(new Map([['HP1', { price: 1000, currency: 'us', inStock: 5 }]]));
 });

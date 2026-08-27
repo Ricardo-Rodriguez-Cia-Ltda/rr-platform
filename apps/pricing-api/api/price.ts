@@ -42,7 +42,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   }
 
   try {
-    const result = await provider.getPrecio({ sku, mpn, upc });
+    const result = await provider.getPrice({ sku, mpn, upc });
     res.status(200).json(result);
   } catch (error) {
     if (error instanceof ProviderError) {

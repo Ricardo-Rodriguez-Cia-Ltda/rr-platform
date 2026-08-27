@@ -22,15 +22,15 @@ if (!apiKey) {
   process.exit(1);
 }
 
-interface Conteo {
+interface Count {
   valor: string;
   n: number;
 }
 
-interface RespuestaFacetas {
+interface FacetsResponse {
   total_productos: number;
-  marca: Conteo[];
-  categoria: Conteo[];
+  marca: Count[];
+  categoria: Count[];
 }
 
 const response = await fetch(`${BASE}/facetas`, { headers: { 'x-api-key': apiKey } });
@@ -40,13 +40,13 @@ if (!response.ok) {
   process.exit(1);
 }
 
-const facets = (await response.json()) as RespuestaFacetas;
+const facets = (await response.json()) as FacetsResponse;
 if (!facets.marca?.length || !facets.categoria?.length) {
   console.error('La respuesta de /facetas vino sin marcas o sin categorias; no se sobrescribe nada');
   process.exit(1);
 }
 
-function tabla(items: Conteo[]): string {
+function table(items: Count[]): string {
   return ['| Valor | Productos |', '|---|---:|', ...items.map((i) => `| ${i.valor} | ${i.n} |`)].join(
     '\n',
   );
@@ -72,11 +72,11 @@ que sepa traducir lo que pide el cliente al vocabulario real del catálogo.
 
 ## Categorías (${facets.categoria.length})
 
-${tabla(facets.categoria)}
+${table(facets.categoria)}
 
 ## Marcas (${facets.marca.length})
 
-${tabla(facets.marca)}
+${table(facets.marca)}
 `;
 
 writeFileSync(DESTINO, content);

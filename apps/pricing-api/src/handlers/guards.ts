@@ -24,8 +24,8 @@ export function resolveOrRespond(
     // No es 502: nadie fallo aguas arriba, falta configuracion nuestra.
     res.status(503).json({
       error: 'proveedor_no_configurado',
-      detail: `El proveedor '${provider.nombre}' no tiene credenciales configuradas`,
-      proveedor: provider.nombre,
+      detail: `El proveedor '${provider.name}' no tiene credenciales configuradas`,
+      proveedor: provider.name,
     });
     return null;
   }

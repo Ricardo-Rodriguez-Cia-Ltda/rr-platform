@@ -19,7 +19,7 @@ export function createFacetsHandler(provider: Provider): Handler {
 
     let catalog;
     try {
-      catalog = getCatalog(provider.nombre);
+      catalog = getCatalog(provider.name);
     } catch (error) {
       if (error instanceof CatalogUnavailableError) {
         res.status(503).json({

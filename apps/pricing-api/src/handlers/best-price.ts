@@ -104,19 +104,19 @@ export function createBestPriceHandler(): Handler {
       const provider = resolveOrRespond(providerName, res);
       if (!provider) return;
 
-      const resolution = skuKey(provider.nombre, sku!);
+      const resolution = skuKey(provider.name, sku!);
 
       if (resolution.estado === 'catalogo_no_disponible') {
         res.status(503).json({
           error: 'catalogo_no_disponible',
-          detail: `El catalogo de '${provider.nombre}' aun no esta disponible. Reintenta mas tarde.`,
+          detail: `El catalogo de '${provider.name}' aun no esta disponible. Reintenta mas tarde.`,
         });
         return;
       }
       if (resolution.estado === 'sku_desconocido') {
         res.status(404).json({
           error: 'not_found',
-          detail: `'${provider.nombre}' no tiene el SKU ${sku}`,
+          detail: `'${provider.name}' no tiene el SKU ${sku}`,
         });
         return;
       }

@@ -13,7 +13,7 @@ const query = raw.startsWith('mpn:')
     : { sku: raw };
 
 try {
-  const result = await intcomex.getPrecio(query);
+  const result = await intcomex.getPrice(query);
   console.log(JSON.stringify(result, null, 2));
 } catch (error) {
   console.error('FAILED:', error);

@@ -25,7 +25,7 @@ export function createProductHandler(provider: Provider): Handler {
 
     let catalog;
     try {
-      catalog = getCatalog(provider.nombre);
+      catalog = getCatalog(provider.name);
     } catch (error) {
       if (error instanceof CatalogUnavailableError) {
         res.status(503).json({
@@ -45,7 +45,7 @@ export function createProductHandler(provider: Provider): Handler {
 
     let prices;
     try {
-      prices = await provider.getPrecios([sku]);
+      prices = await provider.getPrices([sku]);
     } catch (error) {
       if (error instanceof ProviderError) {
         console.error('[product] fallo getPrices', { sku, error });

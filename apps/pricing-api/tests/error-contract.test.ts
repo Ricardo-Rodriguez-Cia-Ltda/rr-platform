@@ -24,8 +24,8 @@ vi.mock('@rr/providers/catalog', async () => {
 vi.mock('@rr/providers/intcomex', () => ({
   cargarCatalogoIntcomex: async () => [],
   intcomex: {
-    nombre: 'intcomex',
-    maxSkusPorLote: 100,
+    name: 'intcomex',
+    maxSkusPerBatch: 100,
     isConfigured: () =>
       Boolean(
         process.env.INTCOMEX_API_KEY &&
@@ -33,8 +33,8 @@ vi.mock('@rr/providers/intcomex', () => ({
           process.env.INTCOMEX_BASE_URL,
       ),
     loadCatalog: async () => [],
-    getPrecios: (skus: string[]) => getPricesMock(skus),
-    getPrecio: (query: unknown) => getPriceMock(query),
+    getPrices: (skus: string[]) => getPricesMock(skus),
+    getPrice: (query: unknown) => getPriceMock(query),
   },
   getPrices: (skus: string[]) => getPricesMock(skus),
 }));

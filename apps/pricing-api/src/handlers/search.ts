@@ -100,7 +100,7 @@ export function createSearchHandler(provider: Provider): Handler {
 
     let catalog;
     try {
-      catalog = getCatalog(provider.nombre);
+      catalog = getCatalog(provider.name);
     } catch (error) {
       if (error instanceof CatalogUnavailableError) {
         res.status(503).json({
@@ -135,12 +135,12 @@ export function createSearchHandler(provider: Provider): Handler {
 
     // Se cotiza por lotes y se corta apenas se junta el limite pedido: sin
     // filtros esto es un solo lote, igual que antes.
-    for (let i = 0; i < candidates.length && productos.length < limit; i += provider.maxSkusPorLote) {
-      const batch = candidates.slice(i, i + provider.maxSkusPorLote);
+    for (let i = 0; i < candidates.length && productos.length < limit; i += provider.maxSkusPerBatch) {
+      const batch = candidates.slice(i, i + provider.maxSkusPerBatch);
 
       let prices;
       try {
-        prices = await provider.getPrecios(batch.map((p) => p.sku));
+        prices = await provider.getPrices(batch.map((p) => p.sku));
       } catch (error) {
         if (error instanceof ProviderError) {
           console.error('[search] fallo getPrices', { candidatos: batch.length, error });

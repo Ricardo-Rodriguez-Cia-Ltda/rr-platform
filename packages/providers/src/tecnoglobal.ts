@@ -179,15 +179,15 @@ function aPrecio(raw: TecnoglobalProduct): PriceInfo | null {
   };
 }
 
-interface Foto {
+interface Snapshot {
   productos: TecnoglobalProduct[];
   obtenidaEn: number;
 }
 
-let foto: Foto | null = null;
+let cachedSnapshot: Snapshot | null = null;
 // Varias peticiones concurrentes no deben disparar varias descargas: la
 // primera comparte su promesa con las que llegan mientras baja el catalogo.
-let descargaEnCurso: Promise<Foto> | null = null;
+let downloadInProgress: Promise<Snapshot> | null = null;
 
 /**
  * La foto tambien vive en disco.
@@ -198,35 +198,35 @@ let descargaEnCurso: Promise<Foto> | null = null;
  * sirve mucho mas que un error, y el definitivo igual se confirma por SKU en
  * /product.
  */
-function rutaFoto(): string {
+function snapshotPath(): string {
   return join(process.env.CATALOG_CACHE_DIR ?? 'cache', 'tecnoglobal-precios.json');
 }
 
-function guardarFotoEnDisco(snapshot: Foto): void {
+function saveSnapshotToDisk(snapshot: Snapshot): void {
   try {
     mkdirSync(process.env.CATALOG_CACHE_DIR ?? 'cache', { recursive: true });
-    writeFileSync(rutaFoto(), JSON.stringify(snapshot));
+    writeFileSync(snapshotPath(), JSON.stringify(snapshot));
   } catch (error) {
     // No poder cachear no es motivo para fallar la consulta que ya se resolvio.
     console.error('[tecnoglobal] no se pudo guardar la foto en disco', error);
   }
 }
 
-function leerFotoDeDisco(): Foto | null {
+function loadSnapshotFromDisk(): Snapshot | null {
   try {
-    const stored = JSON.parse(readFileSync(rutaFoto(), 'utf8')) as Foto;
+    const stored = JSON.parse(readFileSync(snapshotPath(), 'utf8')) as Snapshot;
     return Array.isArray(stored.productos) && stored.productos.length > 0 ? stored : null;
   } catch {
     return null;
   }
 }
 
-function ttlFoto(): number {
+function snapshotTtl(): number {
   const raw = Number(process.env.TECNOGLOBAL_PRECIOS_TTL_MS);
   return Number.isFinite(raw) && raw >= 0 ? raw : TTL_FOTO_MS_POR_DEFECTO;
 }
 
-async function descargarCatalogo(): Promise<Foto> {
+async function downloadCatalog(): Promise<Snapshot> {
   const productos = await leerProductos(await fetchStock('price'));
   // Una respuesta sin productos no se guarda: dejaria una foto vacia vigente
   // durante toda su vida util, y cotizar contra ella devuelve "sin precio"
@@ -234,24 +234,24 @@ async function descargarCatalogo(): Promise<Foto> {
   if (productos.length === 0) {
     throw new ProviderError('upstream', 'Tecnoglobal no devolvio productos en /price');
   }
-  const snapshot: Foto = { productos, obtenidaEn: Date.now() };
-  foto = snapshot;
-  guardarFotoEnDisco(snapshot);
+  const snapshot: Snapshot = { productos, obtenidaEn: Date.now() };
+  cachedSnapshot = snapshot;
+  saveSnapshotToDisk(snapshot);
   return snapshot;
 }
 
-async function obtenerFoto(): Promise<Foto> {
+async function getSnapshot(): Promise<Snapshot> {
   // Tras un reinicio la foto en memoria esta vacia pero la de disco sirve.
-  const current = foto ?? (foto = leerFotoDeDisco());
-  if (current && Date.now() - current.obtenidaEn < ttlFoto()) return current;
-  if (!descargaEnCurso) {
-    descargaEnCurso = descargarCatalogo().finally(() => {
-      descargaEnCurso = null;
+  const current = cachedSnapshot ?? (cachedSnapshot = loadSnapshotFromDisk());
+  if (current && Date.now() - current.obtenidaEn < snapshotTtl()) return current;
+  if (!downloadInProgress) {
+    downloadInProgress = downloadCatalog().finally(() => {
+      downloadInProgress = null;
     });
   }
 
   try {
-    return await descargaEnCurso;
+    return await downloadInProgress;
   } catch (error) {
     // La cuota del volcado es tan estrecha que un refresco rechazado es
     // esperable. Una foto vieja sirve mucho mas que ninguna: es el ranking de
@@ -265,14 +265,14 @@ async function obtenerFoto(): Promise<Foto> {
 }
 
 export function _resetSnapshotForTests(): void {
-  foto = null;
-  descargaEnCurso = null;
+  cachedSnapshot = null;
+  downloadInProgress = null;
 }
 
 export async function cargarCatalogoTecnoglobal(): Promise<NormalizedProduct[]> {
   // El refresco diario del catalogo trae exactamente el mismo cuerpo que usan
   // los precios, asi que deja la foto lista y evita una segunda descarga.
-  const { productos } = await descargarCatalogo();
+  const { productos } = await downloadCatalog();
   return productos.map(normalizeProduct);
 }
 
@@ -300,9 +300,9 @@ async function preciosEnVivo(skus: string[]): Promise<Map<string, PriceInfo>> {
   return prices;
 }
 
-async function preciosDeLaFoto(skus: string[]): Promise<Map<string, PriceInfo>> {
+async function pricesFromSnapshot(skus: string[]): Promise<Map<string, PriceInfo>> {
   const prices = new Map<string, PriceInfo>();
-  const { productos } = await obtenerFoto();
+  const { productos } = await getSnapshot();
   const requested = new Set(skus);
 
   for (const raw of productos) {
@@ -324,7 +324,7 @@ export async function getPrices(skus: string[]): Promise<Map<string, PriceInfo>>
 
   return skus.length <= UMBRAL_CONSULTA_DIRECTA
     ? preciosEnVivo(skus)
-    : preciosDeLaFoto(skus);
+    : pricesFromSnapshot(skus);
 }
 
 export async function getPrice(query: PriceQuery): Promise<PriceResult> {
@@ -336,7 +336,7 @@ export async function getPrice(query: PriceQuery): Promise<PriceResult> {
   if (query.sku) {
     found = await consultarPorSku(query.sku);
   } else {
-    const { productos } = await obtenerFoto();
+    const { productos } = await getSnapshot();
     const inSnapshot = productos.find((c) => {
       if (query.mpn) return (c.pnFabricante ?? '').trim() === query.mpn;
       if (query.upc) return upcValido(c.upcEan13) === query.upc;
@@ -366,10 +366,10 @@ export async function getPrice(query: PriceQuery): Promise<PriceResult> {
 }
 
 export const tecnoglobal: Provider = {
-  nombre: 'tecnoglobal',
-  maxSkusPorLote: MAX_SKUS_POR_LOTE,
+  name: 'tecnoglobal',
+  maxSkusPerBatch: MAX_SKUS_POR_LOTE,
   isConfigured,
   loadCatalog: cargarCatalogoTecnoglobal,
-  getPrecios: getPrices,
-  getPrecio: getPrice,
+  getPrices,
+  getPrice,
 };

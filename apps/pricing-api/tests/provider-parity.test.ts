@@ -74,7 +74,7 @@ beforeEach(() => {
   obtenerCatalogoMock.mockReset().mockReturnValue([PRODUCTO]);
   for (const proveedor of Object.values(PROVIDERS)) {
     vi.spyOn(proveedor, 'isConfigured').mockReturnValue(true);
-    vi.spyOn(proveedor, 'getPrecios').mockResolvedValue(
+    vi.spyOn(proveedor, 'getPrices').mockResolvedValue(
       new Map([['SKU1', { price: 100, currency: 'USD', inStock: 3 }]]),
     );
   }
@@ -173,6 +173,6 @@ describe('paridad de contrato entre proveedores', () => {
   });
 
   it.each(NOMBRES)('%s declara un tope de lote propio y positivo', (nombre) => {
-    expect(PROVIDERS[nombre].maxSkusPorLote).toBeGreaterThan(0);
+    expect(PROVIDERS[nombre].maxSkusPerBatch).toBeGreaterThan(0);
   });
 });

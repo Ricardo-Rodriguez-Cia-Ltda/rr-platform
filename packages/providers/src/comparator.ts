@@ -48,7 +48,7 @@ export interface Comparison {
  * Envuelve el `throw` de `getCatalog` porque aca un catalogo sin cargar
  * no es un error: es un proveedor que no puede participar de la comparacion.
  */
-function catalogoDe(proveedor: string): NormalizedProduct[] | null {
+function catalogFor(proveedor: string): NormalizedProduct[] | null {
   try {
     return getCatalog(proveedor);
   } catch (error) {
@@ -68,7 +68,7 @@ function catalogoDe(proveedor: string): NormalizedProduct[] | null {
  * orden de preferencia es stock confirmado, despues desconocido, y ultimo el
  * cero confirmado, que es el unico "no" de verdad.
  */
-function elegirMejor(ofertas: Offer[]): WinningOffer | null {
+function pickBest(ofertas: Offer[]): WinningOffer | null {
   if (ofertas.length === 0) return null;
 
   const withStock = ofertas.filter((o) => o.stock !== null && o.stock > 0);
@@ -90,14 +90,14 @@ function elegirMejor(ofertas: Offer[]): WinningOffer | null {
   return { ...candidates.reduce((a, b) => (b.precio < a.precio ? b : a)), criterio };
 }
 
-function masBarata(proveedor: string, prices: Map<string, PriceInfo>): Offer | null {
-  let mejor: Offer | null = null;
+function cheapest(proveedor: string, prices: Map<string, PriceInfo>): Offer | null {
+  let best: Offer | null = null;
   for (const [sku, precio] of prices) {
     // Un precio no positivo no es un precio, es ausencia de precio: sale
     // cotizado a un cliente real si se deja pasar. Tambien descarta NaN.
     if (!(precio.price > 0)) continue;
-    if (!mejor || precio.price < mejor.precio) {
-      mejor = {
+    if (!best || precio.price < best.precio) {
+      best = {
         proveedor,
         sku,
         precio: precio.price,
@@ -106,35 +106,35 @@ function masBarata(proveedor: string, prices: Map<string, PriceInfo>): Offer | n
       };
     }
   }
-  return mejor;
+  return best;
 }
 
-async function cotizar(
+async function quote(
   proveedor: Provider,
   productos: NormalizedProduct[],
 ): Promise<Offer | MissingProvider> {
   // Varios productos con la misma clave son duplicados del propio catalogo del
   // proveedor, no ofertas distintas: se piden juntos y gana el mas barato.
-  const skus = productos.slice(0, proveedor.maxSkusPorLote).map((p) => p.sku);
+  const skus = productos.slice(0, proveedor.maxSkusPerBatch).map((p) => p.sku);
 
   try {
-    const offer = masBarata(proveedor.nombre, await proveedor.getPrecios(skus));
+    const offer = cheapest(proveedor.name, await proveedor.getPrices(skus));
     if (offer) return offer;
     return {
-      proveedor: proveedor.nombre,
+      proveedor: proveedor.name,
       error: 'sin_precio',
       detail: 'Tiene el producto en catalogo pero no entrego precio',
     };
   } catch (error) {
     return {
-      proveedor: proveedor.nombre,
+      proveedor: proveedor.name,
       error: 'upstream',
       detail: error instanceof Error ? error.message : 'Error inesperado al cotizar',
     };
   }
 }
 
-function esAusente(r: Offer | MissingProvider): r is MissingProvider {
+function isMissing(r: Offer | MissingProvider): r is MissingProvider {
   return 'error' in r;
 }
 
@@ -155,19 +155,19 @@ export async function compareByKey(
   for (const proveedor of Object.values(registry)) {
     if (!proveedor.isConfigured()) {
       incompleta.push({
-        proveedor: proveedor.nombre,
+        proveedor: proveedor.name,
         error: 'proveedor_no_configurado',
-        detail: `El proveedor '${proveedor.nombre}' no tiene credenciales configuradas`,
+        detail: `El proveedor '${proveedor.name}' no tiene credenciales configuradas`,
       });
       continue;
     }
 
-    const catalog = catalogoDe(proveedor.nombre);
+    const catalog = catalogFor(proveedor.name);
     if (!catalog) {
       incompleta.push({
-        proveedor: proveedor.nombre,
+        proveedor: proveedor.name,
         error: 'catalogo_no_disponible',
-        detail: `El catalogo de '${proveedor.nombre}' aun no esta disponible`,
+        detail: `El catalogo de '${proveedor.name}' aun no esta disponible`,
       });
       continue;
     }
@@ -182,12 +182,12 @@ export async function compareByKey(
   }
 
   const results = await Promise.all(
-    providersWithProduct.map(({ proveedor, productos }) => cotizar(proveedor, productos)),
+    providersWithProduct.map(({ proveedor, productos }) => quote(proveedor, productos)),
   );
 
   const ofertas: Offer[] = [];
   for (const r of results) {
-    if (esAusente(r)) incompleta.push(r);
+    if (isMissing(r)) incompleta.push(r);
     else ofertas.push(r);
   }
   ofertas.sort((a, b) => a.precio - b.precio);
@@ -197,7 +197,7 @@ export async function compareByKey(
     mpn: description?.mpn ?? null,
     marca: description?.marca ?? null,
     nombre: description?.nombre ?? null,
-    mejor: elegirMejor(ofertas),
+    mejor: pickBest(ofertas),
     ofertas,
     incompleta,
   };
@@ -222,7 +222,7 @@ export function resolveKeys(
   const keys = new Set<string>();
 
   for (const nombre of Object.keys(registry)) {
-    for (const p of catalogoDe(nombre) ?? []) {
+    for (const p of catalogFor(nombre) ?? []) {
       if (compactMpn(p.mpn) !== compact) continue;
       if (filter && canonicalBrand(p.marca) !== filter) continue;
       const clave = unionKey(p);
@@ -245,7 +245,7 @@ export type SkuResolution =
  * respuestas HTTP distintas.
  */
 export function skuKey(proveedor: string, sku: string): SkuResolution {
-  const catalog = catalogoDe(proveedor);
+  const catalog = catalogFor(proveedor);
   if (!catalog) return { estado: 'catalogo_no_disponible' };
 
   const product = catalog.find((p) => p.sku === sku);
@@ -258,7 +258,7 @@ export function skuKey(proveedor: string, sku: string): SkuResolution {
 export function hasAnyCatalog(
   registry: Record<string, Provider> = PROVIDERS,
 ): boolean {
-  return Object.keys(registry).some((nombre) => catalogoDe(nombre) !== null);
+  return Object.keys(registry).some((nombre) => catalogFor(nombre) !== null);
 }
 
 /**
@@ -282,17 +282,17 @@ export function unavailableCatalogs(
   for (const proveedor of Object.values(registry)) {
     if (!proveedor.isConfigured()) {
       missing.push({
-        proveedor: proveedor.nombre,
+        proveedor: proveedor.name,
         error: 'proveedor_no_configurado',
-        detail: `El proveedor '${proveedor.nombre}' no tiene credenciales configuradas`,
+        detail: `El proveedor '${proveedor.name}' no tiene credenciales configuradas`,
       });
       continue;
     }
-    if (catalogoDe(proveedor.nombre) === null) {
+    if (catalogFor(proveedor.name) === null) {
       missing.push({
-        proveedor: proveedor.nombre,
+        proveedor: proveedor.name,
         error: 'catalogo_no_disponible',
-        detail: `El catalogo de '${proveedor.nombre}' aun no esta disponible`,
+        detail: `El catalogo de '${proveedor.name}' aun no esta disponible`,
       });
     }
   }

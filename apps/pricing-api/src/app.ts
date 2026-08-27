@@ -14,21 +14,21 @@ import { PROVIDERS } from '@rr/providers';
 // BASE_PATH lets the tunnel expose the API under a path prefix
 // (e.g. /rr/captador-precios/price) while /api/price keeps working, so the
 // local server and the Vercel deployment answer the same canonical route.
-const RECURSOS_POR_PROVEEDOR = ['search', 'product', 'facetas'];
+const RESOURCES_PER_PROVIDER = ['search', 'product', 'facetas'];
 
-interface Ruta {
+interface Route {
   handler: string;
   /** Solo en las rutas con proveedor en el path: Vercel lo pasa como segmento dinamico. */
   proveedor?: string;
 }
 
-function rutas(): Record<string, Ruta> {
+function routes(): Record<string, Route> {
   const basePath = (process.env.BASE_PATH ?? '').replace(/\/+$/, '');
   // OJO: docs.test.ts extrae esta lista con una regex sobre el texto fuente
   // ("const nombres = ["); si este nombre cambia, esa lectura deja de
   // encontrar nada y la prueba de rutas queda verde sin verificar nada.
   const nombres = ['price', 'search', 'product', 'facetas', 'mejor-precio', 'credito/mock'];
-  const table: Record<string, Ruta> = {};
+  const table: Record<string, Route> = {};
   for (const nombre of nombres) {
     table[`/api/${nombre}`] = { handler: nombre };
     if (basePath) table[`${basePath}/${nombre}`] = { handler: nombre };
@@ -37,8 +37,8 @@ function rutas(): Record<string, Ruta> {
   // generico de ruta. El proveedor_desconocido con cuerpo detallado lo entrega
   // Vercel, donde el segmento es dinamico y siempre llega al handler.
   for (const proveedor of Object.keys(PROVIDERS)) {
-    for (const resource of RECURSOS_POR_PROVEEDOR) {
-      const route: Ruta = { handler: `proveedor:${resource}`, proveedor };
+    for (const resource of RESOURCES_PER_PROVIDER) {
+      const route: Route = { handler: `proveedor:${resource}`, proveedor };
       table[`/api/${proveedor}/${resource}`] = route;
       if (basePath) table[`${basePath}/${proveedor}/${resource}`] = route;
     }
@@ -62,23 +62,23 @@ const handlers = {
 // socket. El tope evita que un cliente sin autenticar (el cuerpo se lee antes
 // de que el handler valide la api key) mantenga el proceso leyendo para
 // siempre.
-const CUERPO_MAXIMO_BYTES = 1_000_000;
+const MAX_BODY_BYTES = 1_000_000;
 
-class CuerpoDemasiadoGrandeError extends Error {}
+class BodyTooLargeError extends Error {}
 
-function leerCuerpo(req: IncomingMessage): Promise<string> {
+function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const parts: Buffer[] = [];
     let bytes = 0;
 
     req.on('data', (chunk: Buffer) => {
       bytes += chunk.length;
-      if (bytes > CUERPO_MAXIMO_BYTES) {
+      if (bytes > MAX_BODY_BYTES) {
         // Se deja de leer pero no se destruye el socket: hay que alcanzar a
         // escribir el 413. Node cierra la conexion solo al terminar la
         // respuesta, porque el cuerpo quedo sin consumir.
         req.pause();
-        reject(new CuerpoDemasiadoGrandeError());
+        reject(new BodyTooLargeError());
         return;
       }
       parts.push(chunk);
@@ -89,7 +89,7 @@ function leerCuerpo(req: IncomingMessage): Promise<string> {
 }
 
 export function createApp(): Server {
-  const table = rutas();
+  const table = routes();
 
   return createServer(async (req, res) => {
     const vres = res as unknown as VercelResponse;
@@ -116,7 +116,7 @@ export function createApp(): Server {
 
       const skuMatch = productPattern.exec(url.pathname);
       const providerFromPath = skuMatch?.[1];
-      const route: Ruta | undefined = skuMatch
+      const route: Route | undefined = skuMatch
         ? providerFromPath
           ? { handler: 'proveedor:product', proveedor: providerFromPath }
           : { handler: 'product' }
@@ -141,13 +141,13 @@ export function createApp(): Server {
       // hacernos consumir el cuerpo.
       if (req.method && req.method !== 'GET' && req.method !== 'HEAD') {
         try {
-          (req as unknown as VercelRequest).body = await leerCuerpo(req);
+          (req as unknown as VercelRequest).body = await readBody(req);
         } catch (error) {
-          if (error instanceof CuerpoDemasiadoGrandeError) {
+          if (error instanceof BodyTooLargeError) {
             res.setHeader('connection', 'close');
             vres.status(413).json({
               error: 'payload_too_large',
-              detail: `El cuerpo supera el maximo de ${CUERPO_MAXIMO_BYTES} bytes`,
+              detail: `El cuerpo supera el maximo de ${MAX_BODY_BYTES} bytes`,
             });
             return;
           }

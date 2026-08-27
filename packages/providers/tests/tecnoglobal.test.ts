@@ -207,7 +207,7 @@ describe('getPrices', () => {
   });
 
   it('el tope declarado coincide con el que aplica getPrices', () => {
-    expect(tecnoglobal.maxSkusPorLote).toBe(300);
+    expect(tecnoglobal.maxSkusPerBatch).toBe(300);
   });
 
   // Pedir 25 en vivo son ~37 s contra su servicio: el ranking de una busqueda

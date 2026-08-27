@@ -379,7 +379,7 @@ describe('getPrices', () => {
   });
 
   it('el tope declarado coincide con el que aplica getPrices', () => {
-    expect(ingram.maxSkusPorLote).toBe(50);
+    expect(ingram.maxSkusPerBatch).toBe(50);
   });
 });
 

@@ -23,12 +23,12 @@ export interface PriceInfo {
 }
 
 export interface Provider {
-  nombre: string;
+  name: string;
   loadCatalog(): Promise<NormalizedProduct[]>;
-  getPrecios(skus: string[]): Promise<Map<string, PriceInfo>>;
-  getPrecio(query: PriceQuery): Promise<PriceResult>;
+  getPrices(skus: string[]): Promise<Map<string, PriceInfo>>;
+  getPrice(query: PriceQuery): Promise<PriceResult>;
   /** Tope de SKUs por llamada de precios. Es limite del proveedor, no politica nuestra. */
-  maxSkusPorLote: number;
+  maxSkusPerBatch: number;
   isConfigured(): boolean;
 }
 

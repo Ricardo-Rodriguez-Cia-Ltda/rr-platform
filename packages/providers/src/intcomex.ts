@@ -190,8 +190,8 @@ export async function cargarCatalogoIntcomex(): Promise<NormalizedProduct[]> {
 }
 
 export const intcomex: Provider = {
-  nombre: 'intcomex',
-  maxSkusPorLote: MAX_SKUS_PER_CALL,
+  name: 'intcomex',
+  maxSkusPerBatch: MAX_SKUS_PER_CALL,
   isConfigured: () =>
     Boolean(
       process.env.INTCOMEX_API_KEY &&
@@ -199,6 +199,6 @@ export const intcomex: Provider = {
         process.env.INTCOMEX_BASE_URL,
     ),
   loadCatalog: cargarCatalogoIntcomex,
-  getPrecios: getPrices,
-  getPrecio: getPrice,
+  getPrices,
+  getPrice,
 };
