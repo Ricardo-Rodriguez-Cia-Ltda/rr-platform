@@ -4,8 +4,8 @@ import { PROVEEDORES } from '../lib/providers/index.js';
 import { normalizarProducto as normalizarIngram } from '../lib/providers/ingram.js';
 import { normalizarProducto as normalizarIntcomex } from '../lib/providers/intcomex.js';
 import { normalizarProducto as normalizarTecnoglobal } from '../lib/providers/tecnoglobal.js';
-import { claveUnion } from '../lib/producto.js';
-import type { ProductoNormalizado } from '../lib/producto.js';
+import { claveUnion } from '@rr/domain/product';
+import type { ProductoNormalizado } from '@rr/domain/product';
 
 // Paridad de contrato entre proveedores.
 //
@@ -16,8 +16,8 @@ import type { ProductoNormalizado } from '../lib/producto.js';
 
 const obtenerCatalogoMock = vi.fn();
 
-vi.mock('../lib/catalog.js', async () => {
-  const actual = await vi.importActual<typeof import('../lib/catalog.js')>('../lib/catalog.js');
+vi.mock('@rr/domain/catalog', async () => {
+  const actual = await vi.importActual<typeof import('@rr/domain/catalog')>('@rr/domain/catalog');
   return { ...actual, obtenerCatalogo: () => obtenerCatalogoMock() };
 });
 

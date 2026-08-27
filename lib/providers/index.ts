@@ -1,4 +1,4 @@
-import type { Proveedor } from '../types.js';
+import type { Proveedor } from '@rr/domain/types';
 import { ingram } from './ingram.js';
 import { intcomex } from './intcomex.js';
 import { tecnoglobal } from './tecnoglobal.js';

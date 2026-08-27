@@ -1,6 +1,6 @@
 import type { VercelResponse } from '@vercel/node';
 import { PROVEEDORES, resolverProveedor } from '../providers/index.js';
-import type { Proveedor } from '../types.js';
+import type { Proveedor } from '@rr/domain/types';
 
 /**
  * Resuelve el proveedor de la ruta o responde el error correspondiente.

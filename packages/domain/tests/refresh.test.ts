@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { proveedoresConfigurados, refrescarTodos } from '../lib/refresco.js';
+import { proveedoresConfigurados, refrescarTodos } from '@rr/domain/refresh';
 
 beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});

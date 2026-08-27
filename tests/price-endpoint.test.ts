@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { ProviderError } from '../lib/types.js';
+import { ProviderError } from '@rr/domain/types';
 
 const getPriceMock = vi.fn();
 

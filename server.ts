@@ -1,7 +1,7 @@
-import { cargarCatalogo } from './lib/catalog.js';
+import { cargarCatalogo } from '@rr/domain/catalog';
 import { PROVEEDORES } from './lib/providers/index.js';
 import { MENSAJE_CUOTA } from './lib/providers/tecnoglobal.js';
-import { proveedoresConfigurados, refrescarTodos } from './lib/refresco.js';
+import { proveedoresConfigurados, refrescarTodos } from '@rr/domain/refresh';
 import { createApp } from './lib/server.js';
 
 const port = Number(process.env.PORT ?? 3000);

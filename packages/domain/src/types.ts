@@ -1,4 +1,4 @@
-import type { ProductoNormalizado } from './producto.js';
+import type { ProductoNormalizado } from './product.js';
 
 export interface PriceQuery {
   sku?: string;

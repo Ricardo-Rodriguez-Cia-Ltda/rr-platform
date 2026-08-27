@@ -5,15 +5,15 @@ import {
   compararPorClave,
   hayAlgunCatalogo,
   resolverClaves,
-} from '../lib/comparador.js';
-import type { ProductoNormalizado } from '../lib/producto.js';
-import type { PriceInfo, Proveedor } from '../lib/types.js';
-import { ProviderError } from '../lib/types.js';
+} from '@rr/domain/comparator';
+import type { ProductoNormalizado } from '@rr/domain/product';
+import type { PriceInfo, Proveedor } from '@rr/domain/types';
+import { ProviderError } from '@rr/domain/types';
 
 const catalogos = new Map<string, ProductoNormalizado[]>();
 
-vi.mock('../lib/catalog.js', async () => {
-  const actual = await vi.importActual<typeof import('../lib/catalog.js')>('../lib/catalog.js');
+vi.mock('../src/catalog.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/catalog.js')>('../src/catalog.js');
   return {
     ...actual,
     obtenerCatalogo: (proveedor: string) => {

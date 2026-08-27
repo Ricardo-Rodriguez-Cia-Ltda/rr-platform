@@ -11,7 +11,7 @@ import {
   tecnoglobal,
   type ProductoTecnoglobal,
 } from '../lib/providers/tecnoglobal.js';
-import { ProviderError } from '../lib/types.js';
+import { ProviderError } from '@rr/domain/types';
 
 // Respuesta real de http://200.6.78.34/stock/v1/price, recortada a una muestra
 // con stock y sin stock, en oferta y no, con UPC real y con el "0" que usan

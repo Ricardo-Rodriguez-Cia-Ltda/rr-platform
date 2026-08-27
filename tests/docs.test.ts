@@ -160,7 +160,7 @@ describe('docs/api sigue el codigo: nombres de campo de las respuestas', () => {
     expect(DOCS).toContain(campo);
   });
 
-  it.each(camposDeInterfaz(readFileSync('lib/types.ts', 'utf8'), 'PriceResult'))(
+  it.each(camposDeInterfaz(readFileSync('packages/domain/src/types.ts', 'utf8'), 'PriceResult'))(
     "el campo '%s' de /price esta documentado",
     (campo) => {
       expect(README).toContain(`\`${campo}\``);
@@ -168,7 +168,7 @@ describe('docs/api sigue el codigo: nombres de campo de las respuestas', () => {
     },
   );
 
-  it.each(camposDeInterfaz(readFileSync('lib/search.ts', 'utf8'), 'Facetas'))(
+  it.each(camposDeInterfaz(readFileSync('packages/domain/src/search.ts', 'utf8'), 'Facetas'))(
     "la faceta '%s' esta documentada",
     (campo) => {
       expect(DOCS).toContain(campo);
@@ -219,7 +219,7 @@ describe('docs/api sigue el codigo: constantes citadas', () => {
   });
 
   it('README.md cita los pesos reales del ranking', () => {
-    const codigoRanking = readFileSync('lib/search.ts', 'utf8');
+    const codigoRanking = readFileSync('packages/domain/src/search.ts', 'utf8');
     for (const nombre of ['PESO_MPN_EXACTO', 'PESO_MARCA', 'PESO_DESCRIPCION']) {
       const valor = new RegExp(`const ${nombre} = (\\d+)`).exec(codigoRanking)?.[1];
       expect(valor, `falta ${nombre}`).toBeTruthy();
@@ -228,7 +228,7 @@ describe('docs/api sigue el codigo: constantes citadas', () => {
   });
 
   it('README.md cita la vigencia del catalogo y el reintento', () => {
-    const codigoCatalogo = readFileSync('lib/catalog.ts', 'utf8');
+    const codigoCatalogo = readFileSync('packages/domain/src/catalog.ts', 'utf8');
     expect(codigoCatalogo).toContain('24 * 60 * 60 * 1000');
     expect(README).toContain('**24 horas**');
 

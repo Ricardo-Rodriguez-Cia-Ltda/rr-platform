@@ -1,5 +1,5 @@
-import type { ProductoNormalizado } from './producto.js';
-import { normalizar, tokenizar } from './texto.js';
+import type { ProductoNormalizado } from './product.js';
+import { normalizar, tokenizar } from './text.js';
 
 export { normalizar, tokenizar };
 

@@ -2,9 +2,9 @@ import { createHash } from 'node:crypto';
 
 import { fetchConTimeout } from '../http.js';
 import { normalizarMoneda } from '@rr/domain/currency';
-import type { PriceInfo, PriceQuery, PriceResult, Proveedor } from '../types.js';
-import { ProviderError } from '../types.js';
-import type { ProductoNormalizado } from '../producto.js';
+import type { PriceInfo, PriceQuery, PriceResult, Proveedor } from '@rr/domain/types';
+import { ProviderError } from '@rr/domain/types';
+import type { ProductoNormalizado } from '@rr/domain/product';
 
 export function formatUtcTimestamp(date: Date): string {
   return date.toISOString().replace(/\.\d{3}Z$/, 'Z');

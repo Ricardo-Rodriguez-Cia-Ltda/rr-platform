@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 
 import { fetchConTimeout } from '../http.js';
 import { normalizarMoneda } from '@rr/domain/currency';
-import type { ProductoNormalizado } from '../producto.js';
-import type { PriceInfo, PriceQuery, PriceResult, Proveedor } from '../types.js';
-import { ProviderError } from '../types.js';
+import type { ProductoNormalizado } from '@rr/domain/product';
+import type { PriceInfo, PriceQuery, PriceResult, Proveedor } from '@rr/domain/types';
+import { ProviderError } from '@rr/domain/types';
 
 const BASE_URL_POR_DEFECTO = 'https://api.ingrammicro.com';
 const TOKEN_URL_POR_DEFECTO = 'https://api.ingrammicro.com/oauth/oauth30/token';

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { CatalogUnavailableError } from '../lib/catalog.js';
-import type { ProductoNormalizado } from '../lib/producto.js';
-import { ProviderError } from '../lib/types.js';
+import { CatalogUnavailableError } from '@rr/domain/catalog';
+import type { ProductoNormalizado } from '@rr/domain/product';
+import { ProviderError } from '@rr/domain/types';
 
 // Contrato transversal de errores.
 //
@@ -16,8 +16,8 @@ const obtenerCatalogoMock = vi.fn();
 const getPricesMock = vi.fn();
 const getPriceMock = vi.fn();
 
-vi.mock('../lib/catalog.js', async () => {
-  const actual = await vi.importActual<typeof import('../lib/catalog.js')>('../lib/catalog.js');
+vi.mock('@rr/domain/catalog', async () => {
+  const actual = await vi.importActual<typeof import('@rr/domain/catalog')>('@rr/domain/catalog');
   return { ...actual, obtenerCatalogo: () => obtenerCatalogoMock() };
 });
 

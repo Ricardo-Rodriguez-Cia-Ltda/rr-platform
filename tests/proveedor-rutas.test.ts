@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import type { ProductoNormalizado } from '../lib/producto.js';
+import type { ProductoNormalizado } from '@rr/domain/product';
 
 const obtenerCatalogoMock = vi.fn();
 const getPreciosMock = vi.fn();
 
-vi.mock('../lib/catalog.js', async () => {
-  const actual = await vi.importActual<typeof import('../lib/catalog.js')>('../lib/catalog.js');
+vi.mock('@rr/domain/catalog', async () => {
+  const actual = await vi.importActual<typeof import('@rr/domain/catalog')>('@rr/domain/catalog');
   return { ...actual, obtenerCatalogo: () => obtenerCatalogoMock() };
 });
 

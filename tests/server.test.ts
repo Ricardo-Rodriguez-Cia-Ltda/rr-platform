@@ -16,8 +16,8 @@ const CATALOGO = [
   },
 ];
 
-vi.mock('../lib/catalog.js', async () => {
-  const actual = await vi.importActual<typeof import('../lib/catalog.js')>('../lib/catalog.js');
+vi.mock('@rr/domain/catalog', async () => {
+  const actual = await vi.importActual<typeof import('@rr/domain/catalog')>('@rr/domain/catalog');
   return { ...actual, obtenerCatalogo: () => CATALOGO };
 });
 

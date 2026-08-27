@@ -4,8 +4,8 @@ import {
   compactarMpn,
   marcaCanonica,
   type ProductoNormalizado,
-} from './producto.js';
-import { PROVEEDORES } from './providers/index.js';
+} from './product.js';
+import { PROVEEDORES } from '../../../lib/providers/index.js';
 import type { PriceInfo, Proveedor } from './types.js';
 
 export interface Oferta {

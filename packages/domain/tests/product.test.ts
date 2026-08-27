@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { claveUnion, compactarMpn, marcaCanonica } from '../lib/producto.js';
-import type { ProductoNormalizado } from '../lib/producto.js';
+import { claveUnion, compactarMpn, marcaCanonica } from '@rr/domain/product';
+import type { ProductoNormalizado } from '@rr/domain/product';
 
 function producto(campos: Partial<ProductoNormalizado>): ProductoNormalizado {
   return {

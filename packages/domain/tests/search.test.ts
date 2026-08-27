@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buscar, calcularFacetas, normalizar, tokenizar } from '../lib/search.js';
-import type { ProductoNormalizado } from '../lib/producto.js';
+import { buscar, calcularFacetas, normalizar, tokenizar } from '@rr/domain/search';
+import type { ProductoNormalizado } from '@rr/domain/product';
 
 function producto(
   sku: string,

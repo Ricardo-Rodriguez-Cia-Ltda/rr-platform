@@ -7,7 +7,7 @@ import {
   cargarCatalogo,
   obtenerCatalogo,
   _resetCatalogoParaTests,
-} from '../lib/catalog.js';
+} from '@rr/domain/catalog';
 
 // Lo que devuelve la red viene crudo de Intcomex; lo que queda en disco y en
 // memoria ya esta normalizado. Mezclar las dos formas esconde justo el paso

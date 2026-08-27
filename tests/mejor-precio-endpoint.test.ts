@@ -7,7 +7,7 @@ const claveDeSkuMock = vi.fn();
 const hayAlgunCatalogoMock = vi.fn();
 const catalogosNoDisponiblesMock = vi.fn();
 
-vi.mock('../lib/comparador.js', () => ({
+vi.mock('@rr/domain/comparator', () => ({
   compararPorClave: (...a: unknown[]) => compararMock(...a),
   resolverClaves: (...a: unknown[]) => resolverClavesMock(...a),
   claveDeSku: (...a: unknown[]) => claveDeSkuMock(...a),

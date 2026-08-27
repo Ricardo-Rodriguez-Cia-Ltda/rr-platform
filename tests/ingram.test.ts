@@ -9,7 +9,7 @@ import {
   normalizarProducto,
   type ProductoIngram,
 } from '../lib/providers/ingram.js';
-import { ProviderError } from '../lib/types.js';
+import { ProviderError } from '@rr/domain/types';
 
 // Fixtures tomadas de la OpenAPI oficial de Ingram
 // (ingrammicro-xvantage/xi-sdk-openapispec). Verifican NUESTRA normalizacion

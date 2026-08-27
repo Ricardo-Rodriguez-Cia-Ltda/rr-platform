@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getPrices } from '../lib/providers/intcomex.js';
-import { ProviderError } from '../lib/types.js';
+import { ProviderError } from '@rr/domain/types';
 
 const IWS_ITEMS = [
   { Sku: 'A1', Mpn: 'M1', Price: { UnitPrice: 10.5, CurrencyId: 'us' }, InStock: 3 },

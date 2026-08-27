@@ -1,4 +1,4 @@
-import { tokenizar } from './texto.js';
+import { tokenizar } from './text.js';
 
 export interface ProductoNormalizado {
   /** Identificador del proveedor. NO es comparable entre proveedores. */

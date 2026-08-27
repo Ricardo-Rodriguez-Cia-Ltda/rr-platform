@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ProductoNormalizado } from './producto.js';
-import { PROVEEDORES } from './providers/index.js';
+import type { ProductoNormalizado } from './product.js';
+import { PROVEEDORES } from '../../../lib/providers/index.js';
 
 const VIGENCIA_MS = 24 * 60 * 60 * 1000;
 
