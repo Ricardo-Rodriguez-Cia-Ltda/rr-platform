@@ -117,9 +117,15 @@ Editar ese valor y correr `npm run kapso:functions` de nuevo. El script hace
 `generar-cotizacion-v2`, `emitir-ordenes-compra`) — no hace falta redeploy
 del código, un secreto se actualiza sin tocar el Worker.
 
-No confundir con el `MARGEN` de las functions de v1 (`0.30`, usado por
-`Rayo Perez`): son secretos independientes en functions independientes;
-cambiar uno no toca el otro.
+No confundir con el `MARGEN` de las functions de v1, usadas por
+`Rayo Perez`: son secretos independientes en functions independientes;
+cambiar uno no toca el otro. El `0.30` que aparece en el código de v1
+(`env.MARGEN ?? "0.30"`, en `docs/kapso/functions-v1-backup/*.js`) es solo
+el **valor por defecto que usa el código si el secreto no está cargado**,
+no una lectura del secreto real: la API de Kapso nunca expone valores de
+secretos, solo sus nombres, así que no hay forma de confirmar qué valor
+tiene realmente cargado `MARGEN` en las functions de v1 sin acceso directo
+a la consola de Kapso.
 
 ---
 
@@ -327,12 +333,34 @@ sin verificar").
    correr `npm run kapso:workflow` de nuevo. Costo: una llamada a LLM más
    por decisión, y la decisión deja de ser 100% determinista.
 2. **Liberar un slot de cupo borrando otra function en `draft` que no se
-   use.** Candidatas sin actividad real: las de v1 ya huérfanas
-   (`route-rejection`, `route-payment-method`, `route-credit-result`,
-   `route-partial-credit`, `chequear-credito`, `notify-pending-quote`) —
-   pero **cualquier borrado de una function de v1 requiere la misma
-   autorización explícita del humano** que se pidió para el cutover de Task
-   6, con el mismo respaldo previo en
+   use.** De las seis functions de v1 que ya no tienen agente propio en
+   `rr-isia-version2` (`route-rejection`, `route-payment-method`,
+   `route-credit-result`, `route-partial-credit`, `chequear-credito`,
+   `notify-pending-quote`), **solo tres son huérfanas de verdad dentro de
+   `Rayo Perez`: `route-credit-result`, `route-partial-credit` y
+   `chequear-credito`.** Las otras tres siguen cableadas a un nodo cada
+   una — `route-rejection` en el nodo `function_n4route_1786100000005`,
+   `route-payment-method` en `function_paymentroute_1786100000007`, y
+   `notify-pending-quote` en `function_pending_1786100000014` (verificado
+   contra `GET /workflows/155d9b86-.../definition`, buscando el
+   `function_id` de cada una dentro del JSON de la definición). Borrar
+   cualquiera de esas tres agrega tres nodos más con `function_id: null` a
+   un workflow que ya está roto por el mismo motivo — el daño que describe
+   la sección siguiente.
+
+   **Cómo repetir este chequeo** (la lista de arriba puede envejecer si
+   `Rayo Perez` se edita): tomar el `id` de la function candidata desde
+   `GET /functions`, y buscar ese `id` dentro de
+   `GET /workflows/155d9b86-f1f6-42cb-b40e-e623321d7a58/definition` (en los
+   `config.function_id` de los nodos `function`/`decide`, y en
+   `config.flow_agent_function_tools[].function_id` de los nodos `agent`).
+   Si no aparece ninguna coincidencia, la function es huérfana de verdad y
+   se puede considerar para liberar cupo; si aparece, borrarla rompe un nodo
+   que hoy funciona.
+
+   En cualquier caso, **cualquier borrado de una function de v1 requiere la
+   misma autorización explícita del humano** que se pidió para el cutover de
+   Task 6, con el mismo respaldo previo en
    `docs/kapso/functions-v1-backup/`. No se debe borrar nada por cuenta
    propia para resolver esto.
 
