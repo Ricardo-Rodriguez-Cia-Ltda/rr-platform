@@ -555,7 +555,7 @@ bien escrito ya debería manejarlo.
 | Utilizado | **4.000.000** CLP |
 | Disponible | **6.000.000** CLP |
 
-Están hardcodeados en `api/credito/mock.ts`. Como consecuencia: cualquier monto
+Están hardcodeados en `apps/pricing-api/api/credito/mock.ts`. Como consecuencia: cualquier monto
 hasta 6.000.000 se aprueba y cualquiera sobre eso se rechaza, para todos los RUT.
 
 ### Un rechazo no es un error
@@ -815,4 +815,4 @@ prompt— está en
 |---|---|
 | Rutas, códigos de error y constantes | `tests/docs.test.ts` falla si el código y estos documentos se desincronizan. Corre con `npm test`. |
 | `vocabulario.md` | Regenerado desde la API con `npm run docs:vocabulario`. |
-| Formas de respuesta y semántica | A mano. Al tocar un handler de `api/`, actualizar la sección correspondiente. |
+| Formas de respuesta y semántica | A mano. Al tocar un handler de `apps/pricing-api/api/`, actualizar la sección correspondiente. |
