@@ -11,26 +11,27 @@ const README = readFileSync('docs/api/README.md', 'utf8');
 const OPENAPI = readFileSync('docs/api/openapi.yaml', 'utf8');
 const DOCS = `${README}\n${OPENAPI}`;
 
-// lib/server.ts es la fuente de verdad de que endpoints existen: de ahi salen
-// tanto las rutas a verificar como los archivos de api/ que hay que leer, asi
-// que un endpoint nuevo entra solo a todas las comprobaciones de abajo.
-const CODIGO_SERVIDOR = readFileSync('lib/server.ts', 'utf8');
+// apps/pricing-api/src/app.ts es la fuente de verdad de que endpoints existen:
+// de ahi salen tanto las rutas a verificar como los archivos de api/ que hay
+// que leer, asi que un endpoint nuevo entra solo a todas las comprobaciones
+// de abajo.
+const CODIGO_SERVIDOR = readFileSync('apps/pricing-api/src/app.ts', 'utf8');
 const RUTAS = [
   ...(/const nombres = \[([^\]]+)\]/.exec(CODIGO_SERVIDOR)?.[1] ?? '').matchAll(/'([a-z/-]+)'/g),
 ].map((m) => m[1]);
 
 // Los archivos de api/ son envoltorios de pocas lineas; la logica que la doc
-// tiene que reflejar vive en las fabricas de lib/handlers/.
+// tiene que reflejar vive en las fabricas de apps/pricing-api/src/handlers/.
 const IMPLEMENTACION: Record<string, string> = {
-  search: 'lib/handlers/busqueda.ts',
-  product: 'lib/handlers/producto.ts',
-  facetas: 'lib/handlers/facetas.ts',
-  'mejor-precio': 'lib/handlers/mejor-precio.ts',
+  search: 'apps/pricing-api/src/handlers/search.ts',
+  product: 'apps/pricing-api/src/handlers/product.ts',
+  facetas: 'apps/pricing-api/src/handlers/facets.ts',
+  'mejor-precio': 'apps/pricing-api/src/handlers/best-price.ts',
 };
 
 const FUENTES_API = RUTAS.map((n) => ({
   nombre: n,
-  codigo: readFileSync(IMPLEMENTACION[n] ?? `api/${n}.ts`, 'utf8'),
+  codigo: readFileSync(IMPLEMENTACION[n] ?? `apps/pricing-api/api/${n}.ts`, 'utf8'),
 }));
 
 // Solo la seccion paths: components tiene sus propias claves 'responses' y
@@ -82,7 +83,7 @@ function clavesDelLiteral(codigo: string, marca: string): string[] {
 }
 
 describe('docs/api sigue el codigo: rutas', () => {
-  it('lib/server.ts declara las rutas de forma reconocible', () => {
+  it('apps/pricing-api/src/app.ts declara las rutas de forma reconocible', () => {
     expect(RUTAS.length).toBeGreaterThan(3);
   });
 
@@ -160,7 +161,7 @@ describe('docs/api sigue el codigo: nombres de campo de las respuestas', () => {
     expect(DOCS).toContain(campo);
   });
 
-  it.each(camposDeInterfaz(readFileSync('lib/types.ts', 'utf8'), 'PriceResult'))(
+  it.each(camposDeInterfaz(readFileSync('packages/domain/src/types.ts', 'utf8'), 'PriceResult'))(
     "el campo '%s' de /price esta documentado",
     (campo) => {
       expect(README).toContain(`\`${campo}\``);
@@ -168,7 +169,7 @@ describe('docs/api sigue el codigo: nombres de campo de las respuestas', () => {
     },
   );
 
-  it.each(camposDeInterfaz(readFileSync('lib/search.ts', 'utf8'), 'Facetas'))(
+  it.each(camposDeInterfaz(readFileSync('packages/domain/src/search.ts', 'utf8'), 'Facets'))(
     "la faceta '%s' esta documentada",
     (campo) => {
       expect(DOCS).toContain(campo);
@@ -187,7 +188,7 @@ describe('docs/api sigue el codigo: nombres de campo de las respuestas', () => {
 
 describe('docs/api sigue el codigo: constantes citadas', () => {
   const codigoSearch = FUENTES_API.find((f) => f.nombre === 'search')!.codigo;
-  const codigoIntcomex = readFileSync('lib/providers/intcomex.ts', 'utf8');
+  const codigoIntcomex = readFileSync('packages/providers/src/intcomex.ts', 'utf8');
 
   function constante(codigo: string, nombre: string): string {
     const valor = new RegExp(`const ${nombre} = (\\d+)`).exec(codigo)?.[1];
@@ -200,7 +201,7 @@ describe('docs/api sigue el codigo: constantes citadas', () => {
     ['LIMITE_POR_DEFECTO', constante(codigoSearch, 'LIMITE_POR_DEFECTO')],
     ['MAX_CANDIDATOS_SIN_FILTROS', constante(codigoSearch, 'MAX_CANDIDATOS_SIN_FILTROS')],
     ['MAX_CANDIDATOS_CON_FILTROS', constante(codigoSearch, 'MAX_CANDIDATOS_CON_FILTROS')],
-    ['MAX_SKUS_POR_LLAMADA', constante(codigoIntcomex, 'MAX_SKUS_POR_LLAMADA')],
+    ['MAX_SKUS_PER_CALL', constante(codigoIntcomex, 'MAX_SKUS_PER_CALL')],
   ];
 
   // Se exige que el numero aparezca destacado (negrita o codigo), no suelto en
@@ -219,7 +220,7 @@ describe('docs/api sigue el codigo: constantes citadas', () => {
   });
 
   it('README.md cita los pesos reales del ranking', () => {
-    const codigoRanking = readFileSync('lib/search.ts', 'utf8');
+    const codigoRanking = readFileSync('packages/domain/src/search.ts', 'utf8');
     for (const nombre of ['PESO_MPN_EXACTO', 'PESO_MARCA', 'PESO_DESCRIPCION']) {
       const valor = new RegExp(`const ${nombre} = (\\d+)`).exec(codigoRanking)?.[1];
       expect(valor, `falta ${nombre}`).toBeTruthy();
@@ -228,11 +229,11 @@ describe('docs/api sigue el codigo: constantes citadas', () => {
   });
 
   it('README.md cita la vigencia del catalogo y el reintento', () => {
-    const codigoCatalogo = readFileSync('lib/catalog.ts', 'utf8');
+    const codigoCatalogo = readFileSync('packages/providers/src/catalog.ts', 'utf8');
     expect(codigoCatalogo).toContain('24 * 60 * 60 * 1000');
     expect(README).toContain('**24 horas**');
 
-    const codigoArranque = readFileSync('server.ts', 'utf8');
+    const codigoArranque = readFileSync('apps/pricing-api/server.ts', 'utf8');
     expect(codigoArranque).toContain('5 * 60 * 1000');
     expect(README).toContain('**5 minutos**');
   });
@@ -258,8 +259,8 @@ describe('openapi.yaml es internamente consistente', () => {
   // path esta suite queda en verde con el agente sin poder usar el proveedor
   // nuevo en el endpoint del precio oficial.
   it('todos los enum inline de proveedores coinciden con el registro', async () => {
-    const { PROVEEDORES } = await import('../lib/providers/index.js');
-    const registro = Object.keys(PROVEEDORES).sort();
+    const { PROVIDERS } = await import('@rr/providers');
+    const registro = Object.keys(PROVIDERS).sort();
 
     // Cualquier enum inline de 2+ valores que sean todos proveedores reales
     // es, por definicion, una lista de "los proveedores": tiene que

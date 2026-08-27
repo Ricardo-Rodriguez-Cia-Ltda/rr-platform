@@ -1,8 +1,9 @@
 # API de precios de proveedores — referencia
 
 > Documento pensado para ser leído por un modelo de lenguaje. Todo lo que
-> aparece aquí está verificado contra el código de `api/` y `lib/`. Si algo del
-> código cambia y esta referencia queda vieja, `tests/docs.test.ts` falla.
+> aparece aquí está verificado contra el código de `apps/pricing-api/`,
+> `packages/domain/` y `packages/providers/`. Si algo del código cambia y esta
+> referencia queda vieja, `tests/docs.test.ts` falla.
 >
 > Contrato machine-readable equivalente: [`openapi.yaml`](openapi.yaml).
 > Vocabulario real del catálogo (marcas y categorías): [`vocabulario.md`](vocabulario.md).
@@ -26,7 +27,8 @@ productos existen, no cuánto cuestan.
 > **Todos los precios que devuelve esta API son precio de COSTO** (lo que la
 > empresa le paga a Intcomex). Si el consumidor final es un LLM que conversa con
 > clientes, el margen debe aplicarse en un nodo determinista **antes** de que la
-> respuesta entre al contexto del modelo. Ver [`../kapso/README.md`](../kapso/README.md).
+> respuesta entre al contexto del modelo. Ver
+> [`../../apps/kapso-agent/README-v1.md`](../../apps/kapso-agent/README-v1.md).
 
 ## Acceso
 
@@ -553,7 +555,7 @@ bien escrito ya debería manejarlo.
 | Utilizado | **4.000.000** CLP |
 | Disponible | **6.000.000** CLP |
 
-Están hardcodeados en `api/credito/mock.ts`. Como consecuencia: cualquier monto
+Están hardcodeados en `apps/pricing-api/api/credito/mock.ts`. Como consecuencia: cualquier monto
 hasta 6.000.000 se aprueba y cualquiera sobre eso se rechaza, para todos los RUT.
 
 ### Un rechazo no es un error
@@ -802,7 +804,8 @@ Resumen operativo de lo anterior:
 9. **Aplica el margen fuera del modelo.** Los precios de esta API son costo.
 
 La implementación de referencia de todo esto —tools, margen, esquemas y system
-prompt— está en [`../kapso/README.md`](../kapso/README.md).
+prompt— está en
+[`../../apps/kapso-agent/README-v1.md`](../../apps/kapso-agent/README-v1.md).
 
 ---
 
@@ -812,4 +815,4 @@ prompt— está en [`../kapso/README.md`](../kapso/README.md).
 |---|---|
 | Rutas, códigos de error y constantes | `tests/docs.test.ts` falla si el código y estos documentos se desincronizan. Corre con `npm test`. |
 | `vocabulario.md` | Regenerado desde la API con `npm run docs:vocabulario`. |
-| Formas de respuesta y semántica | A mano. Al tocar un handler de `api/`, actualizar la sección correspondiente. |
+| Formas de respuesta y semántica | A mano. Al tocar un handler de `apps/pricing-api/api/`, actualizar la sección correspondiente. |

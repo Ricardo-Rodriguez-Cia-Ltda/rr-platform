@@ -1,8 +1,11 @@
-# scrapper-proveedores
+# rr-platform
 
-API de precios de proveedores. Cotiza contra Intcomex (IWS), Tecnoglobal e
-Ingram Micro, cada uno con su propio catálogo y sus propias rutas. Ver
-[Proveedores](#proveedores).
+Monorepo de Ricardo Rodríguez y Cía. Su pieza principal es una API de precios
+de proveedores que cotiza contra Intcomex (IWS), Tecnoglobal e Ingram Micro,
+cada uno con su propio catálogo y sus propias rutas (ver
+[Proveedores](#proveedores)), más el agente de WhatsApp que la consume y la
+operación del servidor que la hostea. Ver [Estructura](#estructura) para el
+mapa completo.
 
 ## Uso
 
@@ -28,6 +31,35 @@ Respuesta 200:
 ```
 
 Errores: `401` x-api-key inválida · `400` parámetros inválidos · `404` producto no encontrado · `502` fallo del proveedor. Formato: `{ "error": "...", "detail": "..." }`.
+
+## Estructura
+
+```
+apps/
+  pricing-api/    # la API HTTP: rutas /api/*, handlers y el server standalone
+  kapso-agent/    # Kapso Functions + prompts + scripts de deploy del agente de WhatsApp
+packages/
+  domain/         # tipos y logica de negocio pura: precio, producto, busqueda/ranking, moneda
+  providers/      # un modulo por mayorista (Intcomex, Tecnoglobal, Ingram) + el registro PROVIDERS
+infra/
+  office-node/    # scripts de PowerShell para el PC de oficina (autoarranque + tunel de Cloudflare)
+docs/
+  api/            # referencia de la API: README.md, openapi.yaml, vocabulario.md
+  superpowers/    # specs y planes de diseno, historicos
+tests/
+  docs.test.ts    # unico test fuera de apps/ y packages/: verifica docs/api/ contra el codigo
+```
+
+| App / paquete | Qué es | Qué expone | Dónde se despliega |
+|---|---|---|---|
+| `apps/pricing-api` | La API de precios | `GET /search`, `/product`, `/price`, `/mejor-precio`, `/facetas`, `POST /credito/mock`, y `/search`, `/product`, `/facetas` por proveedor bajo `/api/<proveedor>/...` (las únicas tres con forma por proveedor: `/price` elige proveedor por query param `?provider=`, `/mejor-precio` compara entre todos y `/credito/mock` no toca proveedores) | Vercel (proyecto `captador-precios-proveedores`) y, en paralelo, el PC de oficina vía `npm run serve` + Cloudflare Tunnel — ver [Hosting local](#hosting-local-pc-oficina--cloudflare-tunnel) |
+| `apps/kapso-agent` | El agente de WhatsApp que consume la API y aplica el margen fuera del modelo | Kapso Functions (`buscar-productos-v2`, `generar-cotizacion-v2`, `emitir-ordenes-compra`, etc.) y el workflow `rr-isia-version2` | Cuenta de Kapso (Cloudflare Workers), vía `npm run kapso:functions` / `npm run kapso:workflow` |
+| `packages/domain` | Tipos y lógica de negocio pura: precio, producto normalizado, búsqueda/ranking, moneda | Módulos TypeScript (`@rr/domain/*`), sin I/O | No se despliega; lo importan `pricing-api` y `providers` |
+| `packages/providers` | Un módulo por mayorista que normaliza su API real a `NormalizedProduct` | El registro `PROVIDERS` (`@rr/providers`) | No se despliega; lo importa `pricing-api` |
+| `infra/office-node` | Scripts de operación del servidor en el PC de oficina | Scripts de PowerShell (`install-autostart.ps1`, `verify-autostart.ps1`) | No se despliega; se ejecutan a mano en el PC de oficina |
+
+Convenciones de nombres, qué va en `apps/` vs `packages/` y por qué:
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Desarrollo
 
@@ -78,7 +110,7 @@ La referencia completa vive en [`docs/api/`](docs/api/) y está escrita para ser
 | [`docs/api/README.md`](docs/api/README.md) | Referencia narrativa: cada endpoint, cada código de error, cómo funciona el ranking, cuándo reintentar y cuándo no. |
 | [`docs/api/openapi.yaml`](docs/api/openapi.yaml) | El mismo contrato, machine-readable (OpenAPI 3.1). |
 | [`docs/api/vocabulario.md`](docs/api/vocabulario.md) | Marcas y categorías reales del catálogo. Generado con `npm run docs:vocabulario`. |
-| [`docs/kapso/README.md`](docs/kapso/README.md) | Cómo conectar todo esto al agente de WhatsApp aplicando el margen fuera del modelo. |
+| [`apps/kapso-agent/README-v1.md`](apps/kapso-agent/README-v1.md) | Cómo conectar todo esto al agente de WhatsApp aplicando el margen fuera del modelo. |
 
 Resumen de endpoints (todos con `x-api-key`):
 
@@ -193,13 +225,13 @@ Ingram responde `403 customer validation failed` aunque el token sea válido.
 
 ### Probar Ingram sin credenciales
 
-`scripts/mock-ingram.ts` levanta un servidor que imita el contrato publicado de
-Ingram, para ejercitar el módulo de punta a punta (ruta HTTP → handler →
-proveedor → red). Verifica el **cableado**, no que le hayamos acertado a la
-forma real del tenant:
+`apps/pricing-api/scripts/mock-ingram.ts` levanta un servidor que imita el
+contrato publicado de Ingram, para ejercitar el módulo de punta a punta (ruta
+HTTP → handler → proveedor → red). Verifica el **cableado**, no que le
+hayamos acertado a la forma real del tenant:
 
 ```bash
-npx tsx scripts/mock-ingram.ts    # queda escuchando en :4010
+npx tsx apps/pricing-api/scripts/mock-ingram.ts    # queda escuchando en :4010
 ```
 
 Y en otra terminal, `npm run serve` con `INGRAM_BASE_URL=http://127.0.0.1:4010`,
@@ -211,18 +243,19 @@ simulada con la de verdad.
 
 ### Agregar un proveedor nuevo
 
-1. Escribir `lib/providers/<nombre>.ts` exportando un objeto que cumpla
-   `Proveedor` (`lib/types.ts`): `cargarCatalogo`, `getPrecios`, `getPrecio`,
-   `maxSkusPorLote` y `estaConfigurado`. La normalización a
-   `ProductoNormalizado` ocurre **dentro** del módulo; ni el catálogo ni el
-   buscador ven nunca una respuesta cruda.
-2. Sumarlo a `PROVEEDORES` en `lib/providers/index.ts`.
+1. Escribir `packages/providers/src/<nombre>.ts` exportando un objeto que
+   cumpla `Provider` (`packages/domain/src/types.ts`): `loadCatalog`,
+   `getPrices`, `getPrice`, `maxSkusPerBatch` e `isConfigured`. La
+   normalización a `NormalizedProduct` (`packages/domain/src/product.ts`)
+   ocurre **dentro** del módulo; ni el catálogo ni el buscador ven nunca una
+   respuesta cruda.
+2. Sumarlo a `PROVIDERS` en `packages/providers/src/index.ts`.
 3. Documentar sus variables en `.env.example`.
 
 Con eso quedan andando sus tres rutas, su catálogo con caché propio
 (`cache/catalog-<nombre>.json`) y su refresco en paralelo. No hay nada más que
-tocar: `tests/paridad-proveedores.test.ts` verifica que el proveedor nuevo
-responda el mismo contrato que los demás.
+tocar: `apps/pricing-api/tests/provider-parity.test.ts` verifica que el
+proveedor nuevo responda el mismo contrato que los demás.
 
 ## Hosting local (PC oficina) + Cloudflare Tunnel
 
@@ -280,7 +313,13 @@ cloudflared service install
 Hay un script que deja todo instalado (túnel como servicio + servidor como tarea programada al arrancar el equipo + desactivar suspensión). En PowerShell **como Administrador**:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install-autostart.ps1
+powershell -ExecutionPolicy Bypass -File infra\office-node\install-autostart.ps1
+```
+
+Para verificar que quedó bien instalado (simula un reinicio: detiene los procesos sueltos, arranca las tareas programadas y comprueba que la API responde), también como Administrador:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File infra\office-node\verify-autostart.ps1
 ```
 
 Para hacerlo a mano en vez del script: Task Scheduler → Create Task: trigger "At startup", action "Start a program":
