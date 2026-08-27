@@ -26,22 +26,22 @@ interface Cotizado {
   stock: number | null;
 }
 
-function masBarato(productos: Cotizado[]): Cotizado {
+function cheapest(productos: Cotizado[]): Cotizado {
   return productos.reduce((a, b) => (b.precio < a.precio ? b : a));
 }
 
-function explicarVacio(
+function explainEmpty(
   evaluados: Cotizado[],
   onlyWithStock: boolean,
 ): { motivo: string; alternativa: Cotizado } {
   const withStock = evaluados.filter((p) => (p.stock ?? 0) > 0);
 
   if (onlyWithStock && withStock.length === 0) {
-    return { motivo: 'sin_stock', alternativa: masBarato(evaluados) };
+    return { motivo: 'sin_stock', alternativa: cheapest(evaluados) };
   }
   return {
     motivo: 'sobre_presupuesto',
-    alternativa: masBarato(withStock.length > 0 ? withStock : evaluados),
+    alternativa: cheapest(withStock.length > 0 ? withStock : evaluados),
   };
 }
 
@@ -189,7 +189,7 @@ export function createSearchHandler(provider: Provider): Handler {
       // decir por que fallo y ofrecer lo mas cercano, o el consumidor reintenta
       // la misma busqueda con otras palabras creyendo que fue un error tecnico.
       ...(productos.length === 0 && evaluados.length > 0
-        ? { sin_resultados: explicarVacio(evaluados, onlyWithStock) }
+        ? { sin_resultados: explainEmpty(evaluados, onlyWithStock) }
         : {}),
     });
   };

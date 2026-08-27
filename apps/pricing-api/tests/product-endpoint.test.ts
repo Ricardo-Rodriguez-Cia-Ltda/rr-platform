@@ -4,12 +4,12 @@ import { CatalogUnavailableError } from '@rr/providers/catalog';
 import type { NormalizedProduct } from '@rr/domain/product';
 import { ProviderError } from '@rr/domain/types';
 
-const obtenerCatalogoMock = vi.fn();
+const getCatalogMock = vi.fn();
 const getPricesMock = vi.fn();
 
 vi.mock('@rr/providers/catalog', async () => {
   const actual = await vi.importActual<typeof import('@rr/providers/catalog')>('@rr/providers/catalog');
-  return { ...actual, getCatalog: () => obtenerCatalogoMock() };
+  return { ...actual, getCatalog: () => getCatalogMock() };
 });
 
 vi.mock('@rr/providers/intcomex', () => ({
@@ -30,7 +30,7 @@ vi.mock('@rr/providers/intcomex', () => ({
 const { default: productHandler } = await import('../api/product.js');
 const { default: facetasHandler } = await import('../api/facetas.js');
 
-const PRODUCTO: NormalizedProduct = {
+const PRODUCT: NormalizedProduct = {
   sku: 'HP1',
   mpn: '2N6G5LT',
   nombre: 'HP ProBook 640 G8 - Notebook - 14"',
@@ -58,7 +58,7 @@ const AUTH = { 'x-api-key': 'test-secret' };
 
 beforeEach(() => {
   vi.stubEnv('API_SECRET_KEY', 'test-secret');
-  obtenerCatalogoMock.mockReset().mockReturnValue([PRODUCTO]);
+  getCatalogMock.mockReset().mockReturnValue([PRODUCT]);
   getPricesMock.mockReset().mockResolvedValue(
     new Map([['HP1', { price: 1697.82, currency: 'us', inStock: 4 }]]),
   );
@@ -79,7 +79,7 @@ describe('GET /product/{sku}', () => {
     const res = makeRes();
     await productHandler(makeReq({ sku: 'HP1' }, { 'x-api-key': 'nope' }), res);
     expect(res.statusCode).toBe(401);
-    expect(obtenerCatalogoMock).not.toHaveBeenCalled();
+    expect(getCatalogMock).not.toHaveBeenCalled();
   });
 
   it('returns 405 for non-GET methods', async () => {
@@ -105,7 +105,7 @@ describe('GET /product/{sku}', () => {
   });
 
   it('returns 503 when the catalog is not loaded yet', async () => {
-    obtenerCatalogoMock.mockImplementation(() => {
+    getCatalogMock.mockImplementation(() => {
       throw new CatalogUnavailableError();
     });
 
@@ -189,7 +189,7 @@ describe('GET /facetas', () => {
     const res = makeRes();
     await facetasHandler(makeReq({}, { 'x-api-key': 'nope' }), res);
     expect(res.statusCode).toBe(401);
-    expect(obtenerCatalogoMock).not.toHaveBeenCalled();
+    expect(getCatalogMock).not.toHaveBeenCalled();
   });
 
   it('returns 405 for non-GET methods', async () => {
@@ -200,7 +200,7 @@ describe('GET /facetas', () => {
   });
 
   it('returns 503 when the catalog is not loaded yet', async () => {
-    obtenerCatalogoMock.mockImplementation(() => {
+    getCatalogMock.mockImplementation(() => {
       throw new CatalogUnavailableError();
     });
 

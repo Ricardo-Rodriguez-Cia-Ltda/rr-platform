@@ -3,9 +3,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const { default: handler } = await import('../api/credito/mock.js');
 
-const LINEA = 10_000_000;
-const UTILIZADO = 4_000_000;
-const DISPONIBLE = LINEA - UTILIZADO;
+const CREDIT_LINE = 10_000_000;
+const USED = 4_000_000;
+const AVAILABLE = CREDIT_LINE - USED;
 
 function makeReq(body: unknown, headers: Record<string, string> = {}, method = 'POST'): VercelRequest {
   return { body, headers, method, query: {} } as unknown as VercelRequest;
@@ -83,10 +83,10 @@ describe('POST /credito/mock', () => {
     });
 
     it('rechaza un cuerpo que no es objeto', async () => {
-      for (const cuerpo of ['[1,2]', '"texto"', '42']) {
+      for (const rawBody of ['[1,2]', '"texto"', '42']) {
         const { res, status } = makeRes();
-        await handler(makeReq(cuerpo, AUTH), res);
-        expect(status(), `cuerpo: ${cuerpo}`).toBe(400);
+        await handler(makeReq(rawBody, AUTH), res);
+        expect(status(), `cuerpo: ${rawBody}`).toBe(400);
       }
     });
 
@@ -145,7 +145,7 @@ describe('POST /credito/mock', () => {
   });
 
   describe('logica de la linea de credito (hardcodeada)', () => {
-    async function consultar(total_clp: number) {
+    async function checkCredit(total_clp: number) {
       const { res, status, body } = makeRes();
       await handler(makeReq({ rut: '111111111', total_clp }, AUTH), res);
       return { status: status(), body: body() };
@@ -155,21 +155,21 @@ describe('POST /credito/mock', () => {
       const { res, body } = makeRes();
       await handler(makeReq({ rut: '99999999-9', total_clp: 1000 }, AUTH), res);
       expect(body()).toMatchObject({
-        linea_credito_clp: LINEA,
-        utilizado_clp: UTILIZADO,
-        disponible_clp: DISPONIBLE,
+        linea_credito_clp: CREDIT_LINE,
+        utilizado_clp: USED,
+        disponible_clp: AVAILABLE,
         habilitado: true,
         moneda: 'CLP',
       });
     });
 
     it('se marca como mock en la respuesta', async () => {
-      const { body } = await consultar(1000);
+      const { body } = await checkCredit(1000);
       expect(body.mock).toBe(true);
     });
 
     it('aprueba un monto bajo el disponible', async () => {
-      const { status, body } = await consultar(123_456);
+      const { status, body } = await checkCredit(123_456);
       expect(status).toBe(200);
       expect(body).toMatchObject({
         aprobado: true,
@@ -180,18 +180,18 @@ describe('POST /credito/mock', () => {
     });
 
     it('aprueba un monto exactamente igual al disponible', async () => {
-      const { body } = await consultar(DISPONIBLE);
+      const { body } = await checkCredit(AVAILABLE);
       expect(body).toMatchObject({ aprobado: true, faltante_clp: 0 });
     });
 
     it('rechaza un peso sobre el disponible', async () => {
-      const { body } = await consultar(DISPONIBLE + 1);
+      const { body } = await checkCredit(AVAILABLE + 1);
       expect(body).toMatchObject({ aprobado: false, motivo: 'excede_linea', faltante_clp: 1 });
     });
 
     it('rechaza 12 millones y dice cuanto falta', async () => {
       // El caso del encargo: linea 10M, gastado 4M, disponible 6M.
-      const { status, body } = await consultar(12_000_000);
+      const { status, body } = await checkCredit(12_000_000);
       expect(status).toBe(200);
       expect(body).toMatchObject({
         aprobado: false,
@@ -203,7 +203,7 @@ describe('POST /credito/mock', () => {
     });
 
     it('un rechazo sigue siendo 200: la consulta funciono, la respuesta es "no"', async () => {
-      const { status } = await consultar(50_000_000);
+      const { status } = await checkCredit(50_000_000);
       expect(status).toBe(200);
     });
   });

@@ -4,12 +4,12 @@ import { CatalogUnavailableError } from '@rr/providers/catalog';
 import type { NormalizedProduct } from '@rr/domain/product';
 import { ProviderError } from '@rr/domain/types';
 
-const obtenerCatalogoMock = vi.fn();
+const getCatalogMock = vi.fn();
 const getPricesMock = vi.fn();
 
 vi.mock('@rr/providers/catalog', async () => {
   const actual = await vi.importActual<typeof import('@rr/providers/catalog')>('@rr/providers/catalog');
-  return { ...actual, getCatalog: () => obtenerCatalogoMock() };
+  return { ...actual, getCatalog: () => getCatalogMock() };
 });
 
 vi.mock('@rr/providers/intcomex', () => ({
@@ -29,19 +29,27 @@ vi.mock('@rr/providers/intcomex', () => ({
 
 const { default: handler } = await import('../api/search.js');
 
-function producto(
+function makeProduct(
   sku: string,
-  nombre: string,
-  marca: string,
-  categoria: string,
+  name: string,
+  brand: string,
+  category: string,
 ): NormalizedProduct {
-  return { sku, mpn: `MPN-${sku}`, nombre, marca, categoria, subcategorias: [], tipo: null };
+  return {
+    sku,
+    mpn: `MPN-${sku}`,
+    nombre: name,
+    marca: brand,
+    categoria: category,
+    subcategorias: [],
+    tipo: null,
+  };
 }
 
-const CATALOGO = [
-  producto('HP1', 'HP ProBook 640 Notebook 14"', 'HP', 'Computadores'),
-  producto('HP2', 'HP EliteBook 840 Notebook 14"', 'HP', 'Computadores'),
-  producto('DE1', 'Dell Latitude Notebook 15"', 'Dell', 'Computadores'),
+const CATALOG = [
+  makeProduct('HP1', 'HP ProBook 640 Notebook 14"', 'HP', 'Computadores'),
+  makeProduct('HP2', 'HP EliteBook 840 Notebook 14"', 'HP', 'Computadores'),
+  makeProduct('DE1', 'Dell Latitude Notebook 15"', 'Dell', 'Computadores'),
 ];
 
 function makeReq(query: Record<string, string>, headers: Record<string, string> = {}): VercelRequest {
@@ -63,7 +71,7 @@ const AUTH = { 'x-api-key': 'test-secret' };
 describe('GET /search', () => {
   beforeEach(() => {
     vi.stubEnv('API_SECRET_KEY', 'test-secret');
-    obtenerCatalogoMock.mockReset().mockReturnValue(CATALOGO);
+    getCatalogMock.mockReset().mockReturnValue(CATALOG);
     getPricesMock.mockReset().mockResolvedValue(
       new Map([
         ['HP1', { price: 1000, currency: 'us', inStock: 5 }],
@@ -87,7 +95,7 @@ describe('GET /search', () => {
     const res = makeRes();
     await handler(makeReq({ q: 'hp' }, { 'x-api-key': 'nope' }), res);
     expect(res.statusCode).toBe(401);
-    expect(obtenerCatalogoMock).not.toHaveBeenCalled();
+    expect(getCatalogMock).not.toHaveBeenCalled();
   });
 
   it('returns 405 for non-GET methods', async () => {
@@ -150,10 +158,10 @@ describe('GET /search', () => {
   });
 
   it('returns 409 demasiado_amplio with facets when too many matches and no filters', async () => {
-    const grande = Array.from({ length: 30 }, (_, i) =>
-      producto(`S${i}`, `Notebook generico ${i}`, i % 2 === 0 ? 'HP' : 'Dell', 'Computadores'),
+    const large = Array.from({ length: 30 }, (_, i) =>
+      makeProduct(`S${i}`, `Notebook generico ${i}`, i % 2 === 0 ? 'HP' : 'Dell', 'Computadores'),
     );
-    obtenerCatalogoMock.mockReturnValue(grande);
+    getCatalogMock.mockReturnValue(large);
 
     const res = makeRes();
     await handler(makeReq({ q: 'notebook' }, AUTH), res);
@@ -165,10 +173,10 @@ describe('GET /search', () => {
   });
 
   it('does not trigger 409 when marca is provided', async () => {
-    const grande = Array.from({ length: 30 }, (_, i) =>
-      producto(`S${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
+    const large = Array.from({ length: 30 }, (_, i) =>
+      makeProduct(`S${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
     );
-    obtenerCatalogoMock.mockReturnValue(grande);
+    getCatalogMock.mockReturnValue(large);
     getPricesMock.mockResolvedValue(new Map());
 
     const res = makeRes();
@@ -177,7 +185,7 @@ describe('GET /search', () => {
   });
 
   it('returns 503 when the catalog is not loaded yet', async () => {
-    obtenerCatalogoMock.mockImplementation(() => {
+    getCatalogMock.mockImplementation(() => {
       throw new CatalogUnavailableError();
     });
 
@@ -271,18 +279,18 @@ describe('GET /search', () => {
     const res = makeRes();
     await handler(makeReq({ q: 'notebook' }, AUTH), res);
     expect(res.statusCode).toBe(200);
-    const precios = res.body.productos.map((p: any) => p.precio);
+    const prices = res.body.productos.map((p: any) => p.precio);
     expect(res.body.facetas.precio).toEqual({
-      min: Math.min(...precios),
-      max: Math.max(...precios),
+      min: Math.min(...prices),
+      max: Math.max(...prices),
     });
   });
 
   it('does not include facetas.precio on a 409 (no upstream calls happen on that path)', async () => {
-    const grande = Array.from({ length: 30 }, (_, i) =>
-      producto(`S${i}`, `Notebook generico ${i}`, i % 2 === 0 ? 'HP' : 'Dell', 'Computadores'),
+    const large = Array.from({ length: 30 }, (_, i) =>
+      makeProduct(`S${i}`, `Notebook generico ${i}`, i % 2 === 0 ? 'HP' : 'Dell', 'Computadores'),
     );
-    obtenerCatalogoMock.mockReturnValue(grande);
+    getCatalogMock.mockReturnValue(large);
 
     const res = makeRes();
     await handler(makeReq({ q: 'notebook' }, AUTH), res);
@@ -312,10 +320,10 @@ describe('GET /search', () => {
 
   // Ledger: el umbral de ambigüedad (25) debe ser estrictamente ">", no ">=".
   it('returns 200 (not 409) at exactly the ambiguity threshold (25 matches)', async () => {
-    const exacto = Array.from({ length: 25 }, (_, i) =>
-      producto(`T${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
+    const exact = Array.from({ length: 25 }, (_, i) =>
+      makeProduct(`T${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
     );
-    obtenerCatalogoMock.mockReturnValue(exacto);
+    getCatalogMock.mockReturnValue(exact);
     getPricesMock.mockResolvedValue(new Map());
 
     const res = makeRes();
@@ -326,10 +334,10 @@ describe('GET /search', () => {
   });
 
   it('returns 409 just past the ambiguity threshold (26 matches)', async () => {
-    const pasado = Array.from({ length: 26 }, (_, i) =>
-      producto(`T${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
+    const justPast = Array.from({ length: 26 }, (_, i) =>
+      makeProduct(`T${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
     );
-    obtenerCatalogoMock.mockReturnValue(pasado);
+    getCatalogMock.mockReturnValue(justPast);
 
     const res = makeRes();
     await handler(makeReq({ q: 'notebook' }, AUTH), res);
@@ -348,12 +356,12 @@ describe('GET /search', () => {
 describe('GET /search — paginado con filtros', () => {
   // 250 productos "notebook" de la misma marca: sin el paginado, los que
   // cumplen (los ultimos) quedan fuera de la ventana de candidatos.
-  const CATALOGO_GRANDE = Array.from({ length: 250 }, (_, i) =>
-    producto(`S${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
+  const LARGE_CATALOG = Array.from({ length: 250 }, (_, i) =>
+    makeProduct(`S${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
   );
 
   // Solo los SKUs a partir del 150 tienen stock; todos valen 100.
-  function preciosPorLote(skus: string[]) {
+  function pricesForBatch(skus: string[]) {
     return new Map(
       skus.map((sku) => {
         const n = Number(sku.slice(1));
@@ -364,8 +372,8 @@ describe('GET /search — paginado con filtros', () => {
 
   beforeEach(() => {
     vi.stubEnv('API_SECRET_KEY', 'test-secret');
-    obtenerCatalogoMock.mockReset().mockReturnValue(CATALOGO_GRANDE);
-    getPricesMock.mockReset().mockImplementation((skus: string[]) => Promise.resolve(preciosPorLote(skus)));
+    getCatalogMock.mockReset().mockReturnValue(LARGE_CATALOG);
+    getPricesMock.mockReset().mockImplementation((skus: string[]) => Promise.resolve(pricesForBatch(skus)));
   });
 
   afterEach(() => {
@@ -450,15 +458,15 @@ describe('GET /search — paginado con filtros', () => {
 // pasa la suite entera y recien rompe en produccion, porque getPrices rechaza
 // mas de 100 SKUs por llamada.
 describe('GET /search — topes de cotizacion', () => {
-  function catalogoDe(n: number): NormalizedProduct[] {
+  function catalogOf(n: number): NormalizedProduct[] {
     return Array.from({ length: n }, (_, i) =>
-      producto(`S${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
+      makeProduct(`S${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
     );
   }
 
   beforeEach(() => {
     vi.stubEnv('API_SECRET_KEY', 'test-secret');
-    obtenerCatalogoMock.mockReset();
+    getCatalogMock.mockReset();
     // Sin stock: nada pasa el filtro, asi que el handler recorre todos los
     // candidatos que se permite y podemos contar las llamadas.
     getPricesMock.mockReset().mockImplementation((skus: string[]) =>
@@ -470,25 +478,25 @@ describe('GET /search — topes de cotizacion', () => {
     vi.unstubAllEnvs();
   });
 
-  function lotesPedidos(): string[][] {
+  function requestedBatches(): string[][] {
     return getPricesMock.mock.calls.map((call) => call[0] as string[]);
   }
 
   it('nunca pide mas de 100 SKUs por llamada, que es el maximo que acepta getPrices', async () => {
-    obtenerCatalogoMock.mockReturnValue(catalogoDe(500));
+    getCatalogMock.mockReturnValue(catalogOf(500));
 
     const res = makeRes();
     await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true' }, AUTH), res);
 
     expect(res.statusCode).toBe(200);
-    expect(lotesPedidos().length).toBeGreaterThan(0);
-    for (const lote of lotesPedidos()) {
-      expect(lote.length).toBeLessThanOrEqual(100);
+    expect(requestedBatches().length).toBeGreaterThan(0);
+    for (const batch of requestedBatches()) {
+      expect(batch.length).toBeLessThanOrEqual(100);
     }
   });
 
   it('sin filtros corta en 50 candidatos aunque haya 300 coincidencias', async () => {
-    obtenerCatalogoMock.mockReturnValue(catalogoDe(300));
+    getCatalogMock.mockReturnValue(catalogOf(300));
 
     const res = makeRes();
     await handler(makeReq({ q: 'notebook', marca: 'HP' }, AUTH), res);
@@ -496,13 +504,13 @@ describe('GET /search — topes de cotizacion', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.total).toBe(300);
     // Un solo lote de 50: el orden por relevancia ya dejo arriba lo que sirve.
-    expect(lotesPedidos()).toHaveLength(1);
-    expect(lotesPedidos()[0]).toHaveLength(50);
+    expect(requestedBatches()).toHaveLength(1);
+    expect(requestedBatches()[0]).toHaveLength(50);
     expect(res.body.evaluados).toBe(50);
   });
 
   it('con filtros llega hasta 300 candidatos y no mas, aunque haya 500 coincidencias', async () => {
-    obtenerCatalogoMock.mockReturnValue(catalogoDe(500));
+    getCatalogMock.mockReturnValue(catalogOf(500));
 
     const res = makeRes();
     await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true' }, AUTH), res);
@@ -510,12 +518,12 @@ describe('GET /search — topes de cotizacion', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.total).toBe(500);
     // 300 candidatos en lotes de 100.
-    expect(lotesPedidos()).toHaveLength(3);
+    expect(requestedBatches()).toHaveLength(3);
     expect(res.body.evaluados).toBe(300);
   });
 
   it('precio_max tambien habilita el tope alto de candidatos', async () => {
-    obtenerCatalogoMock.mockReturnValue(catalogoDe(500));
+    getCatalogMock.mockReturnValue(catalogOf(500));
     // Todos por sobre el tope: nada pasa el filtro, se recorren los 300.
     getPricesMock.mockImplementation((skus: string[]) =>
       Promise.resolve(new Map(skus.map((sku) => [sku, { price: 9000, currency: 'us', inStock: 5 }]))),

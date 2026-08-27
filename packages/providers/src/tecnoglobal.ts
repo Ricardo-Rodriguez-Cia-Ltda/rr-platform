@@ -65,7 +65,7 @@ export function isConfigured(): boolean {
  * Tecnoglobal y lo que su servicio espera literalmente, no un hash que
  * calculemos nosotros sobre la contrasena en claro.
  */
-function autorizacion(): string {
+function authorizationHeader(): string {
   const user = process.env.TECNOGLOBAL_USER;
   const password = process.env.TECNOGLOBAL_PASSWORD;
   if (!user || !password) {
@@ -77,7 +77,7 @@ function autorizacion(): string {
 export async function fetchStock(path: string): Promise<Response> {
   const rawBaseUrl = process.env.TECNOGLOBAL_BASE_URL || DEFAULT_BASE_URL;
   const baseUrl = rawBaseUrl.endsWith('/') ? rawBaseUrl : `${rawBaseUrl}/`;
-  const authHeader = autorizacion();
+  const authHeader = authorizationHeader();
 
   try {
     return await fetchWithTimeout(new URL(path, baseUrl), {
@@ -130,7 +130,7 @@ async function readProducts(response: Response): Promise<TecnoglobalProduct[]> {
   if (!response.ok) {
     throw new ProviderError(
       'upstream',
-      esCuotaExcedida(data)
+      isQuotaExceeded(data)
         ? `Tecnoglobal rechazo la consulta por ${QUOTA_MESSAGE} en su ventana de 10 minutos`
         : `Tecnoglobal responded with HTTP ${response.status}`,
       text.slice(0, 500),
@@ -145,7 +145,7 @@ async function readProducts(response: Response): Promise<TecnoglobalProduct[]> {
   return Array.isArray(data.products) ? data.products : [];
 }
 
-function esCuotaExcedida(data: TecnoglobalResponse | null): boolean {
+function isQuotaExceeded(data: TecnoglobalResponse | null): boolean {
   return /excede la cantidad/i.test(data?.message ?? '');
 }
 

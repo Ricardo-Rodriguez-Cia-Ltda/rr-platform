@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import type { NormalizedProduct } from '@rr/domain/product';
 
-const obtenerCatalogoMock = vi.fn();
+const getCatalogMock = vi.fn();
 const getPricesMock = vi.fn();
 
 vi.mock('@rr/providers/catalog', async () => {
   const actual = await vi.importActual<typeof import('@rr/providers/catalog')>('@rr/providers/catalog');
-  return { ...actual, getCatalog: () => obtenerCatalogoMock() };
+  return { ...actual, getCatalog: () => getCatalogMock() };
 });
 
 vi.mock('@rr/providers/intcomex', () => ({
@@ -31,15 +31,15 @@ vi.mock('@rr/providers/intcomex', () => ({
 }));
 
 const { default: aliasSearch } = await import('../api/search.js');
-const { default: porRutaSearch } = await import('../api/[proveedor]/search.js');
-const { default: porRutaProduct } = await import('../api/[proveedor]/product.js');
-const { default: porRutaFacetas } = await import('../api/[proveedor]/facetas.js');
+const { default: searchByRoute } = await import('../api/[proveedor]/search.js');
+const { default: productByRoute } = await import('../api/[proveedor]/product.js');
+const { default: facetasByRoute } = await import('../api/[proveedor]/facetas.js');
 
-function producto(sku: string, nombre: string): NormalizedProduct {
+function makeProduct(sku: string, name: string): NormalizedProduct {
   return {
     sku,
     mpn: `MPN-${sku}`,
-    nombre,
+    nombre: name,
     marca: 'HP',
     categoria: 'Computadores',
     subcategorias: [],
@@ -47,7 +47,7 @@ function producto(sku: string, nombre: string): NormalizedProduct {
   };
 }
 
-const CATALOGO = [producto('HP1', 'HP ProBook 640 Notebook 14"')];
+const CATALOG = [makeProduct('HP1', 'HP ProBook 640 Notebook 14"')];
 
 function makeReq(
   query: Record<string, string>,
@@ -80,7 +80,7 @@ beforeEach(() => {
   vi.stubEnv('INTCOMEX_API_KEY', 'pub');
   vi.stubEnv('INTCOMEX_ACCESS_KEY', 'secret');
   vi.stubEnv('INTCOMEX_BASE_URL', 'https://x/');
-  obtenerCatalogoMock.mockReset().mockReturnValue(CATALOGO);
+  getCatalogMock.mockReset().mockReturnValue(CATALOG);
   getPricesMock
     .mockReset()
     .mockResolvedValue(new Map([['HP1', { price: 1000, currency: 'us', inStock: 5 }]]));
@@ -97,16 +97,16 @@ describe('rutas /api/{proveedor}/...', () => {
     const resAlias = makeRes();
     await aliasSearch(makeReq({ q: 'probook' }, AUTH), resAlias);
 
-    const resRuta = makeRes();
-    await porRutaSearch(makeReq({ proveedor: 'intcomex', q: 'probook' }, AUTH), resRuta);
+    const resByRoute = makeRes();
+    await searchByRoute(makeReq({ proveedor: 'intcomex', q: 'probook' }, AUTH), resByRoute);
 
-    expect(resRuta.statusCode).toBe(resAlias.statusCode);
-    expect(resRuta.body).toEqual(resAlias.body);
+    expect(resByRoute.statusCode).toBe(resAlias.statusCode);
+    expect(resByRoute.body).toEqual(resAlias.body);
   });
 
   it('404 proveedor_desconocido para un proveedor que no existe', async () => {
     const res = makeRes();
-    await porRutaSearch(makeReq({ proveedor: 'nadie', q: 'notebook' }, AUTH), res);
+    await searchByRoute(makeReq({ proveedor: 'nadie', q: 'notebook' }, AUTH), res);
     expect(res.statusCode).toBe(404);
     expect(res.body).toMatchObject({ error: 'proveedor_desconocido', proveedor: 'nadie' });
   });
@@ -116,40 +116,40 @@ describe('rutas /api/{proveedor}/...', () => {
   it('503 proveedor_no_configurado cuando faltan credenciales', async () => {
     vi.stubEnv('INTCOMEX_API_KEY', '');
     const res = makeRes();
-    await porRutaSearch(makeReq({ proveedor: 'intcomex', q: 'notebook' }, AUTH), res);
+    await searchByRoute(makeReq({ proveedor: 'intcomex', q: 'notebook' }, AUTH), res);
     expect(res.statusCode).toBe(503);
     expect(res.body).toMatchObject({ error: 'proveedor_no_configurado', proveedor: 'intcomex' });
   });
 
   it('valida la api key antes de mirar el proveedor', async () => {
     const res = makeRes();
-    await porRutaSearch(makeReq({ proveedor: 'nadie', q: 'notebook' }), res);
+    await searchByRoute(makeReq({ proveedor: 'nadie', q: 'notebook' }), res);
     expect(res.statusCode).toBe(401);
   });
 
   it('rechaza metodos que no son GET antes de resolver el proveedor', async () => {
     const res = makeRes();
-    await porRutaSearch(makeReq({ proveedor: 'nadie', q: 'x' }, AUTH, 'POST'), res);
+    await searchByRoute(makeReq({ proveedor: 'nadie', q: 'x' }, AUTH, 'POST'), res);
     expect(res.statusCode).toBe(405);
   });
 
   it('/api/{proveedor}/product responde la ficha del proveedor de la ruta', async () => {
     const res = makeRes();
-    await porRutaProduct(makeReq({ proveedor: 'intcomex', sku: 'HP1' }, AUTH), res);
+    await productByRoute(makeReq({ proveedor: 'intcomex', sku: 'HP1' }, AUTH), res);
     expect(res.statusCode).toBe(200);
     expect(res.body).toMatchObject({ sku: 'HP1', precio: 1000 });
   });
 
   it('/api/{proveedor}/facetas responde las facetas del proveedor de la ruta', async () => {
     const res = makeRes();
-    await porRutaFacetas(makeReq({ proveedor: 'intcomex' }, AUTH), res);
+    await facetasByRoute(makeReq({ proveedor: 'intcomex' }, AUTH), res);
     expect(res.statusCode).toBe(200);
     expect(res.body.total_productos).toBe(1);
   });
 
   it.each([
-    ['product', porRutaProduct],
-    ['facetas', porRutaFacetas],
+    ['product', productByRoute],
+    ['facetas', facetasByRoute],
   ])('%s tambien devuelve proveedor_desconocido con el proveedor en el cuerpo', async (_n, h) => {
     const res = makeRes();
     await h(makeReq({ proveedor: 'nadie', sku: 'HP1' }, AUTH), res);

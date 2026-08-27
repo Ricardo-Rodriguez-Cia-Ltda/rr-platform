@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { PROVIDERS } from '@rr/providers';
-import { normalizeProduct as normalizarIngram } from '@rr/providers/ingram';
-import { normalizeProduct as normalizarIntcomex } from '@rr/providers/intcomex';
-import { normalizeProduct as normalizarTecnoglobal } from '@rr/providers/tecnoglobal';
+import { normalizeProduct as normalizeIngram } from '@rr/providers/ingram';
+import { normalizeProduct as normalizeIntcomex } from '@rr/providers/intcomex';
+import { normalizeProduct as normalizeTecnoglobal } from '@rr/providers/tecnoglobal';
 import { unionKey } from '@rr/domain/product';
 import type { NormalizedProduct } from '@rr/domain/product';
 
@@ -14,17 +14,17 @@ import type { NormalizedProduct } from '@rr/domain/product';
 // agente que consume /product recibe undefined solo contra ese proveedor, y
 // ningun test por proveedor lo detecta.
 
-const obtenerCatalogoMock = vi.fn();
+const getCatalogMock = vi.fn();
 
 vi.mock('@rr/providers/catalog', async () => {
   const actual = await vi.importActual<typeof import('@rr/providers/catalog')>('@rr/providers/catalog');
-  return { ...actual, getCatalog: () => obtenerCatalogoMock() };
+  return { ...actual, getCatalog: () => getCatalogMock() };
 });
 
-const { default: porRutaProduct } = await import('../api/[proveedor]/product.js');
-const { default: porRutaFacetas } = await import('../api/[proveedor]/facetas.js');
+const { default: productByRoute } = await import('../api/[proveedor]/product.js');
+const { default: facetasByRoute } = await import('../api/[proveedor]/facetas.js');
 
-const PRODUCTO: NormalizedProduct = {
+const PRODUCT: NormalizedProduct = {
   sku: 'SKU1',
   mpn: 'MPN1',
   nombre: 'Producto de prueba',
@@ -34,7 +34,7 @@ const PRODUCTO: NormalizedProduct = {
   tipo: null,
 };
 
-const LLAVES_PRODUCT = [
+const PRODUCT_KEYS = [
   'sku',
   'mpn',
   'nombre',
@@ -67,14 +67,14 @@ function makeRes(): VercelResponse & { statusCode: number; body: any } {
   return res;
 }
 
-const NOMBRES = Object.keys(PROVIDERS);
+const NAMES = Object.keys(PROVIDERS);
 
 beforeEach(() => {
   vi.stubEnv('API_SECRET_KEY', 'test-secret');
-  obtenerCatalogoMock.mockReset().mockReturnValue([PRODUCTO]);
-  for (const proveedor of Object.values(PROVIDERS)) {
-    vi.spyOn(proveedor, 'isConfigured').mockReturnValue(true);
-    vi.spyOn(proveedor, 'getPrices').mockResolvedValue(
+  getCatalogMock.mockReset().mockReturnValue([PRODUCT]);
+  for (const provider of Object.values(PROVIDERS)) {
+    vi.spyOn(provider, 'isConfigured').mockReturnValue(true);
+    vi.spyOn(provider, 'getPrices').mockResolvedValue(
       new Map([['SKU1', { price: 100, currency: 'USD', inStock: 3 }]]),
     );
   }
@@ -87,20 +87,20 @@ afterEach(() => {
 
 describe('paridad de contrato entre proveedores', () => {
   it('estan registrados los tres proveedores del negocio', () => {
-    expect(NOMBRES.sort()).toEqual(['ingram', 'intcomex', 'tecnoglobal']);
+    expect(NAMES.sort()).toEqual(['ingram', 'intcomex', 'tecnoglobal']);
   });
 
-  it.each(NOMBRES)('/api/%s/product devuelve exactamente las mismas llaves', async (nombre) => {
+  it.each(NAMES)('/api/%s/product devuelve exactamente las mismas llaves', async (name) => {
     const res = makeRes();
-    await porRutaProduct(makeReq({ proveedor: nombre, sku: 'SKU1' }), res);
+    await productByRoute(makeReq({ proveedor: name, sku: 'SKU1' }), res);
 
     expect(res.statusCode).toBe(200);
-    expect(Object.keys(res.body).sort()).toEqual([...LLAVES_PRODUCT].sort());
+    expect(Object.keys(res.body).sort()).toEqual([...PRODUCT_KEYS].sort());
   });
 
-  it.each(NOMBRES)('/api/%s/facetas devuelve las mismas llaves', async (nombre) => {
+  it.each(NAMES)('/api/%s/facetas devuelve las mismas llaves', async (name) => {
     const res = makeRes();
-    await porRutaFacetas(makeReq({ proveedor: nombre }), res);
+    await facetasByRoute(makeReq({ proveedor: name }), res);
 
     expect(res.statusCode).toBe(200);
     expect(Object.keys(res.body).sort()).toEqual(['categoria', 'marca', 'total_productos']);
@@ -109,11 +109,11 @@ describe('paridad de contrato entre proveedores', () => {
   // Cada proveedor trae su propia respuesta cruda. El catalogo, el buscador y
   // la comparacion futura leen los campos por nombre: uno que normalice a otra
   // forma los rompe en silencio.
-  const NORMALIZADORES: [string, () => NormalizedProduct][] = [
+  const NORMALIZERS: [string, () => NormalizedProduct][] = [
     [
       'intcomex',
       () =>
-        normalizarIntcomex({
+        normalizeIntcomex({
           Sku: 'SKU1',
           Mpn: 'MPN1',
           Description: 'Producto de prueba',
@@ -124,7 +124,7 @@ describe('paridad de contrato entre proveedores', () => {
     [
       'tecnoglobal',
       () =>
-        normalizarTecnoglobal({
+        normalizeTecnoglobal({
           codigoTg: 'SKU1',
           pnFabricante: 'MPN1',
           descripcion: 'Producto de prueba',
@@ -136,7 +136,7 @@ describe('paridad de contrato entre proveedores', () => {
     [
       'ingram',
       () =>
-        normalizarIngram({
+        normalizeIngram({
           ingramPartNumber: 'SKU1',
           vendorPartNumber: 'MPN1',
           description: 'Producto de prueba',
@@ -148,13 +148,13 @@ describe('paridad de contrato entre proveedores', () => {
   ];
 
   it('hay un normalizador cubierto por proveedor registrado', () => {
-    expect(NORMALIZADORES.map(([n]) => n).sort()).toEqual(NOMBRES.sort());
+    expect(NORMALIZERS.map(([n]) => n).sort()).toEqual(NAMES.sort());
   });
 
-  it.each(NORMALIZADORES)('%s normaliza a la forma comun de NormalizedProduct', (_n, normalize) => {
-    const producto = normalize();
-    expect(Object.keys(producto).sort()).toEqual([...Object.keys(PRODUCTO)].sort());
-    expect(producto).toMatchObject({
+  it.each(NORMALIZERS)('%s normaliza a la forma comun de NormalizedProduct', (_n, normalize) => {
+    const product = normalize();
+    expect(Object.keys(product).sort()).toEqual([...Object.keys(PRODUCT)].sort());
+    expect(product).toMatchObject({
       sku: 'SKU1',
       mpn: 'MPN1',
       nombre: 'Producto de prueba',
@@ -167,12 +167,12 @@ describe('paridad de contrato entre proveedores', () => {
   // El "mejor precio" empareja por MPN + marca. Si dos proveedores producen
   // claves distintas para el mismo producto, la comparacion nunca los junta.
   it('el mismo producto en los tres proveedores produce la misma clave de union', () => {
-    const claves = new Set(NORMALIZADORES.map(([, normalize]) => unionKey(normalize())));
-    expect(claves.size).toBe(1);
-    expect([...claves][0]).not.toBeNull();
+    const keys = new Set(NORMALIZERS.map(([, normalize]) => unionKey(normalize())));
+    expect(keys.size).toBe(1);
+    expect([...keys][0]).not.toBeNull();
   });
 
-  it.each(NOMBRES)('%s declara un tope de lote propio y positivo', (nombre) => {
-    expect(PROVIDERS[nombre].maxSkusPerBatch).toBeGreaterThan(0);
+  it.each(NAMES)('%s declara un tope de lote propio y positivo', (name) => {
+    expect(PROVIDERS[name].maxSkusPerBatch).toBeGreaterThan(0);
   });
 });

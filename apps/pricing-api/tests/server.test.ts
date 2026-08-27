@@ -4,7 +4,7 @@ import type { Server } from 'node:http';
 
 const getPriceMock = vi.fn();
 
-const CATALOGO = [
+const CATALOG = [
   {
     sku: 'HP1',
     mpn: 'MPN-HP1',
@@ -18,7 +18,7 @@ const CATALOGO = [
 
 vi.mock('@rr/providers/catalog', async () => {
   const actual = await vi.importActual<typeof import('@rr/providers/catalog')>('@rr/providers/catalog');
-  return { ...actual, getCatalog: () => CATALOGO };
+  return { ...actual, getCatalog: () => CATALOG };
 });
 
 vi.mock('@rr/providers/intcomex', () => ({

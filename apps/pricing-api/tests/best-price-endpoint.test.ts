@@ -1,23 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-const compararMock = vi.fn();
-const resolverClavesMock = vi.fn();
-const claveDeSkuMock = vi.fn();
-const hayAlgunCatalogoMock = vi.fn();
-const catalogosNoDisponiblesMock = vi.fn();
+const compareMock = vi.fn();
+const resolveKeysMock = vi.fn();
+const skuKeyMock = vi.fn();
+const hasAnyCatalogMock = vi.fn();
+const unavailableCatalogsMock = vi.fn();
 
 vi.mock('@rr/providers/comparator', () => ({
-  compareByKey: (...a: unknown[]) => compararMock(...a),
-  resolveKeys: (...a: unknown[]) => resolverClavesMock(...a),
-  skuKey: (...a: unknown[]) => claveDeSkuMock(...a),
-  hasAnyCatalog: () => hayAlgunCatalogoMock(),
-  unavailableCatalogs: () => catalogosNoDisponiblesMock(),
+  compareByKey: (...a: unknown[]) => compareMock(...a),
+  resolveKeys: (...a: unknown[]) => resolveKeysMock(...a),
+  skuKey: (...a: unknown[]) => skuKeyMock(...a),
+  hasAnyCatalog: () => hasAnyCatalogMock(),
+  unavailableCatalogs: () => unavailableCatalogsMock(),
 }));
 
 const { default: handler } = await import('../api/mejor-precio.js');
 
-const COMPARACION = {
+const COMPARISON = {
   clave: 'mpn1|hp',
   mpn: 'MPN1',
   marca: 'HP',
@@ -55,11 +55,11 @@ beforeEach(() => {
   vi.stubEnv('INTCOMEX_API_KEY', 'pub');
   vi.stubEnv('INTCOMEX_ACCESS_KEY', 'secret');
   vi.stubEnv('INTCOMEX_BASE_URL', 'https://x/');
-  compararMock.mockReset().mockResolvedValue(COMPARACION);
-  resolverClavesMock.mockReset().mockReturnValue(['mpn1|hp']);
-  claveDeSkuMock.mockReset().mockReturnValue({ estado: 'ok', clave: 'mpn1|hp' });
-  hayAlgunCatalogoMock.mockReset().mockReturnValue(true);
-  catalogosNoDisponiblesMock.mockReset().mockReturnValue([]);
+  compareMock.mockReset().mockResolvedValue(COMPARISON);
+  resolveKeysMock.mockReset().mockReturnValue(['mpn1|hp']);
+  skuKeyMock.mockReset().mockReturnValue({ estado: 'ok', clave: 'mpn1|hp' });
+  hasAnyCatalogMock.mockReset().mockReturnValue(true);
+  unavailableCatalogsMock.mockReset().mockReturnValue([]);
 });
 
 afterEach(() => {
@@ -71,7 +71,7 @@ describe('GET /mejor-precio', () => {
     const res = makeRes();
     await handler(makeReq({ mpn: 'MPN1' }), res);
     expect(res.statusCode).toBe(401);
-    expect(resolverClavesMock).not.toHaveBeenCalled();
+    expect(resolveKeysMock).not.toHaveBeenCalled();
   });
 
   it('devuelve 405 para metodos que no son GET', async () => {
@@ -105,21 +105,21 @@ describe('GET /mejor-precio', () => {
     await handler(makeReq({ mpn: 'MPN1' }, AUTH), res);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual(COMPARACION);
-    expect(compararMock).toHaveBeenCalledWith('mpn1|hp');
+    expect(res.body).toEqual(COMPARISON);
+    expect(compareMock).toHaveBeenCalledWith('mpn1|hp');
   });
 
   it('pasa la marca a la resolucion cuando viene', async () => {
     const res = makeRes();
     await handler(makeReq({ mpn: 'MPN1', marca: 'HP' }, AUTH), res);
-    expect(resolverClavesMock).toHaveBeenCalledWith('MPN1', 'HP');
+    expect(resolveKeysMock).toHaveBeenCalledWith('MPN1', 'HP');
   });
 
   it('resuelve por proveedor + sku', async () => {
     const res = makeRes();
     await handler(makeReq({ proveedor: 'intcomex', sku: 'A1' }, AUTH), res);
 
-    expect(claveDeSkuMock).toHaveBeenCalledWith('intcomex', 'A1');
+    expect(skuKeyMock).toHaveBeenCalledWith('intcomex', 'A1');
     expect(res.statusCode).toBe(200);
   });
 
@@ -132,17 +132,17 @@ describe('GET /mejor-precio', () => {
 
   // Elegir una marca por el consumidor es cotizarle un producto que no pidio.
   it('devuelve 409 ambiguo cuando el MPN existe bajo varias marcas', async () => {
-    resolverClavesMock.mockReturnValue(['98pt0g1299|trendnet', '98pt0g1299|msi']);
+    resolveKeysMock.mockReturnValue(['98pt0g1299|trendnet', '98pt0g1299|msi']);
     const res = makeRes();
     await handler(makeReq({ mpn: '98PT0G1299' }, AUTH), res);
 
     expect(res.statusCode).toBe(409);
     expect(res.body).toMatchObject({ error: 'ambiguo', marcas: ['trendnet', 'msi'] });
-    expect(compararMock).not.toHaveBeenCalled();
+    expect(compareMock).not.toHaveBeenCalled();
   });
 
   it('devuelve 404 cuando ningun proveedor tiene ese MPN', async () => {
-    resolverClavesMock.mockReturnValue([]);
+    resolveKeysMock.mockReturnValue([]);
     const res = makeRes();
     await handler(makeReq({ mpn: 'NOEXISTE' }, AUTH), res);
 
@@ -153,8 +153,8 @@ describe('GET /mejor-precio', () => {
   // Un catalogo caido no puede afirmar "nadie lo vende": ese proveedor no se
   // pudo consultar. El 404 tiene que decirlo, igual que ya lo hace el otro.
   it('devuelve 404 con incompleta cuando un catalogo no se pudo consultar', async () => {
-    resolverClavesMock.mockReturnValue([]);
-    catalogosNoDisponiblesMock.mockReturnValue([
+    resolveKeysMock.mockReturnValue([]);
+    unavailableCatalogsMock.mockReturnValue([
       { proveedor: 'tecnoglobal', error: 'catalogo_no_disponible', detail: 'no cargo' },
     ]);
     const res = makeRes();
@@ -169,8 +169,8 @@ describe('GET /mejor-precio', () => {
 
   // Sin ningun catalogo la respuesta no es "no existe", es "todavia no se".
   it('devuelve 503 cuando no hay ningun catalogo cargado', async () => {
-    resolverClavesMock.mockReturnValue([]);
-    hayAlgunCatalogoMock.mockReturnValue(false);
+    resolveKeysMock.mockReturnValue([]);
+    hasAnyCatalogMock.mockReturnValue(false);
     const res = makeRes();
     await handler(makeReq({ mpn: 'MPN1' }, AUTH), res);
 
@@ -179,14 +179,14 @@ describe('GET /mejor-precio', () => {
   });
 
   it('devuelve 503 cuando el catalogo de ese proveedor no esta cargado', async () => {
-    claveDeSkuMock.mockReturnValue({ estado: 'catalogo_no_disponible' });
+    skuKeyMock.mockReturnValue({ estado: 'catalogo_no_disponible' });
     const res = makeRes();
     await handler(makeReq({ proveedor: 'intcomex', sku: 'A1' }, AUTH), res);
     expect(res.statusCode).toBe(503);
   });
 
   it('devuelve 404 para un SKU que ese proveedor no conoce', async () => {
-    claveDeSkuMock.mockReturnValue({ estado: 'sku_desconocido' });
+    skuKeyMock.mockReturnValue({ estado: 'sku_desconocido' });
     const res = makeRes();
     await handler(makeReq({ proveedor: 'intcomex', sku: 'NOEXISTE' }, AUTH), res);
     expect(res.statusCode).toBe(404);
@@ -196,7 +196,7 @@ describe('GET /mejor-precio', () => {
   // Un 404 sugeriria que el producto no existe; existe, pero sin MPN o sin
   // marca no se puede comparar con nadie.
   it('devuelve 409 no_comparable para un producto sin clave de union', async () => {
-    claveDeSkuMock.mockReturnValue({ estado: 'no_comparable' });
+    skuKeyMock.mockReturnValue({ estado: 'no_comparable' });
     const res = makeRes();
     await handler(makeReq({ proveedor: 'intcomex', sku: 'A1' }, AUTH), res);
 
@@ -209,8 +209,8 @@ describe('GET /mejor-precio', () => {
   // existe". Devolver 404 aca le diria al cliente que no vendemos algo que si
   // vendemos, y sin reintento que lo corrija.
   it('devuelve 502 upstream conservando incompleta cuando fallaron todos los proveedores', async () => {
-    compararMock.mockResolvedValue({
-      ...COMPARACION,
+    compareMock.mockResolvedValue({
+      ...COMPARISON,
       mejor: null,
       ofertas: [],
       incompleta: [{ proveedor: 'ingram', error: 'upstream', detail: 'se cayo' }],
@@ -228,8 +228,8 @@ describe('GET /mejor-precio', () => {
   // Sin ofertas y sin nadie que fallara si es definitivo: se revisaron todos
   // los catalogos y ninguno lo vende.
   it('devuelve 404 not_found cuando nadie lo vende y nadie fallo', async () => {
-    compararMock.mockResolvedValue({
-      ...COMPARACION,
+    compareMock.mockResolvedValue({
+      ...COMPARISON,
       mejor: null,
       ofertas: [],
       incompleta: [],
@@ -245,8 +245,8 @@ describe('GET /mejor-precio', () => {
   // precio): reintentar no lo va a cambiar. Distinto de upstream, que si
   // amerita reintento. Nadie "fallo" aca, simplemente no hay precio.
   it('devuelve 404 (no 502) cuando la unica causa en incompleta es sin_precio', async () => {
-    compararMock.mockResolvedValue({
-      ...COMPARACION,
+    compareMock.mockResolvedValue({
+      ...COMPARISON,
       mejor: null,
       ofertas: [],
       incompleta: [{ proveedor: 'ingram', error: 'sin_precio', detail: 'precio 0' }],
@@ -264,8 +264,8 @@ describe('GET /mejor-precio', () => {
   // Con una causa transitoria de por medio, todavia vale la pena reintentar
   // aunque otra de las causas sea permanente.
   it('devuelve 502 cuando incompleta mezcla una causa transitoria con una permanente', async () => {
-    compararMock.mockResolvedValue({
-      ...COMPARACION,
+    compareMock.mockResolvedValue({
+      ...COMPARISON,
       mejor: null,
       ofertas: [],
       incompleta: [
@@ -283,8 +283,8 @@ describe('GET /mejor-precio', () => {
   // Las dos causas transitorias son independientes: catalogo_no_disponible
   // por si sola, sin upstream de por medio, tambien tiene que disparar 502.
   it('devuelve 502 cuando la unica causa transitoria es catalogo_no_disponible', async () => {
-    compararMock.mockResolvedValue({
-      ...COMPARACION,
+    compareMock.mockResolvedValue({
+      ...COMPARISON,
       mejor: null,
       ofertas: [],
       incompleta: [
@@ -302,8 +302,8 @@ describe('GET /mejor-precio', () => {
   });
 
   it('responde 200 aunque la comparacion sea parcial', async () => {
-    compararMock.mockResolvedValue({
-      ...COMPARACION,
+    compareMock.mockResolvedValue({
+      ...COMPARISON,
       incompleta: [{ proveedor: 'tecnoglobal', error: 'upstream', detail: 'cuota' }],
     });
     const res = makeRes();

@@ -12,13 +12,13 @@ import { ProviderError } from '@rr/domain/types';
 // handler nuevo puede devolver { message } o { error: 'Bad Request' } y toda
 // la suite sigue verde mientras el consumidor se rompe.
 
-const obtenerCatalogoMock = vi.fn();
+const getCatalogMock = vi.fn();
 const getPricesMock = vi.fn();
 const getPriceMock = vi.fn();
 
 vi.mock('@rr/providers/catalog', async () => {
   const actual = await vi.importActual<typeof import('@rr/providers/catalog')>('@rr/providers/catalog');
-  return { ...actual, getCatalog: () => obtenerCatalogoMock() };
+  return { ...actual, getCatalog: () => getCatalogMock() };
 });
 
 vi.mock('@rr/providers/intcomex', () => ({
@@ -43,21 +43,21 @@ const { default: searchHandler } = await import('../api/search.js');
 const { default: productHandler } = await import('../api/product.js');
 const { default: facetasHandler } = await import('../api/facetas.js');
 const { default: priceHandler } = await import('../api/price.js');
-const { default: porRutaSearchHandler } = await import('../api/[proveedor]/search.js');
+const { default: searchByRouteHandler } = await import('../api/[proveedor]/search.js');
 const { default: mejorPrecioHandler } = await import('../api/mejor-precio.js');
 
 type Handler = (req: VercelRequest, res: VercelResponse) => Promise<void>;
 
 // Una clave con forma de secreto real: si algun handler la refleja en la
 // respuesta, el assert de fuga lo detecta.
-const SECRETO = 'k3y-de-prueba-no-filtrar';
-const AUTH = { 'x-api-key': SECRETO };
+const SECRET = 'k3y-de-prueba-no-filtrar';
+const AUTH = { 'x-api-key': SECRET };
 
-function producto(sku: string, nombre: string): NormalizedProduct {
+function makeProduct(sku: string, name: string): NormalizedProduct {
   return {
     sku,
     mpn: `MPN-${sku}`,
-    nombre,
+    nombre: name,
     marca: 'HP',
     categoria: 'Computadores',
     subcategorias: [],
@@ -83,145 +83,145 @@ function makeRes(): VercelResponse & { statusCode: number; body: any } {
   return res;
 }
 
-function catalogoSinCargar(): void {
-  obtenerCatalogoMock.mockImplementation(() => {
+function catalogNotLoaded(): void {
+  getCatalogMock.mockImplementation(() => {
     throw new CatalogUnavailableError();
   });
 }
 
-interface Caso {
-  nombre: string;
+interface Case {
+  name: string;
   handler: Handler;
   req: VercelRequest;
   status: number;
   error: string;
-  antes?: () => void;
+  before?: () => void;
 }
 
-const CASOS: Caso[] = [
+const CASES: Case[] = [
   // --- /api/price ---
-  { nombre: 'price sin x-api-key', handler: priceHandler, req: makeReq({ sku: 'HP1' }), status: 401, error: 'unauthorized' },
-  { nombre: 'price con x-api-key incorrecta', handler: priceHandler, req: makeReq({ sku: 'HP1' }, { 'x-api-key': 'nope' }), status: 401, error: 'unauthorized' },
-  { nombre: 'price sin identificador', handler: priceHandler, req: makeReq({}, AUTH), status: 400, error: 'bad_request' },
-  { nombre: 'price con dos identificadores', handler: priceHandler, req: makeReq({ sku: 'HP1', mpn: 'X' }, AUTH), status: 400, error: 'bad_request' },
-  { nombre: 'price con proveedor desconocido', handler: priceHandler, req: makeReq({ sku: 'HP1', provider: 'nadie' }, AUTH), status: 400, error: 'bad_request' },
+  { name: 'price sin x-api-key', handler: priceHandler, req: makeReq({ sku: 'HP1' }), status: 401, error: 'unauthorized' },
+  { name: 'price con x-api-key incorrecta', handler: priceHandler, req: makeReq({ sku: 'HP1' }, { 'x-api-key': 'nope' }), status: 401, error: 'unauthorized' },
+  { name: 'price sin identificador', handler: priceHandler, req: makeReq({}, AUTH), status: 400, error: 'bad_request' },
+  { name: 'price con dos identificadores', handler: priceHandler, req: makeReq({ sku: 'HP1', mpn: 'X' }, AUTH), status: 400, error: 'bad_request' },
+  { name: 'price con proveedor desconocido', handler: priceHandler, req: makeReq({ sku: 'HP1', provider: 'nadie' }, AUTH), status: 400, error: 'bad_request' },
   {
-    nombre: 'price cuando el proveedor no encuentra el producto',
+    name: 'price cuando el proveedor no encuentra el producto',
     handler: priceHandler,
     req: makeReq({ sku: 'HP1' }, AUTH),
     status: 404,
     error: 'not_found',
-    antes: () => getPriceMock.mockRejectedValue(new ProviderError('not_found', 'Product not found at Intcomex')),
+    before: () => getPriceMock.mockRejectedValue(new ProviderError('not_found', 'Product not found at Intcomex')),
   },
   {
-    nombre: 'price cuando el proveedor falla',
+    name: 'price cuando el proveedor falla',
     handler: priceHandler,
     req: makeReq({ sku: 'HP1' }, AUTH),
     status: 502,
     error: 'upstream',
-    antes: () => getPriceMock.mockRejectedValue(new ProviderError('upstream', 'Intcomex responded with HTTP 500')),
+    before: () => getPriceMock.mockRejectedValue(new ProviderError('upstream', 'Intcomex responded with HTTP 500')),
   },
   {
-    nombre: 'price ante un error inesperado',
+    name: 'price ante un error inesperado',
     handler: priceHandler,
     req: makeReq({ sku: 'HP1' }, AUTH),
     status: 502,
     error: 'upstream',
-    antes: () => getPriceMock.mockRejectedValue(new Error('ECONNRESET')),
+    before: () => getPriceMock.mockRejectedValue(new Error('ECONNRESET')),
   },
-  { nombre: 'price con metodo POST', handler: priceHandler, req: makeReq({ sku: 'HP1' }, AUTH, 'POST'), status: 405, error: 'method_not_allowed' },
+  { name: 'price con metodo POST', handler: priceHandler, req: makeReq({ sku: 'HP1' }, AUTH, 'POST'), status: 405, error: 'method_not_allowed' },
 
   // --- /api/search ---
-  { nombre: 'search sin x-api-key', handler: searchHandler, req: makeReq({ q: 'notebook' }), status: 401, error: 'unauthorized' },
-  { nombre: 'search sin q', handler: searchHandler, req: makeReq({}, AUTH), status: 400, error: 'bad_request' },
-  { nombre: 'search con q sin terminos buscables', handler: searchHandler, req: makeReq({ q: '---' }, AUTH), status: 400, error: 'bad_request' },
-  { nombre: 'search con limite invalido', handler: searchHandler, req: makeReq({ q: 'notebook', limite: '-1' }, AUTH), status: 400, error: 'bad_request' },
-  { nombre: 'search con precio_max invalido', handler: searchHandler, req: makeReq({ q: 'notebook', precio_max: 'abc' }, AUTH), status: 400, error: 'bad_request' },
+  { name: 'search sin x-api-key', handler: searchHandler, req: makeReq({ q: 'notebook' }), status: 401, error: 'unauthorized' },
+  { name: 'search sin q', handler: searchHandler, req: makeReq({}, AUTH), status: 400, error: 'bad_request' },
+  { name: 'search con q sin terminos buscables', handler: searchHandler, req: makeReq({ q: '---' }, AUTH), status: 400, error: 'bad_request' },
+  { name: 'search con limite invalido', handler: searchHandler, req: makeReq({ q: 'notebook', limite: '-1' }, AUTH), status: 400, error: 'bad_request' },
+  { name: 'search con precio_max invalido', handler: searchHandler, req: makeReq({ q: 'notebook', precio_max: 'abc' }, AUTH), status: 400, error: 'bad_request' },
   {
-    nombre: 'search con una consulta demasiado amplia',
+    name: 'search con una consulta demasiado amplia',
     handler: searchHandler,
     req: makeReq({ q: 'notebook' }, AUTH),
     status: 409,
     error: 'demasiado_amplio',
-    antes: () =>
-      obtenerCatalogoMock.mockReturnValue(
-        Array.from({ length: 30 }, (_, i) => producto(`S${i}`, `Notebook generico ${i}`)),
+    before: () =>
+      getCatalogMock.mockReturnValue(
+        Array.from({ length: 30 }, (_, i) => makeProduct(`S${i}`, `Notebook generico ${i}`)),
       ),
   },
-  { nombre: 'search con el catalogo sin cargar', handler: searchHandler, req: makeReq({ q: 'notebook' }, AUTH), status: 503, error: 'catalogo_no_disponible', antes: catalogoSinCargar },
+  { name: 'search con el catalogo sin cargar', handler: searchHandler, req: makeReq({ q: 'notebook' }, AUTH), status: 503, error: 'catalogo_no_disponible', before: catalogNotLoaded },
   {
-    nombre: 'search cuando el proveedor falla',
+    name: 'search cuando el proveedor falla',
     handler: searchHandler,
     req: makeReq({ q: 'notebook' }, AUTH),
     status: 502,
     error: 'upstream',
-    antes: () => getPricesMock.mockRejectedValue(new ProviderError('upstream', 'Intcomex responded with HTTP 500')),
+    before: () => getPricesMock.mockRejectedValue(new ProviderError('upstream', 'Intcomex responded with HTTP 500')),
   },
-  { nombre: 'search con metodo POST', handler: searchHandler, req: makeReq({ q: 'notebook' }, AUTH, 'POST'), status: 405, error: 'method_not_allowed' },
+  { name: 'search con metodo POST', handler: searchHandler, req: makeReq({ q: 'notebook' }, AUTH, 'POST'), status: 405, error: 'method_not_allowed' },
 
   // --- /api/product ---
-  { nombre: 'product sin x-api-key', handler: productHandler, req: makeReq({ sku: 'HP1' }), status: 401, error: 'unauthorized' },
-  { nombre: 'product sin sku', handler: productHandler, req: makeReq({}, AUTH), status: 400, error: 'bad_request' },
-  { nombre: 'product con un sku desconocido', handler: productHandler, req: makeReq({ sku: 'NOEXISTE' }, AUTH), status: 404, error: 'not_found' },
+  { name: 'product sin x-api-key', handler: productHandler, req: makeReq({ sku: 'HP1' }), status: 401, error: 'unauthorized' },
+  { name: 'product sin sku', handler: productHandler, req: makeReq({}, AUTH), status: 400, error: 'bad_request' },
+  { name: 'product con un sku desconocido', handler: productHandler, req: makeReq({ sku: 'NOEXISTE' }, AUTH), status: 404, error: 'not_found' },
   {
-    nombre: 'product cuando el proveedor no entrega precio',
+    name: 'product cuando el proveedor no entrega precio',
     handler: productHandler,
     req: makeReq({ sku: 'HP1' }, AUTH),
     status: 404,
     error: 'not_found',
-    antes: () => getPricesMock.mockResolvedValue(new Map()),
+    before: () => getPricesMock.mockResolvedValue(new Map()),
   },
-  { nombre: 'product con el catalogo sin cargar', handler: productHandler, req: makeReq({ sku: 'HP1' }, AUTH), status: 503, error: 'catalogo_no_disponible', antes: catalogoSinCargar },
+  { name: 'product con el catalogo sin cargar', handler: productHandler, req: makeReq({ sku: 'HP1' }, AUTH), status: 503, error: 'catalogo_no_disponible', before: catalogNotLoaded },
   {
-    nombre: 'product cuando el proveedor falla',
+    name: 'product cuando el proveedor falla',
     handler: productHandler,
     req: makeReq({ sku: 'HP1' }, AUTH),
     status: 502,
     error: 'upstream',
-    antes: () => getPricesMock.mockRejectedValue(new ProviderError('upstream', 'Intcomex responded with HTTP 500')),
+    before: () => getPricesMock.mockRejectedValue(new ProviderError('upstream', 'Intcomex responded with HTTP 500')),
   },
-  { nombre: 'product con metodo POST', handler: productHandler, req: makeReq({ sku: 'HP1' }, AUTH, 'POST'), status: 405, error: 'method_not_allowed' },
+  { name: 'product con metodo POST', handler: productHandler, req: makeReq({ sku: 'HP1' }, AUTH, 'POST'), status: 405, error: 'method_not_allowed' },
 
   // --- /api/facetas ---
-  { nombre: 'facetas sin x-api-key', handler: facetasHandler, req: makeReq({}), status: 401, error: 'unauthorized' },
-  { nombre: 'facetas con el catalogo sin cargar', handler: facetasHandler, req: makeReq({}, AUTH), status: 503, error: 'catalogo_no_disponible', antes: catalogoSinCargar },
-  { nombre: 'facetas con metodo POST', handler: facetasHandler, req: makeReq({}, AUTH, 'POST'), status: 405, error: 'method_not_allowed' },
+  { name: 'facetas sin x-api-key', handler: facetasHandler, req: makeReq({}), status: 401, error: 'unauthorized' },
+  { name: 'facetas con el catalogo sin cargar', handler: facetasHandler, req: makeReq({}, AUTH), status: 503, error: 'catalogo_no_disponible', before: catalogNotLoaded },
+  { name: 'facetas con metodo POST', handler: facetasHandler, req: makeReq({}, AUTH, 'POST'), status: 405, error: 'method_not_allowed' },
 
   // --- /api/{proveedor}/... ---
   // El prefijo 'search' no es decorativo: el test de cobertura de abajo deriva
   // el endpoint del primer token del nombre.
   {
-    nombre: 'search proveedor desconocido en la ruta',
-    handler: porRutaSearchHandler,
+    name: 'search proveedor desconocido en la ruta',
+    handler: searchByRouteHandler,
     req: makeReq({ proveedor: 'nadie', q: 'notebook' }, AUTH),
     status: 404,
     error: 'proveedor_desconocido',
   },
   {
-    nombre: 'search proveedor sin credenciales',
-    handler: porRutaSearchHandler,
+    name: 'search proveedor sin credenciales',
+    handler: searchByRouteHandler,
     req: makeReq({ proveedor: 'intcomex', q: 'notebook' }, AUTH),
     status: 503,
     error: 'proveedor_no_configurado',
-    antes: () => vi.stubEnv('INTCOMEX_API_KEY', ''),
+    before: () => vi.stubEnv('INTCOMEX_API_KEY', ''),
   },
 
   // --- /api/mejor-precio ---
-  { nombre: 'mejor-precio sin x-api-key', handler: mejorPrecioHandler, req: makeReq({ mpn: 'X' }), status: 401, error: 'unauthorized' },
-  { nombre: 'mejor-precio sin identificador', handler: mejorPrecioHandler, req: makeReq({}, AUTH), status: 400, error: 'bad_request' },
-  { nombre: 'mejor-precio con metodo POST', handler: mejorPrecioHandler, req: makeReq({ mpn: 'X' }, AUTH, 'POST'), status: 405, error: 'method_not_allowed' },
+  { name: 'mejor-precio sin x-api-key', handler: mejorPrecioHandler, req: makeReq({ mpn: 'X' }), status: 401, error: 'unauthorized' },
+  { name: 'mejor-precio sin identificador', handler: mejorPrecioHandler, req: makeReq({}, AUTH), status: 400, error: 'bad_request' },
+  { name: 'mejor-precio con metodo POST', handler: mejorPrecioHandler, req: makeReq({ mpn: 'X' }, AUTH, 'POST'), status: 405, error: 'method_not_allowed' },
 ];
 
 describe('contrato de errores de la API', () => {
   beforeEach(() => {
-    vi.stubEnv('API_SECRET_KEY', SECRETO);
+    vi.stubEnv('API_SECRET_KEY', SECRET);
     vi.stubEnv('INTCOMEX_API_KEY', 'pub');
     vi.stubEnv('INTCOMEX_ACCESS_KEY', 'secret');
     vi.stubEnv('INTCOMEX_BASE_URL', 'https://x/');
     // Silencia los console.error de los caminos 502, que son esperados aca.
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    obtenerCatalogoMock.mockReset().mockReturnValue([producto('HP1', 'HP ProBook 640 Notebook 14"')]);
+    getCatalogMock.mockReset().mockReturnValue([makeProduct('HP1', 'HP ProBook 640 Notebook 14"')]);
     getPricesMock.mockReset().mockResolvedValue(
       new Map([['HP1', { price: 1000, currency: 'us', inStock: 5 }]]),
     );
@@ -241,14 +241,14 @@ describe('contrato de errores de la API', () => {
     vi.restoreAllMocks();
   });
 
-  it.each(CASOS)('$nombre responde $status con el sobre { error, detail }', async (caso) => {
-    caso.antes?.();
+  it.each(CASES)('$name responde $status con el sobre { error, detail }', async (testCase) => {
+    testCase.before?.();
 
     const res = makeRes();
-    await caso.handler(caso.req, res);
+    await testCase.handler(testCase.req, res);
 
-    expect(res.statusCode).toBe(caso.status);
-    expect(res.body.error).toBe(caso.error);
+    expect(res.statusCode).toBe(testCase.status);
+    expect(res.body.error).toBe(testCase.error);
 
     // `error` es un codigo estable en snake_case, no una frase para humanos:
     // el consumidor ramifica sobre el.
@@ -259,11 +259,11 @@ describe('contrato de errores de la API', () => {
     expect(res.body.detail.length).toBeGreaterThan(0);
 
     // Ninguna respuesta de error puede devolver la clave de la API.
-    expect(JSON.stringify(res.body)).not.toContain(SECRETO);
+    expect(JSON.stringify(res.body)).not.toContain(SECRET);
   });
 
   it('cubre los cinco endpoints GET', () => {
-    const cubiertos = new Set(CASOS.map((c) => c.nombre.split(' ')[0]));
-    expect([...cubiertos].sort()).toEqual(['facetas', 'mejor-precio', 'price', 'product', 'search']);
+    const covered = new Set(CASES.map((c) => c.name.split(' ')[0]));
+    expect([...covered].sort()).toEqual(['facetas', 'mejor-precio', 'price', 'product', 'search']);
   });
 });

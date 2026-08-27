@@ -22,15 +22,15 @@ function brandFromKey(clave: string): string {
 // por defecto -el lado peligroso: una falla transitoria nueva quedaria
 // marcada como definitiva y el agente dejaria de reintentar algo que si
 // conviene.
-const ES_TRANSITORIA: Record<MissingProvider['error'], boolean> = {
+const IS_TRANSIENT: Record<MissingProvider['error'], boolean> = {
   catalogo_no_disponible: true,
   upstream: true,
   sin_precio: false,
   proveedor_no_configurado: false,
 };
 
-function esTransitoria(p: MissingProvider): boolean {
-  return ES_TRANSITORIA[p.error];
+function isTransient(p: MissingProvider): boolean {
+  return IS_TRANSIENT[p.error];
 }
 
 export function createBestPriceHandler(): Handler {
@@ -140,7 +140,7 @@ export function createBestPriceHandler(): Handler {
       // permanentes, no fallas de un momento. Solo si hay al menos una causa
       // transitoria (cuota, un 500 puntual, catalogo aun sin cargar) vale la
       // pena reintentar.
-      if (comparison.incompleta.some(esTransitoria)) {
+      if (comparison.incompleta.some(isTransient)) {
         res.status(502).json({
           error: 'upstream',
           detail: 'No se pudo cotizar con ningun proveedor',
