@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "check": "tsx --env-file=.env.local scripts/check.ts",
     "docs:vocabulario": "tsx --env-file=.env.local scripts/docs-vocabulario.ts",
-    "serve": "tsx --env-file=.env.local server.ts"
+    "serve": "tsx --env-file=.env.local server.ts",
+    "kapso:functions": "tsx --env-file=.env.local scripts/kapso-functions.ts",
+    "kapso:workflow": "tsx --env-file=.env.local scripts/kapso-workflow-v2.ts"
   },
   "devDependencies": {
     "@types/node": "^22",
