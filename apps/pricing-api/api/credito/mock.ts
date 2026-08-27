@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { isAuthorized } from '../../lib/auth.js';
+import { isAuthorized } from '../../src/auth.js';
 
 // MOCK. No consulta nada: siempre responde la misma linea de credito, sin
 // importar que RUT se pida. Existe para que el consumidor (agente de Kapso)

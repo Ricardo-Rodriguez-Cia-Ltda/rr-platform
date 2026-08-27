@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { fetchConTimeout } from '../../../lib/http.js';
+import { fetchConTimeout } from './http.js';
 import { normalizarMoneda } from '@rr/domain/currency';
 import type { ProductoNormalizado } from '@rr/domain/product';
 import type { PriceInfo, PriceQuery, PriceResult, Proveedor } from '@rr/domain/types';

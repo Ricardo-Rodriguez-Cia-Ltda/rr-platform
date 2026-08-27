@@ -1,8 +1,14 @@
+import { fileURLToPath } from 'node:url';
+
+// El caché vive en la raíz del repositorio, no dentro de la app: los tres
+// catalogos se comparten y bajarlos de nuevo cuesta cuota en Tecnoglobal.
+process.env.CATALOG_CACHE_DIR ??= fileURLToPath(new URL('../../cache', import.meta.url));
+
 import { cargarCatalogo } from '@rr/providers/catalog';
 import { PROVEEDORES } from '@rr/providers';
 import { MENSAJE_CUOTA } from '@rr/providers/tecnoglobal';
 import { proveedoresConfigurados, refrescarTodos } from '@rr/domain/refresh';
-import { createApp } from './lib/server.js';
+import { createApp } from './src/app.js';
 
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? '127.0.0.1';

@@ -33,7 +33,7 @@ vi.mock('@rr/providers/intcomex', () => ({
   },
 }));
 
-const { createApp } = await import('../lib/server.js');
+const { createApp } = await import('../src/app.js');
 
 const RESULT = {
   provider: 'intcomex',

@@ -4,8 +4,8 @@ import { CatalogUnavailableError, obtenerCatalogo } from '@rr/providers/catalog'
 import { buscar, calcularFacetas, tokenizar } from '@rr/domain/search';
 import type { Proveedor } from '@rr/domain/types';
 import { ProviderError } from '@rr/domain/types';
-import { resolverOResponder } from './guardas.js';
-import { firstString, type Handler } from './tipos.js';
+import { resolverOResponder } from './guards.js';
+import { firstString, type Handler } from './types.js';
 
 const UMBRAL_AMBIGUEDAD = 25;
 const LIMITE_POR_DEFECTO = 10;

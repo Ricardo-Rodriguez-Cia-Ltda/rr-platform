@@ -11,26 +11,27 @@ const README = readFileSync('docs/api/README.md', 'utf8');
 const OPENAPI = readFileSync('docs/api/openapi.yaml', 'utf8');
 const DOCS = `${README}\n${OPENAPI}`;
 
-// lib/server.ts es la fuente de verdad de que endpoints existen: de ahi salen
-// tanto las rutas a verificar como los archivos de api/ que hay que leer, asi
-// que un endpoint nuevo entra solo a todas las comprobaciones de abajo.
-const CODIGO_SERVIDOR = readFileSync('lib/server.ts', 'utf8');
+// apps/pricing-api/src/app.ts es la fuente de verdad de que endpoints existen:
+// de ahi salen tanto las rutas a verificar como los archivos de api/ que hay
+// que leer, asi que un endpoint nuevo entra solo a todas las comprobaciones
+// de abajo.
+const CODIGO_SERVIDOR = readFileSync('apps/pricing-api/src/app.ts', 'utf8');
 const RUTAS = [
   ...(/const nombres = \[([^\]]+)\]/.exec(CODIGO_SERVIDOR)?.[1] ?? '').matchAll(/'([a-z/-]+)'/g),
 ].map((m) => m[1]);
 
 // Los archivos de api/ son envoltorios de pocas lineas; la logica que la doc
-// tiene que reflejar vive en las fabricas de lib/handlers/.
+// tiene que reflejar vive en las fabricas de apps/pricing-api/src/handlers/.
 const IMPLEMENTACION: Record<string, string> = {
-  search: 'lib/handlers/busqueda.ts',
-  product: 'lib/handlers/producto.ts',
-  facetas: 'lib/handlers/facetas.ts',
-  'mejor-precio': 'lib/handlers/mejor-precio.ts',
+  search: 'apps/pricing-api/src/handlers/search.ts',
+  product: 'apps/pricing-api/src/handlers/product.ts',
+  facetas: 'apps/pricing-api/src/handlers/facets.ts',
+  'mejor-precio': 'apps/pricing-api/src/handlers/best-price.ts',
 };
 
 const FUENTES_API = RUTAS.map((n) => ({
   nombre: n,
-  codigo: readFileSync(IMPLEMENTACION[n] ?? `api/${n}.ts`, 'utf8'),
+  codigo: readFileSync(IMPLEMENTACION[n] ?? `apps/pricing-api/api/${n}.ts`, 'utf8'),
 }));
 
 // Solo la seccion paths: components tiene sus propias claves 'responses' y
@@ -82,7 +83,7 @@ function clavesDelLiteral(codigo: string, marca: string): string[] {
 }
 
 describe('docs/api sigue el codigo: rutas', () => {
-  it('lib/server.ts declara las rutas de forma reconocible', () => {
+  it('apps/pricing-api/src/app.ts declara las rutas de forma reconocible', () => {
     expect(RUTAS.length).toBeGreaterThan(3);
   });
 
@@ -232,7 +233,7 @@ describe('docs/api sigue el codigo: constantes citadas', () => {
     expect(codigoCatalogo).toContain('24 * 60 * 60 * 1000');
     expect(README).toContain('**24 horas**');
 
-    const codigoArranque = readFileSync('server.ts', 'utf8');
+    const codigoArranque = readFileSync('apps/pricing-api/server.ts', 'utf8');
     expect(codigoArranque).toContain('5 * 60 * 1000');
     expect(README).toContain('**5 minutos**');
   });

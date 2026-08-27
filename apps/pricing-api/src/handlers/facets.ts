@@ -3,8 +3,8 @@ import { isAuthorized } from '../auth.js';
 import { CatalogUnavailableError, obtenerCatalogo } from '@rr/providers/catalog';
 import { calcularFacetas } from '@rr/domain/search';
 import type { Proveedor } from '@rr/domain/types';
-import { resolverOResponder } from './guardas.js';
-import { firstString, type Handler } from './tipos.js';
+import { resolverOResponder } from './guards.js';
+import { firstString, type Handler } from './types.js';
 
 export function crearHandlerFacetas(proveedor: Proveedor): Handler {
   return async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {

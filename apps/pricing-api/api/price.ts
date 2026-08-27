@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { isAuthorized } from '../lib/auth.js';
+import { isAuthorized } from '../src/auth.js';
 import { PROVEEDORES } from '@rr/providers';
 import { ProviderError } from '@rr/domain/types';
 

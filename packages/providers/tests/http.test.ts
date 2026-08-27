@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { fetchConTimeout, timeoutProveedor } from '../lib/http.js';
+import { fetchConTimeout, timeoutProveedor } from '../src/http.js';
 
 // Un servidor que acepta la conexion y nunca contesta: es el proveedor
 // colgado, que es distinto del proveedor caido. El caido ya estaba cubierto

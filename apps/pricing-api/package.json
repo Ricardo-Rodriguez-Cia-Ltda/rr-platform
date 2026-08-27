@@ -1,0 +1,11 @@
+{
+  "name": "@rr/pricing-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "serve": "tsx --env-file=../../.env.local server.ts",
+    "check": "tsx --env-file=../../.env.local scripts/check.ts",
+    "docs:vocabulario": "tsx --env-file=../../.env.local scripts/docs-vocabulario.ts"
+  }
+}

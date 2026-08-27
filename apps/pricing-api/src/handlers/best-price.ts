@@ -8,8 +8,8 @@ import {
   resolverClaves,
   type ProveedorAusente,
 } from '@rr/providers/comparator';
-import { resolverOResponder } from './guardas.js';
-import { firstString, type Handler } from './tipos.js';
+import { resolverOResponder } from './guards.js';
+import { firstString, type Handler } from './types.js';
 
 /** La marca que sigue al separador de la clave de union. */
 function marcaDeClave(clave: string): string {
