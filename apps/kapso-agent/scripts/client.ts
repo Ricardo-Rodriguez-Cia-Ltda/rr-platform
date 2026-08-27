@@ -1,21 +1,21 @@
 const BASE = 'https://api.kapso.ai/platform/v1';
 
-export interface Opciones {
-  metodo?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
-  cuerpo?: unknown;
+export interface Options {
+  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  body?: unknown;
 }
 
-export async function kapso<T = unknown>(ruta: string, opciones: Opciones = {}): Promise<T> {
-  const clave = process.env.KAPSO_API_KEY;
-  if (!clave) throw new Error('Falta KAPSO_API_KEY. Corre con `npm run kapso:functions`, que carga .env.local.');
+export async function kapso<T = unknown>(path: string, options: Options = {}): Promise<T> {
+  const apiKey = process.env.KAPSO_API_KEY;
+  if (!apiKey) throw new Error('Falta KAPSO_API_KEY. Corre con `npm run kapso:functions`, que carga .env.local.');
 
-  const respuesta = await fetch(`${BASE}${ruta}`, {
-    method: opciones.metodo ?? 'GET',
-    headers: { 'X-API-Key': clave, 'Content-Type': 'application/json' },
-    body: opciones.cuerpo === undefined ? undefined : JSON.stringify(opciones.cuerpo),
+  const response = await fetch(`${BASE}${path}`, {
+    method: options.method ?? 'GET',
+    headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
   });
 
-  const texto = await respuesta.text();
-  if (!respuesta.ok) throw new Error(`${opciones.metodo ?? 'GET'} ${ruta} → ${respuesta.status}: ${texto.slice(0, 400)}`);
-  return texto ? (JSON.parse(texto) as T) : (undefined as T);
+  const text = await response.text();
+  if (!response.ok) throw new Error(`${options.method ?? 'GET'} ${path} → ${response.status}: ${text.slice(0, 400)}`);
+  return text ? (JSON.parse(text) as T) : (undefined as T);
 }

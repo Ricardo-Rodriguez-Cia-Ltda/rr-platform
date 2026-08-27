@@ -3,41 +3,41 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { kapso } from './client.js';
 
-const RAIZ_APP = fileURLToPath(new URL('..', import.meta.url));
+const APP_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
-interface Funcion { id: string; name: string; }
+interface KapsoFunction { id: string; name: string; }
 interface Workflow { id: string; name: string; slug: string; }
 
-const MODELO = '8c6d57df-3f07-4290-b8a5-38047608c4df';  // claude-haiku-4-5, el mismo de v1
+const MODEL = '8c6d57df-3f07-4290-b8a5-38047608c4df';  // claude-haiku-4-5, el mismo de v1
 
 // La version que se despliega es la que el propio directorio declara
 // `vigente`, no un `v-01` fijo: al subir un prompt lo unico que hay que tocar
 // es la cabecera del archivo, y `tests/prompts.test.ts` ya garantiza que hay
 // como maximo una vigente por agente.
-function archivoVigente(agente: string): string {
-  const dir = join(RAIZ_APP, 'prompts', agente);
-  const vigentes = readdirSync(dir)
+function currentPromptFile(agent: string): string {
+  const dir = join(APP_ROOT, 'prompts', agent);
+  const current = readdirSync(dir)
     .filter((n) => /^v-\d+\.md$/.test(n))
     .filter((n) => /\| \*\*Estado\*\* \| vigente \|/.test(readFileSync(join(dir, n), 'utf8')));
 
-  if (vigentes.length !== 1) {
-    throw new Error(`${agente} tiene ${vigentes.length} versiones vigentes; tiene que haber exactamente una`);
+  if (current.length !== 1) {
+    throw new Error(`${agent} tiene ${current.length} versiones vigentes; tiene que haber exactamente una`);
   }
-  return join(dir, vigentes[0]);
+  return join(dir, current[0]);
 }
 
 // Solo el bloque delimitado va al system_prompt. La cabecera y las notas de
 // diseno son documentacion nuestra; en v1 se subio el archivo entero por error.
-function prompt(agente: string): string {
-  const ruta = archivoVigente(agente);
-  const archivo = readFileSync(ruta, 'utf8');
-  const bloque = /<!-- PROMPT:INICIO -->([\s\S]*?)<!-- PROMPT:FIN -->/.exec(archivo);
-  if (!bloque) throw new Error(`${ruta} no tiene delimitadores de prompt`);
-  console.log(`prompt ${agente}: ${ruta}`);
-  return bloque[1].trim();
+function prompt(agent: string): string {
+  const path = currentPromptFile(agent);
+  const file = readFileSync(path, 'utf8');
+  const block = /<!-- PROMPT:INICIO -->([\s\S]*?)<!-- PROMPT:FIN -->/.exec(file);
+  if (!block) throw new Error(`${path} no tiene delimitadores de prompt`);
+  console.log(`prompt ${agent}: ${path}`);
+  return block[1].trim();
 }
 
-function agente(id: string, x: number, y: number, texto: string, extra: Record<string, unknown> = {}) {
+function agentNode(id: string, x: number, y: number, text: string, extra: Record<string, unknown> = {}) {
   return {
     id,
     type: 'flow-node',
@@ -46,8 +46,8 @@ function agente(id: string, x: number, y: number, texto: string, extra: Record<s
       node_type: 'agent',
       display_name: id,
       config: {
-        system_prompt: texto,
-        provider_model_id: MODELO,
+        system_prompt: text,
+        provider_model_id: MODEL,
         temperature: 0,
         max_iterations: 20,
         message_delivery_mode: 'auto_send_assistant_text',
@@ -58,49 +58,49 @@ function agente(id: string, x: number, y: number, texto: string, extra: Record<s
   };
 }
 
-function fn(id: string, functionId: string, nombre: string, guardarEn: string, x: number, y: number) {
+function fn(id: string, functionId: string, name: string, saveTo: string, x: number, y: number) {
   return {
     id,
     type: 'flow-node',
     position: { x, y },
     data: {
       node_type: 'function',
-      display_name: `Function: ${nombre}`,
-      config: { function_id: functionId, function_name: nombre, save_response_to: guardarEn },
+      display_name: `Function: ${name}`,
+      config: { function_id: functionId, function_name: name, save_response_to: saveTo },
     },
   };
 }
 
-function decide(id: string, functionId: string, nombre: string, etiquetas: Array<[string, string]>, x: number, y: number) {
+function decide(id: string, functionId: string, name: string, labels: Array<[string, string]>, x: number, y: number) {
   return {
     id,
     type: 'flow-node',
     position: { x, y },
     data: {
       node_type: 'decide',
-      display_name: `Decide: ${nombre}`,
+      display_name: `Decide: ${name}`,
       config: {
         decision_type: 'function',
         function_id: functionId,
-        function_name: nombre,
-        conditions: etiquetas.map(([label, description]) => ({ label, description })),
+        function_name: name,
+        conditions: labels.map(([label, description]) => ({ label, description })),
       },
     },
   };
 }
 
 async function main() {
-  const { data: funciones } = await kapso<{ data: Funcion[] }>('/functions');
-  const id = (nombre: string) => {
-    const f = funciones.find((x) => x.name === nombre);
-    if (!f) throw new Error(`Falta la function ${nombre}. Corre antes: npm run kapso:functions`);
+  const { data: functions } = await kapso<{ data: KapsoFunction[] }>('/functions');
+  const id = (name: string) => {
+    const f = functions.find((x) => x.name === name);
+    if (!f) throw new Error(`Falta la function ${name}. Corre antes: npm run kapso:functions`);
     return f.id;
   };
 
-  const nodos = [
+  const nodes = [
     { id: 'start', type: 'flow-node', position: { x: -700, y: 0 }, data: { node_type: 'start', display_name: 'Start', config: {} } },
 
-    agente('agente_descubrimiento', -480, 0, prompt('agente-descubrimiento'), {
+    agentNode('agente_descubrimiento', -480, 0, prompt('agente-descubrimiento'), {
       max_iterations: 40,
       enabled_default_tools: ['get_execution_metadata', 'get_variable', 'save_variable', 'enter_waiting', 'complete_task', 'handoff_to_human'],
       flow_agent_function_tools: [{
@@ -124,13 +124,13 @@ async function main() {
     }),
 
     fn('fn_cotizar', id('generar-cotizacion-v2'), 'generar-cotizacion-v2', 'quote_function_response', -260, 0),
-    agente('agente_presentacion', -40, 0, prompt('agente-presentacion')),
+    agentNode('agente_presentacion', -40, 0, prompt('agente-presentacion')),
     decide('route_decision', id('route-quote-decision-v2'), 'route-quote-decision-v2', [
       ['accepted', 'El cliente acepta la cotización'],
       ['rejected', 'El cliente rechaza o pide cambios'],
     ], 180, 0),
 
-    agente('agente_facturacion', 400, 120, prompt('agente-facturacion')),
+    agentNode('agente_facturacion', 400, 120, prompt('agente-facturacion')),
     fn('fn_validar_rut', id('validar-rut'), 'validar-rut', 'rut_validation_response', 620, 120),
     decide('route_rut', id('route-rut-v2'), 'route-rut-v2', [
       ['valid', 'RUT válido'],
@@ -142,7 +142,7 @@ async function main() {
       ['expired', 'La cotización expiró y debe recalcularse'],
     ], 1060, 120),
 
-    agente('agente_cierre', 1280, 120, prompt('agente-cierre'), {
+    agentNode('agente_cierre', 1280, 120, prompt('agente-cierre'), {
       max_iterations: 30,
       enabled_default_tools: ['get_execution_metadata', 'get_whatsapp_context', 'get_variable', 'save_variable', 'enter_waiting', 'complete_task', 'handoff_to_human'],
     }),
@@ -172,7 +172,7 @@ async function main() {
     { id: 'handoff_fin', type: 'flow-node', position: { x: 1940, y: 120 }, data: { node_type: 'handoff', display_name: 'Handoff', config: { reason: 'Pedido cursado, órdenes de compra emitidas' } } },
   ];
 
-  const aristas = [
+  const edges = [
     { source: 'start', target: 'agente_descubrimiento', label: 'next' },
     { source: 'agente_descubrimiento', target: 'fn_cotizar', label: 'next' },
     { source: 'fn_cotizar', target: 'agente_presentacion', label: 'next' },
@@ -190,28 +190,28 @@ async function main() {
     { source: 'send_confirmacion', target: 'handoff_fin', label: 'next' },
   ];
 
-  const { data: existentes } = await kapso<{ data: Workflow[] }>('/workflows');
-  const previo = existentes.find((w) => w.slug === 'rr-isia-version2');
+  const { data: existing } = await kapso<{ data: Workflow[] }>('/workflows');
+  const previous = existing.find((w) => w.slug === 'rr-isia-version2');
 
-  if (previo) {
-    const { data: meta } = await kapso<{ data: { lock_version: number } }>(`/workflows/${previo.id}`);
-    await kapso(`/workflows/${previo.id}`, {
-      metodo: 'PATCH',
-      cuerpo: { workflow: { lock_version: meta.lock_version, definition: { nodes: nodos, edges: aristas } } },
+  if (previous) {
+    const { data: meta } = await kapso<{ data: { lock_version: number } }>(`/workflows/${previous.id}`);
+    await kapso(`/workflows/${previous.id}`, {
+      method: 'PATCH',
+      body: { workflow: { lock_version: meta.lock_version, definition: { nodes, edges } } },
     });
-    console.log(`workflow actualizado: ${previo.id}`);
+    console.log(`workflow actualizado: ${previous.id}`);
     return;
   }
 
   const { data } = await kapso<{ data: Workflow }>('/workflows', {
-    metodo: 'POST',
-    cuerpo: {
+    method: 'POST',
+    body: {
       workflow: {
         name: 'rr-isia-version2',
         slug: 'rr-isia-version2',
         description: 'Cotiza con el mejor precio entre los tres mayoristas y emite una orden de compra por mayorista.',
         status: 'draft',
-        definition: { nodes: nodos, edges: aristas },
+        definition: { nodes, edges },
       },
     },
   });

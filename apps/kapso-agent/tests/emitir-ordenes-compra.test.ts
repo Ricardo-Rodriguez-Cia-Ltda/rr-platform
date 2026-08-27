@@ -1,16 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cargarHandler, peticion } from './load.js';
+import { loadHandler, request } from './load.js';
 
-const handler = cargarHandler('apps/kapso-agent/functions/emitir-ordenes-compra.js');
+const handler = loadHandler('apps/kapso-agent/functions/emitir-ordenes-compra.js');
 
-const MINUTO = 60_000;
+const MINUTE = 60_000;
 
 // D1 falso: guarda filas en un Map y respeta la primary key, que es de donde
 // sale la idempotencia real. `fallaInsert` permite simular un INSERT que
 // revienta por algo que NO es la clave duplicada (D1 caida, tabla bloqueada):
 // ahi el SELECT no encuentra nada y la reserva idempotente no ocurrio.
-function faseD1(opciones: { fallaInsert?: (clave: string) => boolean } = {}) {
-  const filas = new Map<string, Record<string, unknown>>();
+function fakeD1(options: { failInsert?: (key: string) => boolean } = {}) {
+  const rows = new Map<string, Record<string, unknown>>();
   const db = {
     prepare(sql: string) {
       return {
@@ -19,13 +19,13 @@ function faseD1(opciones: { fallaInsert?: (clave: string) => boolean } = {}) {
             async run() {
               if (sql.startsWith('CREATE')) return { success: true };
               if (sql.startsWith('INSERT')) {
-                const clave = String(args[0]);
-                if (opciones.fallaInsert?.(clave)) throw new Error('D1_ERROR: database is locked');
-                if (filas.has(clave)) throw new Error('UNIQUE constraint failed');
+                const key = String(args[0]);
+                if (options.failInsert?.(key)) throw new Error('D1_ERROR: database is locked');
+                if (rows.has(key)) throw new Error('UNIQUE constraint failed');
                 // El status va literal en el SQL ('processing'); los bind son
                 // order_key, po_id, quote_id, version, proveedor, created_at, updated_at.
-                filas.set(clave, {
-                  order_key: clave,
+                rows.set(key, {
+                  order_key: key,
                   po_id: args[1],
                   quote_id: args[2],
                   quote_version: args[3],
@@ -39,18 +39,18 @@ function faseD1(opciones: { fallaInsert?: (clave: string) => boolean } = {}) {
               if (sql.startsWith('UPDATE')) {
                 // En los tres UPDATE de la function el ultimo bind es la clave
                 // y el penultimo el updated_at.
-                const clave = String(args[args.length - 1]);
-                const fila = filas.get(clave);
-                if (fila) {
-                  fila.status = sql.includes("'sent'") ? 'sent' : sql.includes("'failed'") ? 'failed' : 'processing';
-                  fila.updated_at = args[args.length - 2];
+                const key = String(args[args.length - 1]);
+                const row = rows.get(key);
+                if (row) {
+                  row.status = sql.includes("'sent'") ? 'sent' : sql.includes("'failed'") ? 'failed' : 'processing';
+                  row.updated_at = args[args.length - 2];
                 }
                 return { success: true };
               }
               return { success: true };
             },
             async first() {
-              return filas.get(String(args[0])) ?? null;
+              return rows.get(String(args[0])) ?? null;
             },
           };
         },
@@ -58,7 +58,7 @@ function faseD1(opciones: { fallaInsert?: (clave: string) => boolean } = {}) {
       };
     },
   };
-  return { db, filas };
+  return { db, rows };
 }
 
 const quote = {
@@ -78,7 +78,7 @@ const quote = {
 
 // Cada llamada a env() estrena una base: la idempotencia se prueba compartiendo
 // el MISMO entorno entre dos invocaciones, no reusandolo por accidente.
-const env = (db: unknown = faseD1().db) => ({
+const env = (db: unknown = fakeD1().db) => ({
   MARGEN: '0.13',
   RESEND_API_KEY: 'key',
   RESEND_FROM_EMAIL: 'ordenes@rr.cl',
@@ -96,26 +96,26 @@ function resendOk() {
   return spy;
 }
 
-function cuerpos(spy: ReturnType<typeof resendOk>): string[] {
+function bodies(spy: ReturnType<typeof resendOk>): string[] {
   return spy.mock.calls.map((c: any[]) => String((c[1] as RequestInit).body));
 }
 
-async function emitir(entorno: Record<string, unknown>, extra: Record<string, unknown> = {}) {
-  const res = await handler(peticion({ execution_context: { vars: vars(extra) } }), entorno);
-  return { res, datos: (await res.json()) as any };
+async function issue(environment: Record<string, unknown>, extra: Record<string, unknown> = {}) {
+  const res = await handler(request({ execution_context: { vars: vars(extra) } }), environment);
+  return { res, data: (await res.json()) as any };
 }
 
 // Recorre recursivamente un valor visitando cada par (clave, valor). Es lo
 // unico que detecta una fuga de costo enterrada en un objeto anidado: una
 // lista de claves conocidas no ve lo que todavia no existe.
-function recorrer(valor: unknown, visita: (clave: string | null, v: unknown) => void, clave: string | null = null): void {
-  visita(clave, valor);
-  if (Array.isArray(valor)) {
-    for (const v of valor) recorrer(v, visita, clave);
+function walk(value: unknown, visit: (key: string | null, v: unknown) => void, key: string | null = null): void {
+  visit(key, value);
+  if (Array.isArray(value)) {
+    for (const v of value) walk(v, visit, key);
     return;
   }
-  if (valor && typeof valor === 'object') {
-    for (const [k, v] of Object.entries(valor as Record<string, unknown>)) recorrer(v, visita, k);
+  if (value && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) walk(v, visit, k);
   }
 }
 
@@ -124,35 +124,35 @@ afterEach(() => vi.unstubAllGlobals());
 describe('emitir-ordenes-compra', () => {
   it('emite una orden por mayorista', async () => {
     const spy = resendOk();
-    const { datos } = await emitir(env());
-    expect(datos.ok).toBe(true);
-    expect(datos.vars.purchase_orders_count).toBe(2);
+    const { data } = await issue(env());
+    expect(data.ok).toBe(true);
+    expect(data.vars.purchase_orders_count).toBe(2);
     expect(spy).toHaveBeenCalledTimes(2);
-    const proveedores = datos.vars.purchase_orders_result.map((o: { proveedor: string }) => o.proveedor).sort();
-    expect(proveedores).toEqual(['ingram', 'tecnoglobal']);
+    const providers = data.vars.purchase_orders_result.map((o: { proveedor: string }) => o.proveedor).sort();
+    expect(providers).toEqual(['ingram', 'tecnoglobal']);
   });
 
   it('agrupa las lineas del mismo mayorista en una sola orden', async () => {
     resendOk();
-    const { datos } = await emitir(env());
-    const ingram = datos.vars.purchase_orders_result.find((o: { proveedor: string }) => o.proveedor === 'ingram');
+    const { data } = await issue(env());
+    const ingram = data.vars.purchase_orders_result.find((o: { proveedor: string }) => o.proveedor === 'ingram');
     expect(ingram.lineas).toBe(2);
   });
 
   it('reconstruye el costo dividiendo por el margen', async () => {
     const spy = resendOk();
-    await emitir(env());
-    const cuerpo = JSON.parse(cuerpos(spy)[0]);
+    await issue(env());
+    const body = JSON.parse(bodies(spy)[0]);
     // 11.3 / 1.13 = 10.00
-    expect(cuerpo.text).toContain('10');
-    expect(cuerpo.text).not.toContain('11.3');
+    expect(body.text).toContain('10');
+    expect(body.text).not.toContain('11.3');
   });
 
   it('usa el sku del proveedor que gana, no el de Intcomex', async () => {
     const spy = resendOk();
-    await emitir(env());
-    const ingram = cuerpos(spy).find((c) => c.includes('ING-1'));
-    const tecno = cuerpos(spy).find((c) => c.includes('TG-9'));
+    await issue(env());
+    const ingram = bodies(spy).find((c) => c.includes('ING-1'));
+    const tecno = bodies(spy).find((c) => c.includes('TG-9'));
     expect(ingram).toBeDefined();
     expect(tecno).toBeDefined();
     // Una orden no puede arrastrar la linea del otro mayorista: eso seria
@@ -165,80 +165,80 @@ describe('emitir-ordenes-compra', () => {
 
   it('la segunda ejecucion no reenvia correos', async () => {
     const spy = resendOk();
-    const entorno = env();
-    await emitir(entorno);
+    const environment = env();
+    await issue(environment);
     expect(spy).toHaveBeenCalledTimes(2);
-    const { datos } = await emitir(entorno);
+    const { data } = await issue(environment);
     expect(spy).toHaveBeenCalledTimes(2);
-    expect(datos.vars.purchase_orders_result.every((o: { status: string }) => o.status === 'duplicate')).toBe(true);
+    expect(data.vars.purchase_orders_result.every((o: { status: string }) => o.status === 'duplicate')).toBe(true);
   });
 
   it('un correo caido no impide el otro', async () => {
-    let llamada = 0;
+    let calls = 0;
     vi.stubGlobal('fetch', vi.fn(async () => {
-      llamada += 1;
-      return llamada === 1
+      calls += 1;
+            return calls === 1
         ? new Response(JSON.stringify({ message: 'rate limited' }), { status: 429 })
         : new Response(JSON.stringify({ id: 'email-2' }), { status: 200 });
     }));
-    const { datos } = await emitir(env());
-    expect(datos.vars.purchase_orders_ok).toBe(false);
-    const estados = datos.vars.purchase_orders_result.map((o: { status: string }) => o.status).sort();
-    expect(estados).toEqual(['failed', 'sent']);
+    const { data } = await issue(env());
+    expect(data.vars.purchase_orders_ok).toBe(false);
+    const statuses = data.vars.purchase_orders_result.map((o: { status: string }) => o.status).sort();
+    expect(statuses).toEqual(['failed', 'sent']);
   });
 
   it('no emite sin confirmacion del cliente', async () => {
     resendOk();
-    const { res } = await emitir(env(), { quote_confirmed: false });
+    const { res } = await issue(env(), { quote_confirmed: false });
     expect(res.status).toBe(400);
   });
 
   it('no emite sin cotizacion', async () => {
     resendOk();
-    const res = await handler(peticion({ execution_context: { vars: { quote_confirmed: true } } }), env());
+    const res = await handler(request({ execution_context: { vars: { quote_confirmed: true } } }), env());
     expect(res.status).toBe(400);
   });
 
   it('un fetch lanzado no impide el otro y es reintentable', async () => {
-    let llamada = 0;
+    let calls = 0;
     vi.stubGlobal('fetch', vi.fn(async () => {
-      llamada += 1;
-      if (llamada === 1) throw new Error('Network timeout');
+      calls += 1;
+      if (calls === 1) throw new Error('Network timeout');
       return new Response(JSON.stringify({ id: 'email-3' }), { status: 200 });
     }));
-    const entorno = env();
-    const { datos } = await emitir(entorno);
-    expect(datos.vars.purchase_orders_ok).toBe(false);
-    let resultados = datos.vars.purchase_orders_result;
-    expect(resultados.some((o: { proveedor: string; status: string }) => o.proveedor === 'ingram' && o.status === 'failed')).toBe(true);
-    expect(resultados.some((o: { proveedor: string; status: string }) => o.proveedor === 'tecnoglobal' && o.status === 'sent')).toBe(true);
+    const environment = env();
+    const { data } = await issue(environment);
+    expect(data.vars.purchase_orders_ok).toBe(false);
+    let results = data.vars.purchase_orders_result;
+    expect(results.some((o: { proveedor: string; status: string }) => o.proveedor === 'ingram' && o.status === 'failed')).toBe(true);
+    expect(results.some((o: { proveedor: string; status: string }) => o.proveedor === 'tecnoglobal' && o.status === 'sent')).toBe(true);
 
     // Reintentar con el MISMO entorno: ingram (que estaba failed) se reintenta y queda sent;
     // tecnoglobal (que estaba sent) queda duplicate
     // (NO reiniciar llamada: el contador persiste, así ingram en la segunda invocación no lanza)
-    const { datos: datos2 } = await emitir(entorno);
-    resultados = datos2.vars.purchase_orders_result;
-    expect(resultados.some((o: { proveedor: string; status: string }) => o.proveedor === 'ingram' && o.status === 'sent')).toBe(true);
-    expect(resultados.some((o: { proveedor: string; status: string }) => o.proveedor === 'tecnoglobal' && o.status === 'duplicate')).toBe(true);
+    const { data: data2 } = await issue(environment);
+    results = data2.vars.purchase_orders_result;
+    expect(results.some((o: { proveedor: string; status: string }) => o.proveedor === 'ingram' && o.status === 'sent')).toBe(true);
+    expect(results.some((o: { proveedor: string; status: string }) => o.proveedor === 'tecnoglobal' && o.status === 'duplicate')).toBe(true);
   });
 
   // Hallazgo 1: la idempotencia no puede fallar abierta.
   describe('reserva idempotente', () => {
     it('no manda el correo si el INSERT falla por algo que no es la clave duplicada', async () => {
       const spy = resendOk();
-      const { db } = faseD1({ fallaInsert: (clave) => clave.endsWith(':ingram') });
-      const { datos } = await emitir(env(db));
+      const { db } = fakeD1({ failInsert: (key) => key.endsWith(':ingram') });
+      const { data } = await issue(env(db));
 
       // Sin fila persistida, cada reintento reenviaria la misma orden: hay que
       // abortar esa orden, no seguir hasta Resend.
-      expect(cuerpos(spy).some((c) => c.includes('ING-1'))).toBe(false);
+      expect(bodies(spy).some((c) => c.includes('ING-1'))).toBe(false);
       expect(spy).toHaveBeenCalledTimes(1);
-      expect(cuerpos(spy)[0]).toContain('TG-9');
+      expect(bodies(spy)[0]).toContain('TG-9');
 
-      const ingram = datos.vars.purchase_orders_result.find((o: { proveedor: string }) => o.proveedor === 'ingram');
+      const ingram = data.vars.purchase_orders_result.find((o: { proveedor: string }) => o.proveedor === 'ingram');
       expect(ingram.status).not.toBe('sent');
       expect(ingram.status).not.toBe('duplicate');
-      expect(datos.vars.purchase_orders_ok).toBe(false);
+      expect(data.vars.purchase_orders_ok).toBe(false);
     });
   });
 
@@ -247,16 +247,16 @@ describe('emitir-ordenes-compra', () => {
   describe('vigencia de la cotizacion', () => {
     it('no emite nada si la cotizacion expiro', async () => {
       const spy = resendOk();
-      const vencida = { ...quote, valid_until: new Date(Date.now() - MINUTO).toISOString() };
-      const res = await handler(peticion({ execution_context: { vars: vars({ quote_result: vencida }) } }), env());
+      const expiredQuote = { ...quote, valid_until: new Date(Date.now() - MINUTE).toISOString() };
+      const res = await handler(request({ execution_context: { vars: vars({ quote_result: expiredQuote }) } }), env());
       expect(res.status).toBe(409);
       expect(spy).not.toHaveBeenCalled();
     });
 
     it('no emite nada si la cotizacion no trae vigencia', async () => {
       const spy = resendOk();
-      const { valid_until: _omitida, ...sinVigencia } = quote;
-      const res = await handler(peticion({ execution_context: { vars: vars({ quote_result: sinVigencia }) } }), env());
+      const { valid_until: _validUntil, ...withoutValidity } = quote;
+      const res = await handler(request({ execution_context: { vars: vars({ quote_result: withoutValidity }) } }), env());
       expect(res.status).toBe(409);
       expect(spy).not.toHaveBeenCalled();
     });
@@ -264,9 +264,9 @@ describe('emitir-ordenes-compra', () => {
 
   // Hallazgo 3: una fila trabada en `processing` no puede reportarse como exito.
   describe('filas abandonadas en processing', () => {
-    const sembrar = (updatedAt: string) => {
-      const { db, filas } = faseD1();
-      filas.set('q-1:1:ingram', {
+    const seed = (updatedAt: string) => {
+      const { db, rows } = fakeD1();
+      rows.set('q-1:1:ingram', {
         order_key: 'q-1:1:ingram', po_id: 'oc-viejo', quote_id: 'q-1', quote_version: '1',
         proveedor: 'ingram', status: 'processing', created_at: updatedAt, updated_at: updatedAt,
       });
@@ -275,19 +275,19 @@ describe('emitir-ordenes-compra', () => {
 
     it('reintenta una fila processing que quedo vieja', async () => {
       const spy = resendOk();
-      const db = sembrar(new Date(Date.now() - 30 * MINUTO).toISOString());
-      const { datos } = await emitir(env(db));
-      expect(cuerpos(spy).some((c) => c.includes('ING-1'))).toBe(true);
-      const ingram = datos.vars.purchase_orders_result.find((o: { proveedor: string }) => o.proveedor === 'ingram');
+      const db = seed(new Date(Date.now() - 30 * MINUTE).toISOString());
+      const { data } = await issue(env(db));
+      expect(bodies(spy).some((c) => c.includes('ING-1'))).toBe(true);
+      const ingram = data.vars.purchase_orders_result.find((o: { proveedor: string }) => o.proveedor === 'ingram');
       expect(ingram.status).toBe('sent');
     });
 
     it('trata como duplicado una fila processing recien creada', async () => {
       const spy = resendOk();
-      const db = sembrar(new Date(Date.now() - MINUTO).toISOString());
-      const { datos } = await emitir(env(db));
-      expect(cuerpos(spy).some((c) => c.includes('ING-1'))).toBe(false);
-      const ingram = datos.vars.purchase_orders_result.find((o: { proveedor: string }) => o.proveedor === 'ingram');
+      const db = seed(new Date(Date.now() - MINUTE).toISOString());
+      const { data } = await issue(env(db));
+      expect(bodies(spy).some((c) => c.includes('ING-1'))).toBe(false);
+      const ingram = data.vars.purchase_orders_result.find((o: { proveedor: string }) => o.proveedor === 'ingram');
       expect(ingram.status).toBe('duplicate');
     });
   });
@@ -295,16 +295,16 @@ describe('emitir-ordenes-compra', () => {
   // Hallazgo 4: `quote_confirmed` la escribe un LLM con save_variable, asi que
   // puede llegar como cadena.
   describe('normalizacion de quote_confirmed', () => {
-    it.each([true, 'true', 'TRUE', ' true '])('emite con %p', async (valor) => {
+    it.each([true, 'true', 'TRUE', ' true '])('emite con %p', async (value) => {
       const spy = resendOk();
-      const { res } = await emitir(env(), { quote_confirmed: valor });
+      const { res } = await issue(env(), { quote_confirmed: value });
       expect(res.status).toBe(200);
       expect(spy).toHaveBeenCalledTimes(2);
     });
 
-    it.each([false, 'false', '', 'si', 'yes', '1', null, undefined])('no emite con %p', async (valor) => {
+    it.each([false, 'false', '', 'si', 'yes', '1', null, undefined])('no emite con %p', async (value) => {
       const spy = resendOk();
-      const { res } = await emitir(env(), { quote_confirmed: valor });
+      const { res } = await issue(env(), { quote_confirmed: value });
       expect(res.status).toBe(400);
       expect(spy).not.toHaveBeenCalled();
     });
@@ -313,46 +313,46 @@ describe('emitir-ordenes-compra', () => {
   // Hallazgo 5: la invariante del diseno es que ningun costo vive en una
   // variable que un `get_variable` pueda leer.
   describe('ningun costo sale de la function', () => {
-    const costos = () => {
-      const valores = new Set<number>();
-      const porProveedor = new Map<string, number>();
-      for (const linea of quote.lineas) {
-        const unitario = Math.round((linea.precio_unitario_usd / 1.13) * 100) / 100;
-        const total = Math.round(unitario * linea.cantidad * 100) / 100;
-        valores.add(unitario);
-        valores.add(total);
-        porProveedor.set(linea.proveedor, (porProveedor.get(linea.proveedor) ?? 0) + total);
+    const costs = () => {
+      const values = new Set<number>();
+      const byProvider = new Map<string, number>();
+      for (const line of quote.lineas) {
+        const unit = Math.round((line.precio_unitario_usd / 1.13) * 100) / 100;
+        const total = Math.round(unit * line.cantidad * 100) / 100;
+        values.add(unit);
+        values.add(total);
+        byProvider.set(line.proveedor, (byProvider.get(line.proveedor) ?? 0) + total);
       }
-      for (const total of porProveedor.values()) valores.add(Math.round(total * 100) / 100);
-      return valores;
+      for (const total of byProvider.values()) values.add(Math.round(total * 100) / 100);
+      return values;
     };
 
     it('ni las claves ni los valores de la respuesta llevan un costo', async () => {
       resendOk();
-      const { datos } = await emitir(env());
-      const prohibidos = costos();
-      expect(prohibidos.size).toBeGreaterThan(0);
+      const { data } = await issue(env());
+      const forbidden = costs();
+      expect(forbidden.size).toBeGreaterThan(0);
 
       // El nodo function guarda la respuesta COMPLETA en `purchase_orders_response`
       // (save_response_to), asi que el recorrido cubre el cuerpo entero, no solo `vars`.
-      recorrer(datos, (clave, valor) => {
-        if (clave) expect(clave, `la clave ${clave} suena a costo`).not.toMatch(/cost|_usd|margen|margin/i);
-        if (typeof valor === 'number') {
-          expect(prohibidos.has(valor), `el valor ${valor} es un costo reconstruido`).toBe(false);
+      walk(data, (key, value) => {
+        if (key) expect(key, `la clave ${key} suena a costo`).not.toMatch(/cost|_usd|margen|margin/i);
+        if (typeof value === 'number') {
+          expect(forbidden.has(value), `el valor ${value} es un costo reconstruido`).toBe(false);
         }
         // Una cadena que coacciona a un costo es el mismo dato con otra forma.
         // No se busca como substring: los ids y las fechas traen digitos y
         // darian falsos positivos.
-        if (typeof valor === 'string' && valor.trim() !== '') {
-          expect(prohibidos.has(Number(valor)), `el texto "${valor}" es un costo`).toBe(false);
+        if (typeof value === 'string' && value.trim() !== '') {
+          expect(forbidden.has(Number(value)), `el texto "${value}" es un costo`).toBe(false);
         }
       });
     });
 
     it('el correo si lleva el costo: ahi es donde tiene que estar', async () => {
       const spy = resendOk();
-      await emitir(env());
-      const ingram = cuerpos(spy).find((c) => c.includes('ING-1')) ?? '';
+      await issue(env());
+      const ingram = bodies(spy).find((c) => c.includes('ING-1')) ?? '';
       expect(ingram).toContain('10');
       expect(ingram).toContain('40');
     });
@@ -362,7 +362,7 @@ describe('emitir-ordenes-compra', () => {
   // precio de venta.
   it('rechaza un margen de cero', async () => {
     const spy = resendOk();
-    const { res } = await emitir({ ...env(), MARGEN: '' });
+    const { res } = await issue({ ...env(), MARGEN: '' });
     expect(res.status).toBe(500);
     expect(spy).not.toHaveBeenCalled();
   });

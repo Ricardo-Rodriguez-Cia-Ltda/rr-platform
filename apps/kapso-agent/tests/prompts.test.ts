@@ -6,124 +6,124 @@ import { describe, expect, it } from 'vitest';
 // prompts-rayo/ quedaron un v-02 marcado "vigente" y un v-03 sin estado, y no
 // hay forma de saber cual corria. Esto verifica el formato, no la prosa.
 
-const RAICES = ['apps/kapso-agent/prompts-v1', 'apps/kapso-agent/prompts'];
-const ESTADOS = ['vigente', 'reemplazado', 'borrador'];
+const ROOTS = ['apps/kapso-agent/prompts-v1', 'apps/kapso-agent/prompts'];
+const STATES = ['vigente', 'reemplazado', 'borrador'];
 
-const AGENTES = RAICES.flatMap((raiz) =>
-  readdirSync(raiz, { withFileTypes: true })
+const AGENTS = ROOTS.flatMap((root) =>
+  readdirSync(root, { withFileTypes: true })
     .filter((e) => e.isDirectory())
-    .map((e) => `${raiz}/${e.name}`)
+    .map((e) => `${root}/${e.name}`)
 );
 
 interface Version {
-  archivo: string;
-  contenido: string;
+  file: string;
+  content: string;
 }
 
-function versionesDe(agente: string): Version[] {
-  return readdirSync(agente)
+function versionsOf(agent: string): Version[] {
+  return readdirSync(agent)
     .filter((n) => /^v-\d+\.md$/.test(n))
-    .map((archivo) => ({
-      archivo: `${agente}/${archivo}`,
-      contenido: readFileSync(`${agente}/${archivo}`, 'utf8'),
+    .map((file) => ({
+      file: `${agent}/${file}`,
+      content: readFileSync(`${agent}/${file}`, 'utf8'),
     }));
 }
 
-function campo(contenido: string, nombre: string): string | undefined {
-  return new RegExp(`\\| \\*\\*${nombre}\\*\\* \\| (.+?) \\|`).exec(contenido)?.[1]?.trim();
+function field(content: string, name: string): string | undefined {
+  return new RegExp(`\\| \\*\\*${name}\\*\\* \\| (.+?) \\|`).exec(content)?.[1]?.trim();
 }
 
-const TODAS = AGENTES.flatMap((a) => versionesDe(a).map((v) => ({ ...v, agente: a })));
+const ALL = AGENTS.flatMap((a) => versionsOf(a).map((v) => ({ ...v, agent: a })));
 
 describe('estructura de apps/kapso-agent/prompts', () => {
   it('hay al menos un agente con versiones', () => {
-    expect(TODAS.length).toBeGreaterThan(0);
+    expect(ALL.length).toBeGreaterThan(0);
   });
 
   it('cada directorio de agente tiene al menos una version', () => {
-    for (const agente of AGENTES) {
-      expect(versionesDe(agente).length, `${agente} no tiene ningun v-NN.md`).toBeGreaterThan(0);
+    for (const agent of AGENTS) {
+      expect(versionsOf(agent).length, `${agent} no tiene ningun v-NN.md`).toBeGreaterThan(0);
     }
   });
 
   it('el README indexa cada directorio de agente', () => {
-    for (const agente of AGENTES) {
-      const raiz = agente.slice(0, agente.lastIndexOf('/'));
-      const nombre = agente.slice(agente.lastIndexOf('/') + 1);
-      const readme = readFileSync(`${raiz}/README.md`, 'utf8');
-      expect(readme, `falta ${nombre} en el indice de ${raiz}`).toContain(`${nombre}/`);
+    for (const agent of AGENTS) {
+      const root = agent.slice(0, agent.lastIndexOf('/'));
+      const name = agent.slice(agent.lastIndexOf('/') + 1);
+      const readme = readFileSync(`${root}/README.md`, 'utf8');
+      expect(readme, `falta ${name} en el indice de ${root}`).toContain(`${name}/`);
     }
   });
 });
 
 describe('cabecera de cada version', () => {
-  it.each(TODAS)('$archivo declara nodo, estado y fecha', ({ contenido }) => {
-    expect(campo(contenido, 'Nodo Kapso')).toBeTruthy();
-    expect(campo(contenido, 'Estado')).toBeTruthy();
-    expect(campo(contenido, 'Fecha')).toBeTruthy();
+  it.each(ALL)('$file declara nodo, estado y fecha', ({ content }) => {
+    expect(field(content, 'Nodo Kapso')).toBeTruthy();
+    expect(field(content, 'Estado')).toBeTruthy();
+    expect(field(content, 'Fecha')).toBeTruthy();
   });
 
-  it.each(TODAS)('$archivo usa un estado conocido', ({ contenido }) => {
-    expect(ESTADOS).toContain(campo(contenido, 'Estado'));
+  it.each(ALL)('$file usa un estado conocido', ({ content }) => {
+    expect(STATES).toContain(field(content, 'Estado'));
   });
 
-  it.each(TODAS)('$archivo tiene fecha AAAA-MM-DD', ({ contenido }) => {
-    expect(campo(contenido, 'Fecha')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  it.each(ALL)('$file tiene fecha AAAA-MM-DD', ({ content }) => {
+    expect(field(content, 'Fecha')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
-  it.each(TODAS)('$archivo explica que cambio', ({ contenido }) => {
-    expect(contenido).toContain('## Qué cambió');
+  it.each(ALL)('$file explica que cambio', ({ content }) => {
+    expect(content).toContain('## Qué cambió');
   });
 });
 
 describe('el prompt es extraible', () => {
-  it.each(TODAS)('$archivo delimita el prompt y no viene vacio', ({ contenido }) => {
-    const inicio = contenido.indexOf('<!-- PROMPT:INICIO -->');
-    const fin = contenido.indexOf('<!-- PROMPT:FIN -->');
+  it.each(ALL)('$file delimita el prompt y no viene vacio', ({ content }) => {
+    const start = content.indexOf('<!-- PROMPT:INICIO -->');
+    const end = content.indexOf('<!-- PROMPT:FIN -->');
 
-    expect(inicio, 'falta <!-- PROMPT:INICIO -->').toBeGreaterThan(-1);
-    expect(fin, 'falta <!-- PROMPT:FIN -->').toBeGreaterThan(inicio);
-    expect(contenido.slice(inicio, fin).trim().length).toBeGreaterThan(200);
+    expect(start, 'falta <!-- PROMPT:INICIO -->').toBeGreaterThan(-1);
+    expect(end, 'falta <!-- PROMPT:FIN -->').toBeGreaterThan(start);
+    expect(content.slice(start, end).trim().length).toBeGreaterThan(200);
   });
 
-  it.each(TODAS)('$archivo no usa ** ni # dentro del prompt de WhatsApp', ({ contenido }) => {
+  it.each(ALL)('$file no usa ** ni # dentro del prompt de WhatsApp', ({ content }) => {
     // Los prompts prohiben ** y # al agente porque WhatsApp los muestra
     // literales; los ejemplos dentro de bloques de codigo tienen que respetarlo
     // o le estamos ensenando lo contrario de lo que le pedimos.
-    const cuerpo = contenido.slice(
-      contenido.indexOf('<!-- PROMPT:INICIO -->'),
-      contenido.indexOf('<!-- PROMPT:FIN -->'),
+    const body = content.slice(
+      content.indexOf('<!-- PROMPT:INICIO -->'),
+      content.indexOf('<!-- PROMPT:FIN -->'),
     );
-    const ejemplos = [...cuerpo.matchAll(/```\n([\s\S]*?)```/g)].map((m) => m[1]);
-    for (const ejemplo of ejemplos) {
-      expect(ejemplo, 'un ejemplo usa ** o #').not.toMatch(/\*\*|^#/m);
+    const examples = [...body.matchAll(/```\n([\s\S]*?)```/g)].map((m) => m[1]);
+    for (const example of examples) {
+      expect(example, 'un ejemplo usa ** o #').not.toMatch(/\*\*|^#/m);
     }
   });
 });
 
 describe('un solo vigente por agente', () => {
-  it.each(AGENTES)('%s tiene como maximo una version vigente', (agente) => {
-    const vigentes = versionesDe(agente).filter((v) => campo(v.contenido, 'Estado') === 'vigente');
-    expect(vigentes.map((v) => v.archivo).length).toBeLessThanOrEqual(1);
+  it.each(AGENTS)('%s tiene como maximo una version vigente', (agent) => {
+    const current = versionsOf(agent).filter((v) => field(v.content, 'Estado') === 'vigente');
+    expect(current.map((v) => v.file).length).toBeLessThanOrEqual(1);
   });
 
   // En v2 no alcanza con "como maximo una": `scripts/deploy-workflow.ts`
   // elige el archivo a desplegar por esa marca, asi que cero vigentes rompe el
   // despliegue igual que dos.
-  it.each(AGENTES.filter((a) => a.startsWith('apps/kapso-agent/prompts/')))(
+  it.each(AGENTS.filter((a) => a.startsWith('apps/kapso-agent/prompts/')))(
     '%s tiene exactamente una version vigente, que es la que se despliega',
-    (agente) => {
-      const vigentes = versionesDe(agente).filter((v) => campo(v.contenido, 'Estado') === 'vigente');
-      expect(vigentes.map((v) => v.archivo)).toHaveLength(1);
+    (agent) => {
+      const current = versionsOf(agent).filter((v) => field(v.content, 'Estado') === 'vigente');
+      expect(current.map((v) => v.file)).toHaveLength(1);
     },
   );
 
-  it.each(AGENTES)('%s marca su version mas alta como vigente o borrador', (agente) => {
+  it.each(AGENTS)('%s marca su version mas alta como vigente o borrador', (agent) => {
     // Si la ultima version quedo como "reemplazado", alguien archivo la nueva y
     // no la escribio: el nodo estaria corriendo un prompt que ya declaramos viejo.
-    const versiones = versionesDe(agente).sort((a, b) => a.archivo.localeCompare(b.archivo));
-    const ultima = versiones[versiones.length - 1];
-    expect(campo(ultima.contenido, 'Estado'), `${ultima.archivo}`).not.toBe('reemplazado');
+    const versions = versionsOf(agent).sort((a, b) => a.file.localeCompare(b.file));
+    const last = versions[versions.length - 1];
+    expect(field(last.content, 'Estado'), `${last.file}`).not.toBe('reemplazado');
   });
 });
 
@@ -135,15 +135,15 @@ describe('un solo vigente por agente', () => {
 describe('reglas de v2 que no se pueden perder al subir una version', () => {
   it('el prompt vigente de agente_presentacion cubre la cotizacion ausente', () => {
     const dir = 'apps/kapso-agent/prompts/agente-presentacion';
-    const vigente = versionesDe(dir).find((v) => campo(v.contenido, 'Estado') === 'vigente');
-    if (!vigente) throw new Error(`${dir} no tiene version vigente`);
+    const current = versionsOf(dir).find((v) => field(v.content, 'Estado') === 'vigente');
+    if (!current) throw new Error(`${dir} no tiene version vigente`);
 
-    const cuerpo = vigente.contenido.slice(
-      vigente.contenido.indexOf('<!-- PROMPT:INICIO -->'),
-      vigente.contenido.indexOf('<!-- PROMPT:FIN -->'),
+    const body = current.content.slice(
+      current.content.indexOf('<!-- PROMPT:INICIO -->'),
+      current.content.indexOf('<!-- PROMPT:FIN -->'),
     );
-    expect(cuerpo, 'el prompt no menciona quote_result').toContain('quote_result');
-    expect(cuerpo, 'la cotizacion ausente no deriva a una persona').toContain('handoff_to_human');
-    expect(cuerpo, 'falta la regla de que quote_result puede venir vacia').toMatch(/vac[ií]a|null/i);
+    expect(body, 'el prompt no menciona quote_result').toContain('quote_result');
+    expect(body, 'la cotizacion ausente no deriva a una persona').toContain('handoff_to_human');
+    expect(body, 'falta la regla de que quote_result puede venir vacia').toMatch(/vac[ií]a|null/i);
   });
 });
