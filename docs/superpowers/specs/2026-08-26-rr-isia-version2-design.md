@@ -227,9 +227,11 @@ El componente nuevo. Lee `quote_result` y los datos de facturación.
 4. **Envía un correo por proveedor** vía Resend a la casilla interna, con asunto `OC <po_id> · <PROVEEDOR> · cotización <quote_id>`. Cuerpo: líneas con SKU **de ese proveedor**, MPN, cantidad, costo unitario y total USD; más el cliente, su RUT y razón social, y la nota de que el pago es contado.
 5. **Fallo parcial**: si un correo falla, esa fila queda `failed` y las demás igual se envían. La function responde `ok: true` con el detalle por proveedor. Un reintento (misma cotización y versión) reenvía solo las `failed`.
 
-Escribe: `purchase_orders_result` (resumen por proveedor: `proveedor`, `po_id`, `status`, `lineas`, `total_usd`), `purchase_orders_count`, `purchase_orders_ok` (booleano: todas enviadas).
+Escribe: `purchase_orders_result` (resumen por proveedor: `proveedor`, `po_id`, `status`, `lineas`), `purchase_orders_count`, `purchase_orders_ok` (booleano: todas enviadas).
 
-Si `quote_result` no existe, o `quote_confirmed` no es `true`, responde 400 sin emitir nada.
+> **Corrección posterior (revisión final, 2026-08-26).** El borrador de esta sección incluía `total_usd` en `purchase_orders_result`, y eso contradice la invariante de más arriba: `total_usd` es la suma de los costos reconstruidos, y `purchase_orders_result` es una variable del workflow que cualquier agente puede leer con `get_variable`. Se sacó del resumen —y del cuerpo de la respuesta, porque el nodo lo guarda entero en `purchase_orders_response`— y se quedó donde corresponde, en el correo de la orden de compra.
+
+Si `quote_result` no existe, o `quote_confirmed` no es `true` (se acepta el booleano `true` y la cadena `"true"`, porque esa variable la escribe el LLM), responde 400 sin emitir nada. Y si la cotización ya expiró, responde 409: `fn_check_validity` corre **antes** de `agente_cierre`, que es una conversación sin límite de tiempo, así que la vigencia se vuelve a revisar aquí, que es el último punto antes de emitir.
 
 ### Los cuatro agentes
 
