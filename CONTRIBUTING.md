@@ -26,7 +26,14 @@ repositorio, y renombrarlo rompe a un consumidor que no está en este código:
   la busca por nombre.
 - El texto de los prompts.
 
-**Dos excepciones que siguen en español dentro del código.** No son un
+**Donde la convención se ha aplicado:** `apps/pricing-api/src/`, `packages/domain/src/`
+y `packages/providers/src/` ya tienen identifiers en inglés. Terminarla en el
+resto del repositorio — especialmente en los tests — es trabajo pendiente, no
+una regla que nadie sigue. Es una invitación: renombrar a inglés lo que queda
+es su propio cambio, y hay que revisar qué tests dependen de cada nombre para
+no dejarlos en verde sin haber verificado nada.
+
+**Nueve excepciones que siguen en español dentro del código.** No son un
 descuido, son deliberadas:
 
 - `Cotizado`, `UMBRAL_AMBIGUEDAD`, `LIMITE_POR_DEFECTO`,
@@ -42,6 +49,11 @@ descuido, son deliberadas:
   respuesta, salvo que el consumidor es un archivo propio en vez de un
   cliente HTTP: renombrar una invalida todo caché ya escrito en disco (local
   y en el PC de oficina), y el próximo arranque no puede leerlo.
+- `nombres` — el array que declara `apps/pricing-api/src/app.ts` con la lista
+  de rutas. `tests/docs.test.ts` lo busca por regex (`/const nombres = \[/`)
+  para verificar que las rutas documentadas existan. Renombrarlo hace que el
+  test no encuentre nada y pase en verde sin haber revisado la documentación
+  contra el código.
 
 **Prosa en español.** Prompts, documentación, mensajes al cliente y
 comentarios. El negocio se piensa en español chileno.

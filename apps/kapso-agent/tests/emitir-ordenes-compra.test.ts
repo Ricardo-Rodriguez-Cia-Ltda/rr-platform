@@ -177,7 +177,7 @@ describe('emitir-ordenes-compra', () => {
     let calls = 0;
     vi.stubGlobal('fetch', vi.fn(async () => {
       calls += 1;
-            return calls === 1
+      return calls === 1
         ? new Response(JSON.stringify({ message: 'rate limited' }), { status: 429 })
         : new Response(JSON.stringify({ id: 'email-2' }), { status: 200 });
     }));
