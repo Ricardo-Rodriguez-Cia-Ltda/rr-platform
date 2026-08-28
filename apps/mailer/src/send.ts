@@ -1,14 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-// Ruta relativa temporal: Vercel no transpila paquetes del workspace que llegan por
-// node_modules (los trata como JS ya compilado); via ruta relativa entran al grafo de
-// codigo fuente que si transpila. Volver a '@rr/http/auth' cuando el paquete tenga build propio.
-import { isAuthorized } from '../../../packages/http/src/auth.js';
-// Ruta relativa temporal: mismo motivo que el import anterior. Volver a '@rr/http/http'
-// cuando el paquete tenga build propio.
-import { firstString } from '../../../packages/http/src/http.js';
-// Ruta relativa temporal: mismo motivo que los imports anteriores. Volver a '@rr/mailer'
-// cuando el paquete tenga build propio.
-import type { Mailer } from '../../../packages/mailer/src/index.js';
+import { isAuthorized } from '@rr/http/auth';
+import { firstString } from '@rr/http/http';
+import type { Mailer } from '@rr/mailer';
 
 // Extrae el codigo simbolico del error de nodemailer (EAUTH, ETIMEDOUT, ECONNECTION,
 // EDNS, etc.) sin tocar su mensaje, que puede traer la credencial. undefined si no hay codigo.

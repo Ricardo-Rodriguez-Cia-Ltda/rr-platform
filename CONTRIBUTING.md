@@ -22,6 +22,20 @@ consumidor sin fecha de vencimiento. Una excepción sin esta nota es una
 regla que cualquiera puede invocar para lo que sea; con ella, es una
 decisión concreta con una condición de salida.
 
+## Los paquetes se compilan
+
+`packages/*` se publica de dos formas a la vez. Su `exports` responde distinto según quién pregunte: `src/*.ts` a quien pida la condición `development`, `dist/*.js` a todos los demás.
+
+Las herramientas locales piden esa condición —`vitest` en `vitest.config.ts`, `tsx` en los scripts de `apps/pricing-api`, `tsc` con `customConditions` en el `tsconfig` raíz— así que siempre leen el código fuente. Vercel no la pide, y por eso recibe JavaScript: sus funciones tratan todo lo que llega por `node_modules` como código ya compilado, y un `.ts` ahí las hace fallar al arrancar.
+
+**Que las pruebas lean el fuente no es un detalle.** Si leyeran `dist/`, olvidar compilar antes de correrlas las haría pasar verdes contra código viejo — un resultado incorrecto que parece correcto.
+
+`dist/` no se versiona. Lo genera `npm run build:packages`, y cada app lo compila en su `buildCommand` de Vercel antes de desplegar.
+
+Un paquete nuevo necesita tres cosas: su `tsconfig.build.json` (con `customConditions: []`, para que al compilarlo resuelva las dependencias a `dist/` y no arrastre el fuente ajeno), su `exports` condicional, y una línea en `build:packages` **en el orden de dependencia correcto** — si importa a otro paquete, va después de él.
+
+Un **consumidor** nuevo —cualquier script que se corra con `tsx` e importe un `@rr/*`— necesita `--conditions=development` en su comando. Sin esa condición no falla: `tsx` resuelve en silencio a `dist/` y corre el JavaScript ya compilado, que puede estar desactualizado respecto al fuente que se está editando. Hoy los scripts de `apps/pricing-api` (`serve`, `check`, `docs:vocabulario`) llevan la condición porque importan paquetes del workspace; los de `apps/kapso-agent` no la necesitan porque no importan ningún `@rr/*`.
+
 ## Nombres
 
 **Inglés adentro, contratos externos intactos.** Archivos e identificadores

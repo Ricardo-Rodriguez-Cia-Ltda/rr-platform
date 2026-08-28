@@ -60,7 +60,7 @@ tests/
 | `apps/mailer` | El relé de correo que reemplazó a Resend | `POST /api/send`, autenticado y con lista blanca de destinatarios — ver [`apps/mailer/README.md`](apps/mailer/README.md) | Vercel (proyecto `rr-mailing`) |
 | `packages/domain` | Tipos y lógica de negocio pura: precio, producto normalizado, búsqueda/ranking, moneda | Módulos TypeScript (`@rr/domain/*`), sin I/O | No se despliega; lo importan `pricing-api` y `providers` |
 | `packages/providers` | Un módulo por mayorista que normaliza su API real a `NormalizedProduct` | El registro `PROVIDERS` (`@rr/providers`) | No se despliega; lo importa `pricing-api` |
-| `packages/mailer` | La interfaz `Mailer` y una implementación sobre el SMTP de Gmail (`nodemailer`) | `createMailer`, `createGmailTransport` (`@rr/mailer`) | No se despliega; lo importa `apps/mailer` (por ruta relativa hoy, ver su README) |
+| `packages/mailer` | La interfaz `Mailer` y una implementación sobre el SMTP de Gmail (`nodemailer`) | `createMailer`, `createGmailTransport` (`@rr/mailer`) | No se despliega; lo importa `apps/mailer` |
 | `packages/http` | Utilidades HTTP chicas compartidas entre apps de Vercel | `isAuthorized`, `firstString` (`@rr/http/*`) | No se despliega; lo importan `apps/mailer` y `apps/pricing-api` |
 | `infra/office-node` | Scripts de operación del servidor en el PC de oficina | Scripts de PowerShell (`install-autostart.ps1`, `verify-autostart.ps1`) | No se despliega; se ejecutan a mano en el PC de oficina |
 
@@ -76,6 +76,7 @@ npm run typecheck
 cp .env.example .env.local   # completar con credenciales reales
 npm run check -- <SKU>       # smoke test contra IWS test
 npm run docs:vocabulario     # regenera docs/api/vocabulario.md desde la API
+npm run build:packages       # compila packages/*; lo necesita vercel dev (npm test, typecheck y serve no)
 vercel dev                   # servidor local
 ```
 
