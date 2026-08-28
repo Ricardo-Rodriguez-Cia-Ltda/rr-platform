@@ -397,4 +397,19 @@ describe('emitir-ordenes-compra', () => {
     expect(res.status).toBe(500);
     expect(spy).not.toHaveBeenCalled();
   });
+
+  // Hallazgo final 5: la lista blanca del rele compara exacto contra un
+  // destino que si viene recortado del otro lado (apps/mailer/api/send.ts).
+  // Un OC_EMAIL_DESTINO con espacios pegados no puede convertirse en
+  // 403 destinatario_no_permitido.
+  it('envia igual con OC_EMAIL_DESTINO con espacios alrededor', async () => {
+    const spy = resendOk();
+    const { data } = await issue({ ...env(), OC_EMAIL_DESTINO: '  pyxis.latam@gmail.com  ' });
+    expect(data.ok).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(2);
+    for (const [, init] of spy.mock.calls as unknown as [string, RequestInit][]) {
+      const cuerpo = JSON.parse(String(init.body));
+      expect(cuerpo.to).toBe('pyxis.latam@gmail.com');
+    }
+  });
 });

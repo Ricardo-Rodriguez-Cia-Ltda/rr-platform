@@ -42,7 +42,11 @@ async function handler(request, env) {
   const margen = Number(env.MARGEN ?? "0.13");
   const mailerUrl = env.MAILER_URL;
   const mailerKey = env.MAILER_API_KEY;
-  const destino = String(env.OC_EMAIL_DESTINO || DESTINO_DEFAULT);
+  // .trim(): la lista blanca del rele compara contra valores que si vienen
+  // recortados de su lado (apps/mailer/api/send.ts). Un secreto de Kapso
+  // pegado con un espacio de mas convertiria todas las ordenes en
+  // 403 destinatario_no_permitido.
+  const destino = String(env.OC_EMAIL_DESTINO || DESTINO_DEFAULT).trim();
 
   // Mayor que cero: un secreto MARGEN vacio coacciona a 0 y dejaria el costo
   // reconstruido igual al precio de venta.
