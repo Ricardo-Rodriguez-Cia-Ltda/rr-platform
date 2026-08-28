@@ -69,9 +69,10 @@ const FUNCTIONS = [
   { name: 'buscar-productos-v2', secrets: ['API_PRECIOS_KEY', 'MARGEN'] },
   { name: 'generar-cotizacion-v2', secrets: ['API_PRECIOS_KEY', 'MARGEN', 'TIPO_CAMBIO_CLP_USD', 'IVA_RATE', 'COTIZACION_VALID_HOURS'] },
   { name: 'emitir-ordenes-compra', secrets: ['MARGEN', 'MAILER_URL', 'MAILER_API_KEY', 'OC_EMAIL_DESTINO'] },
-  { name: 'route-quote-decision-v2', secrets: [] },
-  { name: 'check-quote-validity-v2', secrets: [] },
-  { name: 'route-rut-v2', secrets: [] },
+  // Un solo router para los tres nodos `decide`. El plan de Kapso permite 5
+  // Workers desplegados y las cuatro de arriba ya ocupan cuatro; tres routers
+  // separados no caben. Ver el comentario de cabecera de router-v2.js.
+  { name: 'router-v2', secrets: [] },
 ] as const;
 
 const VALUES: Record<string, string> = {
@@ -178,7 +179,10 @@ async function main() {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/cloudflare_worker_script_limit_exceeded/.test(message)) {
-        console.log(`sin cupo     ${name} (queda en draft; los nodos "decide" del workflow corren asi)`);
+        // Ojo: `draft` NO es un estado funcional. Kapso responde
+        // 422 "Function is not deployed" al invocarla, asi que cualquier nodo
+        // que dependa de esta function deja la conversacion colgada.
+        console.log(`sin cupo     ${name} (queda en DRAFT y NO se puede invocar: los nodos que la usan van a fallar)`);
         withoutQuota.push(name);
       } else {
         throw error;

@@ -125,19 +125,19 @@ async function main() {
 
     fn('fn_cotizar', id('generar-cotizacion-v2'), 'generar-cotizacion-v2', 'quote_function_response', -260, 0),
     agentNode('agente_presentacion', -40, 0, prompt('agente-presentacion')),
-    decide('route_decision', id('route-quote-decision-v2'), 'route-quote-decision-v2', [
+    decide('route_decision', id('router-v2'), 'router-v2', [
       ['accepted', 'El cliente acepta la cotización'],
       ['rejected', 'El cliente rechaza o pide cambios'],
     ], 180, 0),
 
     agentNode('agente_facturacion', 400, 120, prompt('agente-facturacion')),
     fn('fn_validar_rut', id('validar-rut'), 'validar-rut', 'rut_validation_response', 620, 120),
-    decide('route_rut', id('route-rut-v2'), 'route-rut-v2', [
+    decide('route_rut', id('router-v2'), 'router-v2', [
       ['valid', 'RUT válido'],
       ['invalid', 'RUT inválido'],
     ], 840, 120),
 
-    decide('fn_check_validity', id('check-quote-validity-v2'), 'check-quote-validity-v2', [
+    decide('fn_check_validity', id('router-v2'), 'router-v2', [
       ['valid', 'La cotización sigue vigente'],
       ['expired', 'La cotización expiró y debe recalcularse'],
     ], 1060, 120),
