@@ -193,9 +193,11 @@ async function main() {
 
       for (const secret of secrets) {
         const value = VALUES[secret];
-        // MAILER_URL y MAILER_API_KEY no viven en .env.local, y la API de
-        // Kapso nunca devuelve valores. Se avisa y se sigue: abortar dejaria el
-        // despliegue a medias.
+        // Si `value` esta vacio es porque el operador no cargo esa variable en
+        // .env.local (ver el README): MAILER_URL y MAILER_API_KEY si viven ahi,
+        // igual que el resto. Y la API de Kapso nunca devuelve valores, asi que
+        // no hay forma de saber si ya esta cargado del otro lado. Se avisa y se
+        // sigue: abortar dejaria el despliegue a medias.
         if (!value) {
           pending.push(`${name}: ${secret} (sin valor de origen; queda como estuviera)`);
           continue;

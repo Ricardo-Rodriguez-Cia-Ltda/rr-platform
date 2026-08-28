@@ -4,8 +4,10 @@ Un endpoint HTTP, `POST /api/send`, que manda correo por el SMTP de Gmail.
 Reemplaza a Resend: Resend cobraba por un plan que no se quería, y hoy es
 esta app la que envía las órdenes de compra que emite
 `apps/kapso-agent/functions/emitir-ordenes-compra.js`. El proyecto de Vercel
-se llama `rr-mailing` (ver `apps/mailer/.vercel/project.json`), desplegado en
-`https://rr-mailing.vercel.app`.
+se llama `rr-mailing`, desplegado en `https://rr-mailing.vercel.app`. (El
+enlace local vive en `apps/mailer/.vercel/project.json`, pero ese archivo
+está en `.gitignore` y no existe en un clon nuevo hasta que se corre
+`vercel link`.)
 
 No sabe nada de mayoristas, cotizaciones ni de la base D1 del Worker que lo
 llama — solo recibe `{ to, subject, html, text }` autenticado, decide si
@@ -62,6 +64,12 @@ igual que `apps/pricing-api` — porque importa código de `packages/mailer` y
 `packages/http`, que viven fuera de `apps/mailer`.
 
 ### `vercel.json`: por qué tiene `installCommand`, `buildCommand` y `outputDirectory`
+
+Cita parcial — solo las tres claves que explica esta sección. El archivo
+real (`apps/mailer/vercel.json`) tiene además un bloque `functions` que le
+pone `maxDuration: 30` a `api/**/*.ts`; es lo único que acota un envío SMTP
+colgado (sin eso, una conexión a `smtp.gmail.com` que nunca responde dejaría
+la función corriendo hasta el límite por defecto de Vercel).
 
 ```json
 {

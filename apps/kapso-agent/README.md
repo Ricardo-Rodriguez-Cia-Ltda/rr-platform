@@ -210,8 +210,12 @@ ORDER BY updated_at DESC;
      el proyecto `rr-mailing` de Vercel. Falla para todas las órdenes.
    - `destinatario_no_permitido` → `OC_EMAIL_DESTINO` no está en la lista
      blanca (`MAILER_ALLOWED_RECIPIENTS`) del relé.
-   - `falta_configuracion` → al relé le falta una variable de entorno; el
-     mismo error trae `faltan` con los nombres.
+   - `falta_configuracion` → al relé le falta una variable de entorno. La
+     columna `error` de D1 solo guarda el literal `falta_configuracion`: el
+     Worker no persiste `faltan` (ver `emitir-ordenes-compra.js`, el `UPDATE`
+     que arma el mensaje de error). Para ver los nombres hay que llamar al
+     relé directamente (`POST /api/send` a `MAILER_URL` con el mismo cuerpo
+     que hubiera mandado el Worker) y leer `faltan` en esa respuesta.
    - `el_envio_fallo` con `codigo: EAUTH` → Gmail rechazó la contraseña de
      aplicación cargada en el relé (revocada o mal pegada).
    - `el_envio_fallo` con `codigo: ETIMEDOUT`/`ECONNECTION`, o sin
