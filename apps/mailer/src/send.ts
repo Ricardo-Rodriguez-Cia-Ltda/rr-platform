@@ -1,7 +1,14 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { isAuthorized } from '@rr/http/auth';
-import { firstString } from '@rr/http/http';
-import type { Mailer } from '@rr/mailer';
+// Ruta relativa temporal: Vercel no transpila paquetes del workspace que llegan por
+// node_modules (los trata como JS ya compilado); via ruta relativa entran al grafo de
+// codigo fuente que si transpila. Volver a '@rr/http/auth' cuando el paquete tenga build propio.
+import { isAuthorized } from '../../../packages/http/src/auth.js';
+// Ruta relativa temporal: mismo motivo que el import anterior. Volver a '@rr/http/http'
+// cuando el paquete tenga build propio.
+import { firstString } from '../../../packages/http/src/http.js';
+// Ruta relativa temporal: mismo motivo que los imports anteriores. Volver a '@rr/mailer'
+// cuando el paquete tenga build propio.
+import type { Mailer } from '../../../packages/mailer/src/index.js';
 
 export interface SendDeps {
   mailer: Mailer;
