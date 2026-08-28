@@ -1,5 +1,7 @@
 {
   "installCommand": "cd ../.. && npm ci",
+  "buildCommand": "echo 'sin paso de build: las funciones se compilan al desplegar'",
+  "outputDirectory": ".",
   "functions": {
     "api/**/*.ts": {
       "maxDuration": 30
