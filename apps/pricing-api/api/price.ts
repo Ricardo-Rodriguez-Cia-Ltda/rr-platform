@@ -1,11 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { isAuthorized } from '../src/auth.js';
+import { isAuthorized } from '@rr/http/auth';
+import { firstString } from '@rr/http/http';
 import { PROVIDERS } from '@rr/providers';
 import { ProviderError } from '@rr/domain/types';
-
-function firstString(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
 
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
   if (req.method && req.method !== 'GET') {

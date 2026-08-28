@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@rr/domain": "*",
+    "@rr/http": "*",
     "@rr/providers": "*"
   },
   "scripts": {

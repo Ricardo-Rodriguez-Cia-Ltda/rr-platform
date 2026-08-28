@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { isAuthorized } from '../auth.js';
+import { isAuthorized } from '@rr/http/auth';
 import {
   unavailableCatalogs,
   skuKey,
