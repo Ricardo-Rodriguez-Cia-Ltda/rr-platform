@@ -8,24 +8,25 @@ Functions y sale como precio de venta.
 
 - **Workflow:** `rr-isia-version2`
 - **id:** `f8fbe458-118e-4c0f-97d0-b24c2fbf151d`
-- **Estado a la fecha de este documento (2026-08-27):** `draft`, 13 nodos,
+- **Estado a la fecha de este documento (2026-08-28):** `active`, 13 nodos,
   15 aristas (verificado con `GET /workflows/{id}/definition`).
-- **No está activo.** Ver "Activación" más abajo.
+- **Los 7 nodos que invocan una function apuntan a functions `deployed`**, y el
+  cupo quedó en 5 de 5. Cualquier function nueva que haga falta desplegar exige
+  liberar cupo antes.
 
 ---
 
 ## Mapa de functions
 
-Obtenido de `GET /functions` el 2026-08-28. Los tres ejecutables están
-`deployed`; `router-v2` está `draft` por falta de cupo, y mientras siga así los
-tres nodos `decide` **no pueden ejecutar** (ver sección dedicada).
+Obtenido de `GET /functions` el 2026-08-28. Las cuatro están `deployed`, y con
+`validar-rut` ocupan las 5 del cupo (ver sección dedicada).
 
 | name | function_id | status | usado en el nodo |
 |---|---|---|---|
 | `buscar-productos-v2` | `1ff96971-215b-48a9-9a05-947df53796c6` | deployed | tool del agente `agente_descubrimiento` |
 | `generar-cotizacion-v2` | `6583d731-d5d6-4103-9615-9bc4695aec14` | deployed | `fn_cotizar` |
 | `emitir-ordenes-compra` | `af763c0e-5952-45e6-8eac-b5e5667c0eca` | deployed | `fn_emitir_ordenes` |
-| `router-v2` | `86b03e54-259a-4918-b84f-7fc871eede7f` | **draft** (sin cupo) | `route_decision`, `route_rut`, `fn_check_validity` |
+| `router-v2` | `86b03e54-259a-4918-b84f-7fc871eede7f` | deployed | `route_decision`, `route_rut`, `fn_check_validity` |
 
 Además, `fn_validar_rut` reutiliza la function de v1 `validar-rut`
 (`68eff91b-3be5-4dfa-bf5e-7f20b7eefed3`, `deployed`) — no tiene versión v2
@@ -402,23 +403,32 @@ Workers desplegados y el workflow necesita cuatro functions de trabajo
 `emitir-ordenes-compra`). Tres routers separados suman siete y no caben; uno
 suma cinco y cabe justo.
 
-### Lo que falta para que quede operativo
+### Cómo se liberó el cupo, y qué no se puede volver a tocar
 
-El cupo está en 5 de 5, así que `router-v2` quedó en `draft` y **los tres nodos
-`decide` siguen sin poder ejecutar**. Falta un solo paso, que es un borrado
-permanente y por eso no se hizo por cuenta propia:
-
-1. Borrar la function `send-quote-request-email` en Kapso. Es huérfana de
-   verdad: mandaba correo por Resend, que el repositorio ya no usa, y su único
-   workflow (`Rayo Perez`) ya no existe. Su código ya está respaldado, byte a byte, en
-   [`functions-v1-backup/send-quote-request-email.js`](functions-v1-backup/send-quote-request-email.js)
-   (comparado contra el código vivo el 2026-08-28), así que el borrado es
-   reversible.
-2. `npm run kapso:functions` — despliega `router-v2` en el cupo liberado.
-3. `npm run kapso:workflow` — reapunta los tres nodos `decide` al router.
+El cupo estaba en 5 de 5. Se liberó borrando `send-quote-request-email` el
+2026-08-28: mandaba correo por Resend, que el repositorio ya no usa, y su único
+workflow (`Rayo Perez`) ya no existe. Su código quedó respaldado byte a byte en
+[`functions-v1-backup/send-quote-request-email.js`](functions-v1-backup/send-quote-request-email.js)
+(comparado contra el código vivo antes de borrar), así que el borrado es
+reversible. Después, `npm run kapso:functions` y `npm run kapso:workflow`.
 
 **No borrar `validar-rut`**, aunque sea de v1: el nodo `fn_validar_rut` de v2 la
 usa. Es la única function de v1 que sigue viva.
+
+El cupo volvió a quedar en 5 de 5, sin holgura. Desplegar cualquier function
+nueva exige liberar cupo antes, y de las que quedan **ninguna sobra**.
+
+### Verificación del 2026-08-28
+
+- Los seis casos de ruteo, invocando el `router-v2` **desplegado**: cotización
+  aceptada/rechazada, cotización vigente/expirada, RUT válido/inválido. Los seis
+  devolvieron la arista correcta.
+- Los 7 nodos del grafo que invocan una function apuntan a functions
+  `deployed` (cruzando `GET /workflows/{id}/definition` contra `GET /functions`).
+- `emitir-ordenes-compra` invocada de punta a punta con una cotización de humo:
+  `{"ok":true,...,"status":"sent"}`. Eso prueba de paso que el
+  `MAILER_API_KEY` de Kapso y el del proyecto `rr-mailing` en Vercel coinciden —
+  si no, el relé habría respondido `401` y la orden habría quedado `failed`.
 
 ### La alternativa, si algún día no hay cupo
 
