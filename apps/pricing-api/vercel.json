@@ -1,4 +1,7 @@
 {
+  "installCommand": "cd ../.. && npm ci",
+  "buildCommand": "cd ../.. && npm run build:packages && cd apps/pricing-api && mkdir -p salida-vacia && printf 'captador-precios: solo funciones en /api, sin contenido estatico.' > salida-vacia/index.html",
+  "outputDirectory": "salida-vacia",
   "functions": {
     "api/**/*.ts": {
       "maxDuration": 30
