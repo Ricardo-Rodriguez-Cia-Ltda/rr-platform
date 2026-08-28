@@ -10,6 +10,14 @@ import { firstString } from '../../../packages/http/src/http.js';
 // cuando el paquete tenga build propio.
 import type { Mailer } from '../../../packages/mailer/src/index.js';
 
+// Extrae el codigo simbolico del error de nodemailer (EAUTH, ETIMEDOUT, ECONNECTION,
+// EDNS, etc.) sin tocar su mensaje, que puede traer la credencial. undefined si no hay codigo.
+function transportErrorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const code = (error as Record<string, unknown>).code;
+  return typeof code === 'string' ? code : undefined;
+}
+
 export interface SendDeps {
   mailer: Mailer;
   apiKey: string;
@@ -60,9 +68,12 @@ export function createSendHandler(deps: SendDeps) {
     try {
       const result = await deps.mailer.send(message);
       res.status(200).json({ ok: true, id: result.id });
-    } catch (_error) {
-      // El error del transporte puede traer la credencial. No se propaga.
-      res.status(502).json({ ok: false, error: 'el_envio_fallo' });
+    } catch (error) {
+      // El error del transporte puede traer la credencial en el mensaje: no se propaga.
+      // El codigo simbolico (EAUTH, ETIMEDOUT, ECONNECTION, EDNS...) no puede contenerla,
+      // y ahorra tener que cronometrar la respuesta para adivinar la causa.
+      const codigo = transportErrorCode(error);
+      res.status(502).json(codigo ? { ok: false, error: 'el_envio_fallo', codigo } : { ok: false, error: 'el_envio_fallo' });
     }
   };
 }

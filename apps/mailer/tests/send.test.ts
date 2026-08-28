@@ -92,4 +92,28 @@ describe('POST /api/send', () => {
     expect(res.statusCode).toBe(502);
     expect(JSON.stringify(res.body)).not.toContain('SECRETO123');
   });
+
+  it('incluye el codigo simbolico del error de transporte, sin la credencial', async () => {
+    const send = vi.fn(async () => {
+      const error = new Error('535 rechazado para user=x pass=SECRETO123') as Error & { code: string };
+      error.code = 'EAUTH';
+      throw error;
+    });
+    const res = fakeRes();
+    await createSendHandler(deps(send))(req(), res);
+    expect(res.statusCode).toBe(502);
+    expect(res.body).toEqual({ ok: false, error: 'el_envio_fallo', codigo: 'EAUTH' });
+    expect(JSON.stringify(res.body)).not.toContain('SECRETO123');
+  });
+
+  it('omite el campo codigo cuando el error de transporte no trae uno', async () => {
+    const send = vi.fn(async () => {
+      throw new Error('fallo sin codigo');
+    });
+    const res = fakeRes();
+    await createSendHandler(deps(send))(req(), res);
+    expect(res.statusCode).toBe(502);
+    expect(res.body).toEqual({ ok: false, error: 'el_envio_fallo' });
+    expect('codigo' in (res.body as object)).toBe(false);
+  });
 });
