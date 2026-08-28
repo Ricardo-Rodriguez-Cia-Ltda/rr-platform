@@ -66,7 +66,10 @@ async function syncSecret(
 // se tocan: el `0.30` que aparece en el codigo de v1 es su valor por defecto,
 // no una lectura del secreto real (la API nunca expone valores).
 const FUNCTIONS = [
-  { name: 'buscar-productos-v2', secrets: ['API_PRECIOS_KEY', 'MARGEN'] },
+  // TIPO_CAMBIO_CLP_USD tiene que ser el mismo que usa generar-cotizacion-v2:
+  // si difieren, el precio que ve el cliente en la busqueda no coincide con el
+  // de su cotizacion.
+  { name: 'buscar-productos-v2', secrets: ['API_PRECIOS_KEY', 'MARGEN', 'TIPO_CAMBIO_CLP_USD'] },
   { name: 'generar-cotizacion-v2', secrets: ['API_PRECIOS_KEY', 'MARGEN', 'TIPO_CAMBIO_CLP_USD', 'IVA_RATE', 'COTIZACION_VALID_HOURS'] },
   { name: 'emitir-ordenes-compra', secrets: ['MARGEN', 'MAILER_URL', 'MAILER_API_KEY', 'OC_EMAIL_DESTINO'] },
   // Un solo router para los tres nodos `decide`. El plan de Kapso permite 5
