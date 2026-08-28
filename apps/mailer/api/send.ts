@@ -1,8 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-// Ruta relativa temporal: Vercel no transpila paquetes del workspace que llegan por
-// node_modules (los trata como JS ya compilado); via ruta relativa entran al grafo de
-// codigo fuente que si transpila. Volver a '@rr/mailer' cuando el paquete tenga build propio.
-import { createMailer, createGmailTransport } from '../../../packages/mailer/src/index.js';
+import { createMailer, createGmailTransport } from '@rr/mailer';
 import { createSendHandler } from '../src/send.js';
 
 const REQUIRED = ['MAILER_API_KEY', 'GMAIL_USER', 'GMAIL_APP_PASSWORD', 'MAILER_FROM', 'MAILER_ALLOWED_RECIPIENTS'];
