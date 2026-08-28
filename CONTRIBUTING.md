@@ -34,6 +34,8 @@ Las herramientas locales piden esa condición —`vitest` en `vitest.config.ts`,
 
 Un paquete nuevo necesita tres cosas: su `tsconfig.build.json` (con `customConditions: []`, para que al compilarlo resuelva las dependencias a `dist/` y no arrastre el fuente ajeno), su `exports` condicional, y una línea en `build:packages` **en el orden de dependencia correcto** — si importa a otro paquete, va después de él.
 
+Un **consumidor** nuevo —cualquier script que se corra con `tsx` e importe un `@rr/*`— necesita `--conditions=development` en su comando. Sin esa condición no falla: `tsx` resuelve en silencio a `dist/` y corre el JavaScript ya compilado, que puede estar desactualizado respecto al fuente que se está editando. Hoy los scripts de `apps/pricing-api` (`serve`, `check`, `docs:vocabulario`) llevan la condición porque importan paquetes del workspace; los de `apps/kapso-agent` no la necesitan porque no importan ningún `@rr/*`.
+
 ## Nombres
 
 **Inglés adentro, contratos externos intactos.** Archivos e identificadores
