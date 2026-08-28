@@ -1,6 +1,6 @@
 {
   "installCommand": "cd ../.. && npm ci",
-  "buildCommand": "mkdir -p salida-vacia",
+  "buildCommand": "mkdir -p salida-vacia && printf 'rr-mailing: solo funciones en /api, sin contenido estatico.' > salida-vacia/index.html",
   "outputDirectory": "salida-vacia",
   "functions": {
     "api/**/*.ts": {
