@@ -74,7 +74,7 @@ la función corriendo hasta el límite por defecto de Vercel).
 ```json
 {
   "installCommand": "cd ../.. && npm ci",
-  "buildCommand": "mkdir -p salida-vacia && printf '...' > salida-vacia/index.html",
+  "buildCommand": "cd ../.. && npm run build:packages && cd apps/mailer && mkdir -p salida-vacia && printf '...' > salida-vacia/index.html",
   "outputDirectory": "salida-vacia"
 }
 ```
@@ -114,37 +114,17 @@ de lista blanca a cualquiera. `salida-vacia` corrige eso: hoy esas rutas dan
 `404`, y `GET /api/send.ts` da `405` (la función real respondiendo, no un
 archivo servido).
 
-### Los imports por ruta relativa a `packages/*`
+### Los imports son normales
 
-`apps/mailer/api/send.ts` y `apps/mailer/src/send.ts` importan `@rr/mailer`
-y `@rr/http` así:
+`api/send.ts` y `src/send.ts` importan `@rr/mailer`, `@rr/http/auth` y
+`@rr/http/http` por su nombre, como cualquier otro consumidor.
 
-```ts
-// Ruta relativa temporal: Vercel no transpila paquetes del workspace que llegan por
-// node_modules (los trata como JS ya compilado); via ruta relativa entran al grafo de
-// codigo fuente que si transpila. Volver a '@rr/mailer' cuando el paquete tenga build propio.
-import { createMailer, createGmailTransport } from '../../../packages/mailer/src/index.js';
-```
-
-en vez de `import { createMailer } from '@rr/mailer'`. Motivo: el runtime
-de Vercel Functions transpila el archivo de entrada (`api/send.ts`) pero
-**no** transpila las dependencias que llegan por `node_modules` — y
-`packages/mailer`/`packages/http` publican TypeScript crudo por
-`package.json#exports` (`"./src/index.ts"`), sin ningún paso de build que
-genere un `dist/` compilado. Importado por nombre de paquete, Node intenta
-cargar ese `.ts` tal cual y falla con `ERR_MODULE_NOT_FOUND`. Importado por
-ruta relativa, el archivo entra al grafo de código fuente del propio
-proyecto `apps/mailer`, que Vercel sí transpila junto con el entrypoint.
-
-**Esto es temporal.** Vuelve a un import normal por nombre de paquete
-(`@rr/mailer`, `@rr/http/auth`, `@rr/http/http`) el día que `packages/*`
-tenga un paso de build propio que emita código compilado — trabajo
-pendiente, con spec propia, fuera del alcance de esta fase. Mientras tanto,
-`@rr/mailer` y `@rr/http` siguen declarados como dependencias en
-`apps/mailer/package.json` aunque **nada los importe por ese nombre hoy**:
-es intencional, no un descuido — son el marcador de lo que hay que revertir
-cuando ese build exista. Si se borraran de `package.json`, no habría ninguna
-señal de que este import relativo sigue pendiente de deshacer.
+Durante un tiempo no fue así: los paquetes exponían TypeScript sin
+compilar, Vercel trata `node_modules` como código ya compilado, y la
+función fallaba al arrancar con `ERR_MODULE_NOT_FOUND`. El parche fue
+importarlos por ruta relativa. Ya no hace falta — los paquetes se compilan
+y el `buildCommand` los construye antes de desplegar. Ver
+`CONTRIBUTING.md`.
 
 ## Respuestas del endpoint
 
