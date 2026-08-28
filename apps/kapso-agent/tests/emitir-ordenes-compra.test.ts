@@ -44,6 +44,8 @@ function fakeD1(options: { failInsert?: (key: string) => boolean } = {}) {
                 if (row) {
                   row.status = sql.includes("'sent'") ? 'sent' : sql.includes("'failed'") ? 'failed' : 'processing';
                   row.updated_at = args[args.length - 2];
+                  // En el UPDATE a 'failed' el primer bind es el mensaje de error.
+                  if (sql.includes("'failed'")) row.error = args[0];
                 }
                 return { success: true };
               }
@@ -80,8 +82,8 @@ const quote = {
 // el MISMO entorno entre dos invocaciones, no reusandolo por accidente.
 const env = (db: unknown = fakeD1().db) => ({
   MARGEN: '0.13',
-  RESEND_API_KEY: 'key',
-  RESEND_FROM_EMAIL: 'ordenes@rr.cl',
+  MAILER_URL: 'https://mailer.test/api/send',
+  MAILER_API_KEY: 'clave',
   OC_EMAIL_DESTINO: 'pyxis.latam@gmail.com',
   DB: db,
 });
@@ -122,6 +124,16 @@ function walk(value: unknown, visit: (key: string | null, v: unknown) => void, k
 afterEach(() => vi.unstubAllGlobals());
 
 describe('emitir-ordenes-compra', () => {
+  it('llama al rele con la clave y el cuerpo esperado', async () => {
+    const spy = resendOk();
+    await handler(request({ execution_context: { vars: vars() } }), env());
+    const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('https://mailer.test/api/send');
+    expect((init.headers as Record<string, string>)['x-api-key']).toBe('clave');
+    const cuerpo = JSON.parse(String(init.body));
+    expect(Object.keys(cuerpo).sort()).toEqual(['html', 'subject', 'text', 'to']);
+  });
+
   it('emite una orden por mayorista', async () => {
     const spy = resendOk();
     const { data } = await issue(env());
@@ -185,6 +197,25 @@ describe('emitir-ordenes-compra', () => {
     expect(data.vars.purchase_orders_ok).toBe(false);
     const statuses = data.vars.purchase_orders_result.map((o: { status: string }) => o.status).sort();
     expect(statuses).toEqual(['failed', 'sent']);
+  });
+
+  // El rele nunca devuelve `message` (eso es Resend): devuelve `error` y, en
+  // fallas de transporte, tambien `codigo`. Sin leer los campos correctos,
+  // cada falla del rele cae al generico y no dice nada util para depurar.
+  it('combina error y codigo del rele en el mensaje que queda en D1', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ ok: false, error: 'el_envio_fallo', codigo: 'EAUTH' }), { status: 502 })
+    ));
+    const { db, rows } = fakeD1();
+    const { data } = await issue(env(db));
+
+    const ingram = data.vars.purchase_orders_result.find((o: { proveedor: string }) => o.proveedor === 'ingram');
+    expect(ingram.status).toBe('failed');
+
+    const fila = rows.get('q-1:1:ingram');
+    expect(fila?.error).toContain('el_envio_fallo');
+    expect(fila?.error).toContain('EAUTH');
+    expect(fila?.error).not.toBe('No se pudo enviar la orden.');
   });
 
   it('no emite sin confirmacion del cliente', async () => {
@@ -365,5 +396,20 @@ describe('emitir-ordenes-compra', () => {
     const { res } = await issue({ ...env(), MARGEN: '' });
     expect(res.status).toBe(500);
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  // Hallazgo final 5: la lista blanca del rele compara exacto contra un
+  // destino que si viene recortado del otro lado (apps/mailer/api/send.ts).
+  // Un OC_EMAIL_DESTINO con espacios pegados no puede convertirse en
+  // 403 destinatario_no_permitido.
+  it('envia igual con OC_EMAIL_DESTINO con espacios alrededor', async () => {
+    const spy = resendOk();
+    const { data } = await issue({ ...env(), OC_EMAIL_DESTINO: '  pyxis.latam@gmail.com  ' });
+    expect(data.ok).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(2);
+    for (const [, init] of spy.mock.calls as unknown as [string, RequestInit][]) {
+      const cuerpo = JSON.parse(String(init.body));
+      expect(cuerpo.to).toBe('pyxis.latam@gmail.com');
+    }
   });
 });

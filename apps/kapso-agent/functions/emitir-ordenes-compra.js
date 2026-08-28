@@ -40,14 +40,18 @@ async function handler(request, env) {
   }
 
   const margen = Number(env.MARGEN ?? "0.13");
-  const apiKey = env.RESEND_API_KEY;
-  const from = env.RESEND_FROM_EMAIL;
-  const destino = String(env.OC_EMAIL_DESTINO || DESTINO_DEFAULT);
+  const mailerUrl = env.MAILER_URL;
+  const mailerKey = env.MAILER_API_KEY;
+  // .trim(): la lista blanca del rele compara contra valores que si vienen
+  // recortados de su lado (apps/mailer/api/send.ts). Un secreto de Kapso
+  // pegado con un espacio de mas convertiria todas las ordenes en
+  // 403 destinatario_no_permitido.
+  const destino = String(env.OC_EMAIL_DESTINO || DESTINO_DEFAULT).trim();
 
   // Mayor que cero: un secreto MARGEN vacio coacciona a 0 y dejaria el costo
   // reconstruido igual al precio de venta.
   if (!Number.isFinite(margen) || margen <= 0) return json({ ok: false, error: "Margen mal configurado." }, 500);
-  if (!apiKey || !from) return json({ ok: false, error: "Faltan RESEND_API_KEY o RESEND_FROM_EMAIL." }, 500);
+  if (!mailerUrl || !mailerKey) return json({ ok: false, error: "Faltan MAILER_URL o MAILER_API_KEY." }, 500);
   if (!env.DB) return json({ ok: false, error: "Falta la base D1 para idempotencia." }, 500);
 
   await env.DB.prepare(
@@ -143,19 +147,15 @@ async function handler(request, env) {
       "Pago del cliente: contado."
     ].join("\n");
 
+    const subject = `OC ${poId} · ${proveedor.toUpperCase()} · cotización ${quote.quote_id}`;
+
     let respuesta;
     let cuerpo = {};
     try {
-      respuesta = await fetch("https://api.resend.com/emails", {
+      respuesta = await fetch(mailerUrl, {
         method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          from,
-          to: [destino],
-          subject: `OC ${poId} · ${proveedor.toUpperCase()} · cotización ${quote.quote_id}`,
-          html,
-          text: texto
-        })
+        headers: { "x-api-key": mailerKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ to: destino, subject, html, text: texto })
       });
       cuerpo = await respuesta.json().catch(() => ({}));
     } catch (err) {
@@ -167,8 +167,14 @@ async function handler(request, env) {
     }
 
     if (!respuesta.ok) {
+      // El rele nunca devuelve `message` (eso era Resend): en un fallo
+      // devuelve `error` y, si el transporte se cayo, tambien `codigo`
+      // (EAUTH, ETIMEDOUT...). Se combinan los dos cuando estan, para que la
+      // fila diga algo util en vez de caer siempre al generico.
+      const partes = [cuerpo?.error, cuerpo?.codigo].filter((parte) => typeof parte === "string" && parte !== "");
+      const mensaje = partes.length > 0 ? partes.join(": ") : "No se pudo enviar la orden.";
       await env.DB.prepare("UPDATE purchase_orders SET status = 'failed', error = ?, updated_at = ? WHERE order_key = ?")
-        .bind(String(cuerpo?.message || "No se pudo enviar la orden."), new Date().toISOString(), orderKey).run();
+        .bind(mensaje, new Date().toISOString(), orderKey).run();
       resultados.push({ proveedor, po_id: poId, status: "failed", lineas: lineas.length });
       continue;
     }

@@ -68,7 +68,7 @@ async function syncSecret(
 const FUNCTIONS = [
   { name: 'buscar-productos-v2', secrets: ['API_PRECIOS_KEY', 'MARGEN'] },
   { name: 'generar-cotizacion-v2', secrets: ['API_PRECIOS_KEY', 'MARGEN', 'TIPO_CAMBIO_CLP_USD', 'IVA_RATE', 'COTIZACION_VALID_HOURS'] },
-  { name: 'emitir-ordenes-compra', secrets: ['MARGEN', 'RESEND_API_KEY', 'RESEND_FROM_EMAIL', 'OC_EMAIL_DESTINO'] },
+  { name: 'emitir-ordenes-compra', secrets: ['MARGEN', 'MAILER_URL', 'MAILER_API_KEY', 'OC_EMAIL_DESTINO'] },
   { name: 'route-quote-decision-v2', secrets: [] },
   { name: 'check-quote-validity-v2', secrets: [] },
   { name: 'route-rut-v2', secrets: [] },
@@ -80,8 +80,8 @@ const VALUES: Record<string, string> = {
   TIPO_CAMBIO_CLP_USD: process.env.TIPO_CAMBIO_CLP_USD ?? '950',
   IVA_RATE: '0.19',
   COTIZACION_VALID_HOURS: '3',
-  RESEND_API_KEY: process.env.RESEND_API_KEY ?? '',
-  RESEND_FROM_EMAIL: process.env.RESEND_FROM_EMAIL ?? '',
+  MAILER_URL: process.env.MAILER_URL ?? '',
+  MAILER_API_KEY: process.env.MAILER_API_KEY ?? '',
   OC_EMAIL_DESTINO: process.env.OC_EMAIL_DESTINO ?? 'pyxis.latam@gmail.com',
 };
 
@@ -193,9 +193,11 @@ async function main() {
 
       for (const secret of secrets) {
         const value = VALUES[secret];
-        // RESEND_API_KEY y RESEND_FROM_EMAIL no viven en .env.local, y la API de
-        // Kapso nunca devuelve valores. Se avisa y se sigue: abortar dejaria el
-        // despliegue a medias.
+        // Si `value` esta vacio es porque el operador no cargo esa variable en
+        // .env.local (ver el README): MAILER_URL y MAILER_API_KEY si viven ahi,
+        // igual que el resto. Y la API de Kapso nunca devuelve valores, asi que
+        // no hay forma de saber si ya esta cargado del otro lado. Se avisa y se
+        // sigue: abortar dejaria el despliegue a medias.
         if (!value) {
           pending.push(`${name}: ${secret} (sin valor de origen; queda como estuviera)`);
           continue;

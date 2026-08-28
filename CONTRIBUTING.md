@@ -9,6 +9,19 @@ cosa del repositorio, va en `packages/`.
 **No se extrae un paquete con un solo consumidor.** El segundo consumidor es
 el que justifica la extracción; antes de eso es adivinar.
 
+**Excepción: `packages/mailer`.** Hoy tiene un solo consumidor
+(`apps/mailer`) y se extrajo igual, a propósito, contra esta misma regla —
+ver `docs/superpowers/specs/2026-08-27-mailer-fase-1-design.md`. El segundo
+consumidor es la fase 2 (cotizaciones y facturas a clientes, que necesitan
+mandar correo igual que las órdenes de compra): es la razón de existir de
+la fase 1, no una posibilidad remota. Extraerlo ahora costó un archivo;
+extraerlo después habría costado reescribir quien lo llama. **Si la fase 2
+se cancela**, `packages/mailer` deja de tener excusa: hay que fundirlo de
+vuelta dentro de `apps/mailer` en vez de dejarlo como un paquete de un solo
+consumidor sin fecha de vencimiento. Una excepción sin esta nota es una
+regla que cualquiera puede invocar para lo que sea; con ella, es una
+decisión concreta con una condición de salida.
+
 ## Nombres
 
 **Inglés adentro, contratos externos intactos.** Archivos e identificadores
