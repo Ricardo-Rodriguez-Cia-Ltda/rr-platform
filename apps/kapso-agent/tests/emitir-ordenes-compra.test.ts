@@ -80,8 +80,8 @@ const quote = {
 // el MISMO entorno entre dos invocaciones, no reusandolo por accidente.
 const env = (db: unknown = fakeD1().db) => ({
   MARGEN: '0.13',
-  RESEND_API_KEY: 'key',
-  RESEND_FROM_EMAIL: 'ordenes@rr.cl',
+  MAILER_URL: 'https://mailer.test/api/send',
+  MAILER_API_KEY: 'clave',
   OC_EMAIL_DESTINO: 'pyxis.latam@gmail.com',
   DB: db,
 });
@@ -122,6 +122,16 @@ function walk(value: unknown, visit: (key: string | null, v: unknown) => void, k
 afterEach(() => vi.unstubAllGlobals());
 
 describe('emitir-ordenes-compra', () => {
+  it('llama al rele con la clave y el cuerpo esperado', async () => {
+    const spy = resendOk();
+    await handler(request({ execution_context: { vars: vars() } }), env());
+    const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('https://mailer.test/api/send');
+    expect((init.headers as Record<string, string>)['x-api-key']).toBe('clave');
+    const cuerpo = JSON.parse(String(init.body));
+    expect(Object.keys(cuerpo).sort()).toEqual(['html', 'subject', 'text', 'to']);
+  });
+
   it('emite una orden por mayorista', async () => {
     const spy = resendOk();
     const { data } = await issue(env());

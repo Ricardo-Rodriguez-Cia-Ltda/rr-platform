@@ -40,14 +40,14 @@ async function handler(request, env) {
   }
 
   const margen = Number(env.MARGEN ?? "0.13");
-  const apiKey = env.RESEND_API_KEY;
-  const from = env.RESEND_FROM_EMAIL;
+  const mailerUrl = env.MAILER_URL;
+  const mailerKey = env.MAILER_API_KEY;
   const destino = String(env.OC_EMAIL_DESTINO || DESTINO_DEFAULT);
 
   // Mayor que cero: un secreto MARGEN vacio coacciona a 0 y dejaria el costo
   // reconstruido igual al precio de venta.
   if (!Number.isFinite(margen) || margen <= 0) return json({ ok: false, error: "Margen mal configurado." }, 500);
-  if (!apiKey || !from) return json({ ok: false, error: "Faltan RESEND_API_KEY o RESEND_FROM_EMAIL." }, 500);
+  if (!mailerUrl || !mailerKey) return json({ ok: false, error: "Faltan MAILER_URL o MAILER_API_KEY." }, 500);
   if (!env.DB) return json({ ok: false, error: "Falta la base D1 para idempotencia." }, 500);
 
   await env.DB.prepare(
@@ -143,19 +143,15 @@ async function handler(request, env) {
       "Pago del cliente: contado."
     ].join("\n");
 
+    const subject = `OC ${poId} · ${proveedor.toUpperCase()} · cotización ${quote.quote_id}`;
+
     let respuesta;
     let cuerpo = {};
     try {
-      respuesta = await fetch("https://api.resend.com/emails", {
+      respuesta = await fetch(mailerUrl, {
         method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          from,
-          to: [destino],
-          subject: `OC ${poId} · ${proveedor.toUpperCase()} · cotización ${quote.quote_id}`,
-          html,
-          text: texto
-        })
+        headers: { "x-api-key": mailerKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ to: destino, subject, html, text: texto })
       });
       cuerpo = await respuesta.json().catch(() => ({}));
     } catch (err) {
