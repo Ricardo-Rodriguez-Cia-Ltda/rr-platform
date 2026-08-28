@@ -163,8 +163,14 @@ async function handler(request, env) {
     }
 
     if (!respuesta.ok) {
+      // El rele nunca devuelve `message` (eso era Resend): en un fallo
+      // devuelve `error` y, si el transporte se cayo, tambien `codigo`
+      // (EAUTH, ETIMEDOUT...). Se combinan los dos cuando estan, para que la
+      // fila diga algo util en vez de caer siempre al generico.
+      const partes = [cuerpo?.error, cuerpo?.codigo].filter((parte) => typeof parte === "string" && parte !== "");
+      const mensaje = partes.length > 0 ? partes.join(": ") : "No se pudo enviar la orden.";
       await env.DB.prepare("UPDATE purchase_orders SET status = 'failed', error = ?, updated_at = ? WHERE order_key = ?")
-        .bind(String(cuerpo?.message || "No se pudo enviar la orden."), new Date().toISOString(), orderKey).run();
+        .bind(mensaje, new Date().toISOString(), orderKey).run();
       resultados.push({ proveedor, po_id: poId, status: "failed", lineas: lineas.length });
       continue;
     }

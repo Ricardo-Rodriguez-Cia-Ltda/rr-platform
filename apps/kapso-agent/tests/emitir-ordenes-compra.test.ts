@@ -44,6 +44,8 @@ function fakeD1(options: { failInsert?: (key: string) => boolean } = {}) {
                 if (row) {
                   row.status = sql.includes("'sent'") ? 'sent' : sql.includes("'failed'") ? 'failed' : 'processing';
                   row.updated_at = args[args.length - 2];
+                  // En el UPDATE a 'failed' el primer bind es el mensaje de error.
+                  if (sql.includes("'failed'")) row.error = args[0];
                 }
                 return { success: true };
               }
@@ -195,6 +197,25 @@ describe('emitir-ordenes-compra', () => {
     expect(data.vars.purchase_orders_ok).toBe(false);
     const statuses = data.vars.purchase_orders_result.map((o: { status: string }) => o.status).sort();
     expect(statuses).toEqual(['failed', 'sent']);
+  });
+
+  // El rele nunca devuelve `message` (eso es Resend): devuelve `error` y, en
+  // fallas de transporte, tambien `codigo`. Sin leer los campos correctos,
+  // cada falla del rele cae al generico y no dice nada util para depurar.
+  it('combina error y codigo del rele en el mensaje que queda en D1', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ ok: false, error: 'el_envio_fallo', codigo: 'EAUTH' }), { status: 502 })
+    ));
+    const { db, rows } = fakeD1();
+    const { data } = await issue(env(db));
+
+    const ingram = data.vars.purchase_orders_result.find((o: { proveedor: string }) => o.proveedor === 'ingram');
+    expect(ingram.status).toBe('failed');
+
+    const fila = rows.get('q-1:1:ingram');
+    expect(fila?.error).toContain('el_envio_fallo');
+    expect(fila?.error).toContain('EAUTH');
+    expect(fila?.error).not.toBe('No se pudo enviar la orden.');
   });
 
   it('no emite sin confirmacion del cliente', async () => {

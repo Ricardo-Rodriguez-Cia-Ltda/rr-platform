@@ -51,35 +51,39 @@ falta.
 | `generar-cotizacion-v2` | `COTIZACION_VALID_HOURS` | Constante `3` en el script |
 | `emitir-ordenes-compra` | `MARGEN` | Igual que arriba (mismo 0.13; se usa para reconstruir el costo desde el precio de venta congelado en la cotización) |
 | `emitir-ordenes-compra` | `OC_EMAIL_DESTINO` | `process.env.OC_EMAIL_DESTINO` si existe, si no `pyxis.latam@gmail.com` (fallback en el script) |
-| `emitir-ordenes-compra` | `RESEND_API_KEY` | **Pendiente.** Ver "Secretos pendientes" |
-| `emitir-ordenes-compra` | `RESEND_FROM_EMAIL` | **Pendiente.** Ver "Secretos pendientes" |
+| `emitir-ordenes-compra` | `MAILER_URL` | La URL desplegada de `apps/mailer` (proyecto `rr-mailing` en Vercel), `https://rr-mailing.vercel.app/api/send` |
+| `emitir-ordenes-compra` | `MAILER_API_KEY` | La misma clave cargada como `MAILER_API_KEY` en el proyecto `rr-mailing` de Vercel — tiene que coincidir en los dos lados, si no todo envío falla con `401 no_autorizado` desde el relé |
 
-### Secretos pendientes
+### Correo: relé propio, ya no Resend
 
-`RESEND_API_KEY` y `RESEND_FROM_EMAIL` **no están cargados** en
-`emitir-ordenes-compra`. Confirmado dos veces: (a) no existen en
-`.env.local`, y (b) `GET /functions/{id}/secrets` sobre
-`af763c0e-5952-45e6-8eac-b5e5667c0eca` devuelve solo
-`["MARGEN", "OC_EMAIL_DESTINO"]`. Mientras falten, la function corta con
-`500 Faltan RESEND_API_KEY o RESEND_FROM_EMAIL` antes de tocar la base D1 o
-de intentar mandar nada (ver smoke test más abajo).
+Hasta esta misma fecha (2026-08-27) `emitir-ordenes-compra` llamaba
+directo a la API de Resend y estaba desplegada **sin** `RESEND_API_KEY` ni
+`RESEND_FROM_EMAIL` cargados, así que cortaba con `500` antes de mandar
+nada — ese fue justamente el problema que motivó la fase de mailer propio
+(ver `docs/superpowers/specs/2026-08-27-mailer-fase-1-design.md`). Esa fase
+ya se implementó: la function ahora llama a `MAILER_URL` (el endpoint
+`POST /api/send` de `apps/mailer`, documentado en `apps/mailer/README.md`)
+en vez de a `api.resend.com`, y los secretos `MAILER_URL`/`MAILER_API_KEY`
+quedaron cargados sin pendientes (ver
+`.superpowers/sdd/2026-08-27-mailer-fase-1/task-4-report.md`). `RESEND_API_KEY`
+y `RESEND_FROM_EMAIL` ya no son secretos de esta function.
 
-Cómo cargarlos:
+Cómo recargar `MAILER_URL`/`MAILER_API_KEY` si hace falta (rotación de
+clave, cambio de URL del relé):
 
-1. Conseguir (o emitir de nuevo, ver nota) una API key de Resend y el
-   remitente verificado que se quiera usar.
-2. Agregarlos a `.env.local` como `RESEND_API_KEY=...` y
-   `RESEND_FROM_EMAIL=...`.
-3. Correr `npm run kapso:functions` — el script toma esos valores de
+1. Agregarlos a `.env.local` como `MAILER_URL=...` y `MAILER_API_KEY=...`.
+2. Correr `npm run kapso:functions` — el script toma esos valores de
    `process.env` y hace `POST /functions/{id}/secrets` sobre
    `emitir-ordenes-compra` (es idempotente: no crea ni redespliega nada más).
 
-**Nota:** `send-quote-request-email` (v1, sigue viva y `deployed`) tenía
-también `RESEND_API_KEY`/`RESEND_FROM_EMAIL` propios, pero esos valores no
-son recuperables (la API nunca expone valores) y son secretos de una
-function distinta de todos modos — no sirven para copiar y pegar en
-`emitir-ordenes-compra` sin decidir antes si se reutiliza la misma cuenta de
-Resend o no.
+**Nota:** `send-quote-request-email` (v1, sigue viva y `deployed`) sigue
+usando `RESEND_API_KEY`/`RESEND_FROM_EMAIL` propios — es una function
+distinta de `emitir-ordenes-compra`, fuera del alcance de esta fase, y no
+se tocó ni en Kapso ni en este repositorio. Su código aparece también en
+`apps/kapso-agent/functions-v1-backup/send-quote-request-email.js`, un
+respaldo tomado el 2026-08-26 antes del cutover a v2 (ver el README de esa
+carpeta) — es una foto histórica, no la fuente de verdad de lo que corre
+hoy, y no se edita para que siga siendo fiel a lo que capturó.
 
 ---
 
@@ -167,7 +171,7 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   quote_version TEXT,
   proveedor   TEXT,               -- intcomex | ingram | tecnoglobal
   status      TEXT,               -- processing | sent | duplicate | failed
-  email_id    TEXT,               -- id que devuelve Resend si el envío fue ok
+  email_id    TEXT,               -- id que devuelve el relé (apps/mailer) si el envío fue ok
   error       TEXT,               -- mensaje de error si status = failed
   created_at  TEXT,
   updated_at  TEXT
@@ -195,22 +199,30 @@ ORDER BY updated_at DESC;
 
 ### Qué revisar cuando una orden queda `failed`
 
-1. **Leer la columna `error`** de esa fila — el código guarda ahí el mensaje
-   de Resend (`cuerpo.message`) o el mensaje de la excepción de `fetch` si
-   la llamada ni siquiera llegó a responder.
-2. **Causas típicas:**
-   - `RESEND_API_KEY`/`RESEND_FROM_EMAIL` mal cargados o revocados en
-     Resend → siempre falla, para todas las órdenes.
-   - El remitente (`RESEND_FROM_EMAIL`) no está verificado en el dominio
-     de Resend → Resend devuelve 4xx con un mensaje al respecto en `error`.
-   - Timeout o corte de red hacia `api.resend.com` → `error` trae el
-     mensaje de la excepción, no una respuesta HTTP.
+1. **Leer la columna `error`** de esa fila — el código guarda ahí el
+   `error` (y el `codigo` de transporte, si vino) que devuelve el relé
+   (`apps/mailer`) cuando responde algo distinto de `ok`, combinados en un
+   solo texto; o el mensaje de la excepción de `fetch` si la llamada ni
+   siquiera llegó a responder.
+2. **Causas típicas** (ver la tabla completa de respuestas del relé en
+   `apps/mailer/README.md`):
+   - `no_autorizado` → `MAILER_API_KEY` no coincide entre esta function y
+     el proyecto `rr-mailing` de Vercel. Falla para todas las órdenes.
+   - `destinatario_no_permitido` → `OC_EMAIL_DESTINO` no está en la lista
+     blanca (`MAILER_ALLOWED_RECIPIENTS`) del relé.
+   - `falta_configuracion` → al relé le falta una variable de entorno; el
+     mismo error trae `faltan` con los nombres.
+   - `el_envio_fallo` con `codigo: EAUTH` → Gmail rechazó la contraseña de
+     aplicación cargada en el relé (revocada o mal pegada).
+   - `el_envio_fallo` con `codigo: ETIMEDOUT`/`ECONNECTION`, o sin
+     `codigo` → problema de red o de transporte; revisar los logs de
+     Vercel del proyecto `rr-mailing`.
 
 **Límite de tiempo para recuperar:** la recuperación está acotada por la validez de la cotización. Con `COTIZACION_VALID_HOURS=3`, tienes tres horas desde que se generó para reintentar. Pasado ese plazo, `emitir-ordenes-compra` devuelve **HTTP 409** (`"La cotización expiró; debe recalcularse."`) sin tocar la base D1 ni intentar ningún envío más. Si ves un 409, la cotización venció: no hay remedio reinventando. Toca recalcular la cotización (paso anterior) y hacer que el cliente la confirme de nuevo; las órdenes contra la cotización vieja están cerradas.
 
 3. **Reintentar es seguro:** repetir el mismo `invoke` con el mismo
    `quote_id`/`version` no reenvía las órdenes que ya quedaron `sent` (esas
-   vuelven `duplicate` sin tocar Resend), pero sí reintenta las que quedaron
+   vuelven `duplicate` sin llamar al relé), pero sí reintenta las que quedaron
    `failed` — el código las deja en `processing` de nuevo antes de reintentar
    el envío en vez de tratarlas como duplicado.
 
@@ -303,8 +315,18 @@ No se pudo, por lo tanto, verificar: el conteo `purchase_orders_count: 2`,
 el `status: "sent"` de ambas órdenes, el contenido de los dos correos (en
 particular que Ingram muestre costo unitario US$ 10.00 = 11.3 / 1.13 en vez
 de 11.3 tal cual), ni el comportamiento de idempotencia en una segunda
-llamada (`status: "duplicate"`). Todo esto queda pendiente hasta cargar
-`RESEND_API_KEY`/`RESEND_FROM_EMAIL` — ver "Secretos pendientes" arriba.
+llamada (`status: "duplicate"`). En su momento esto quedó pendiente de
+cargar `RESEND_API_KEY`/`RESEND_FROM_EMAIL`.
+
+> **Actualización (mailer-fase-1, mismo 2026-08-27):** ese bloqueo ya no
+> existe — `emitir-ordenes-compra` dejó de usar Resend. Con el relé propio
+> desplegado y `MAILER_URL`/`MAILER_API_KEY` cargados, se repitió esta
+> misma invocación con una cotización vigente: `purchase_orders_count: 2`,
+> ambas órdenes `sent`, y una segunda invocación con el mismo `quote_id`
+> devolvió ambas `duplicate` sin llamar de nuevo al relé. Detalle completo
+> en `.superpowers/sdd/2026-08-27-mailer-fase-1/task-4-report.md`. Sigue
+> pendiente la confirmación visual de que los dos correos llegaron de
+> verdad a la casilla (esa parte no se puede verificar por API).
 
 ---
 
@@ -335,8 +357,9 @@ locking: si alguien más tocó el workflow entre medio, el `PATCH` con un
 de escribir esto el workflow está en `lock_version: 2`.
 
 Antes de activar, conviene:
-- Cargar `RESEND_API_KEY`/`RESEND_FROM_EMAIL` (si no, cualquier cierre de
-  venta real fallará en el último paso).
+- Confirmar que `MAILER_URL`/`MAILER_API_KEY` siguen cargados y vigentes
+  (ya lo están desde mailer-fase-1; si no, cualquier cierre de venta real
+  fallará en el último paso).
 - Decidir qué pasa con `Rayo Perez` (¿se desactiva, convive, se prueba en un
   número de WhatsApp aparte primero?).
 - Resolver, o al menos aceptar el riesgo de, la pregunta de cupo de los
@@ -456,7 +479,7 @@ workflows conviviendo en el mismo número.
 | Pendiente | Por qué no se hizo aquí | Qué lo resolvería |
 |---|---|---|
 | Ramificar el cierre según `purchase_orders_ok` | La arista `fn_emitir_ordenes → send_confirmacion` es incondicional y no hay cupo de Cloudflare Worker para un nodo `decide` más. El mensaje de `send_confirmacion` es hoy **deliberadamente genérico** ("dejamos tu pedido con el equipo comercial", no "quedó cursado") justamente porque sale igual con un 400, con un 500 por secretos faltantes, y con `ok: true` pero todas las órdenes en `failed` | Un nodo `decide` extra entre `fn_emitir_ordenes` y el cierre, con dos salidas (`ok` / `con_problemas`) y un `send_text` por rama. Con `decision_type: "llm"` no consume cupo de Worker; con `decision_type: "function"` hay que liberar un slot antes (ver la sección de cupo). Recién entonces el mensaje puede volver a afirmar que el pedido quedó cursado |
-| Emisión real de órdenes de compra (paso 3 completo: `sent`, dos correos, costo Ingram en US$ 10.00, segunda llamada `duplicate`) | Faltan `RESEND_API_KEY`/`RESEND_FROM_EMAIL` | Cargar los dos secretos (ver arriba) y repetir el `invoke` del paso 3 dos veces seguidas |
+| ~~Emisión real de órdenes de compra (paso 3 completo: `sent`, dos correos, costo Ingram en US$ 10.00, segunda llamada `duplicate`)~~ — **resuelto en mailer-fase-1** (ver la actualización en el smoke test arriba y `.superpowers/sdd/2026-08-27-mailer-fase-1/task-4-report.md`) | Faltaban `RESEND_API_KEY`/`RESEND_FROM_EMAIL`; se reemplazó Resend por el relé propio (`MAILER_URL`/`MAILER_API_KEY`) | Pendiente solo la confirmación visual de que los correos llegan a la casilla — no verificable por API |
 | Si un nodo `decide` puede invocar de verdad una function en `draft` dentro de una ejecución | Requiere una ejecución real del workflow, que requiere activarlo — prohibido en esta tarea | Activar el workflow en un momento decidido por el negocio y correr la conversación de prueba completa (tabla de abajo), revisando el historial de ejecución nodo por nodo |
 | Conversación completa por WhatsApp (paso 5 del brief: descubrimiento → cotización → rechazo → facturación → RUT inválido → cierre → verificación de que el LLM nunca vio un costo) | El workflow no está activo; no se puede iniciar una conversación real sin activarlo, y activar está fuera del alcance de esta tarea | Activar el workflow (ver comando arriba) y correr la conversación de la siguiente tabla contra el número real de WhatsApp |
 

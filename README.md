@@ -38,9 +38,12 @@ Errores: `401` x-api-key inválida · `400` parámetros inválidos · `404` prod
 apps/
   pricing-api/    # la API HTTP: rutas /api/*, handlers y el server standalone
   kapso-agent/    # Kapso Functions + prompts + scripts de deploy del agente de WhatsApp
+  mailer/         # rele de correo propio (POST /api/send) sobre SMTP de Gmail
 packages/
   domain/         # tipos y logica de negocio pura: precio, producto, busqueda/ranking, moneda
   providers/      # un modulo por mayorista (Intcomex, Tecnoglobal, Ingram) + el registro PROVIDERS
+  mailer/         # interfaz Mailer + implementacion sobre nodemailer/Gmail
+  http/           # utilidades HTTP compartidas (auth por x-api-key, parseo de headers)
 infra/
   office-node/    # scripts de PowerShell para el PC de oficina (autoarranque + tunel de Cloudflare)
 docs/
@@ -54,8 +57,11 @@ tests/
 |---|---|---|---|
 | `apps/pricing-api` | La API de precios | `GET /search`, `/product`, `/price`, `/mejor-precio`, `/facetas`, `POST /credito/mock`, y `/search`, `/product`, `/facetas` por proveedor bajo `/api/<proveedor>/...` (las únicas tres con forma por proveedor: `/price` elige proveedor por query param `?provider=`, `/mejor-precio` compara entre todos y `/credito/mock` no toca proveedores) | Vercel (proyecto `captador-precios-proveedores`) y, en paralelo, el PC de oficina vía `npm run serve` + Cloudflare Tunnel — ver [Hosting local](#hosting-local-pc-oficina--cloudflare-tunnel) |
 | `apps/kapso-agent` | El agente de WhatsApp que consume la API y aplica el margen fuera del modelo | Kapso Functions (`buscar-productos-v2`, `generar-cotizacion-v2`, `emitir-ordenes-compra`, etc.) y el workflow `rr-isia-version2` | Cuenta de Kapso (Cloudflare Workers), vía `npm run kapso:functions` / `npm run kapso:workflow` |
+| `apps/mailer` | El relé de correo que reemplazó a Resend | `POST /api/send`, autenticado y con lista blanca de destinatarios — ver [`apps/mailer/README.md`](apps/mailer/README.md) | Vercel (proyecto `rr-mailing`) |
 | `packages/domain` | Tipos y lógica de negocio pura: precio, producto normalizado, búsqueda/ranking, moneda | Módulos TypeScript (`@rr/domain/*`), sin I/O | No se despliega; lo importan `pricing-api` y `providers` |
 | `packages/providers` | Un módulo por mayorista que normaliza su API real a `NormalizedProduct` | El registro `PROVIDERS` (`@rr/providers`) | No se despliega; lo importa `pricing-api` |
+| `packages/mailer` | La interfaz `Mailer` y una implementación sobre el SMTP de Gmail (`nodemailer`) | `createMailer`, `createGmailTransport` (`@rr/mailer`) | No se despliega; lo importa `apps/mailer` (por ruta relativa hoy, ver su README) |
+| `packages/http` | Utilidades HTTP chicas compartidas entre apps de Vercel | `isAuthorized`, `firstString` (`@rr/http/*`) | No se despliega; lo importan `apps/mailer` y `apps/pricing-api` |
 | `infra/office-node` | Scripts de operación del servidor en el PC de oficina | Scripts de PowerShell (`install-autostart.ps1`, `verify-autostart.ps1`) | No se despliega; se ejecutan a mano en el PC de oficina |
 
 Convenciones de nombres, qué va en `apps/` vs `packages/` y por qué:
