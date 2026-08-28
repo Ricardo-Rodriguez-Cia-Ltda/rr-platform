@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { isAuthorized } from '../auth.js';
+import { isAuthorized } from '@rr/http/auth';
 import { CatalogUnavailableError, getCatalog } from '@rr/providers/catalog';
 import { computeFacets } from '@rr/domain/search';
 import type { Provider } from '@rr/domain/types';

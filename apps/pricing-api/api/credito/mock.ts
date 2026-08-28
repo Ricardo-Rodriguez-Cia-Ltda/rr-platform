@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { isAuthorized } from '../../src/auth.js';
+import { isAuthorized } from '@rr/http/auth';
+import { firstString } from '@rr/http/http';
 
 // MOCK. No consulta nada: siempre responde la misma linea de credito, sin
 // importar que RUT se pida. Existe para que el consumidor (agente de Kapso)
@@ -13,10 +14,6 @@ const LINEA_CREDITO_CLP = 10_000_000;
 const UTILIZADO_CLP = 4_000_000;
 
 type Motivo = 'dentro_de_linea' | 'excede_linea' | 'sin_linea_habilitada';
-
-function firstString(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
 
 // Vercel entrega req.body ya parseado; el servidor local lo deja como texto
 // crudo. Devuelve null si el cuerpo no es un objeto JSON.
