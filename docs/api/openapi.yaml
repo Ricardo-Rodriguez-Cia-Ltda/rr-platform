@@ -952,8 +952,9 @@ components:
         parcial:
           type: boolean
           description: |
-            Presente y true solo si la búsqueda se cortó por presupuesto de
-            tiempo (8s) y quedaron candidatos sin cotizar. No es un error, pero
+            Presente y true solo si la búsqueda quedó a medias: la sonda inicial
+            proyectó pasarse del presupuesto (20s) y la ronda paralela no se
+            lanzó, o un lote de la ronda falló. No es un error, pero
             impide afirmar que algo no existe: solo se sabe de los `evaluados`.
         productos:
           type: array

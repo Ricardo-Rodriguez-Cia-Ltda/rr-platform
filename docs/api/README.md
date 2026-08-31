@@ -308,10 +308,13 @@ ofrecía una mochila a quien buscó un notebook.
 ### `parcial`
 
 Cotizar es ir al mayorista, y con filtros activos la API recorre hasta 300
-candidatos en lotes. Cuando ninguno pasa el filtro los recorre todos, y eso
-tarda. Para no dejar esperando a quien llama, hay un presupuesto de **8
-segundos**: al agotarse, la respuesta trae `parcial: true` y el recorrido queda
-a medias. `evaluados` dice cuántos alcanzó a cotizar.
+candidatos. El primer lote va solo, como sonda; si no basta, el resto se cotiza
+**en una ronda paralela**, así que el peor caso honesto son ~2 lotes de reloj
+(~15 s con el mayorista lento, 2-3 s en un día normal). Hay además un
+presupuesto de **20 segundos**: si la sonda sola ya proyecta pasarse, la ronda
+no se lanza, la respuesta trae `parcial: true` y el recorrido queda a medias —
+lo mismo si un lote de la ronda falla. `evaluados` dice cuántos alcanzó a
+cotizar.
 
 Una respuesta `parcial` no es un error, y sobre todo no autoriza a afirmar que
 algo no existe: solo se sabe de los `evaluados`.

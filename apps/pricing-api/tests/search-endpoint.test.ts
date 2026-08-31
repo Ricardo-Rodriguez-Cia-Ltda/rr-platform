@@ -537,11 +537,11 @@ describe('GET /search — topes de cotizacion', () => {
   });
 });
 
-// El techo de candidatos no acota el reloj: recorrer los 300 son ~6 viajes al
-// mayorista, y cuando ninguno pasa el filtro se recorren todos. El 2026-08-31
-// eso tardo 18s y el agente de WhatsApp, que no puede esperar tanto, le dijo a
-// un cliente "esta fallando el sistema". Vale mas responder parcial a tiempo.
-describe('GET /search — presupuesto de tiempo', () => {
+// El reloj se acota con una sonda secuencial mas una ronda paralela. El usuario
+// pidio explicito (2026-08-31): mejor demorar ~10-15s y responder con productos
+// que responder rapido diciendo que no se alcanzo a revisar. El presupuesto
+// (20s) solo impide lanzar la ronda cuando la sonda ya proyecta pasarse.
+describe('GET /search — sonda + ronda paralela con presupuesto', () => {
   const LARGE_CATALOG = Array.from({ length: 250 }, (_, i) =>
     makeProduct(`S${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
   );
@@ -556,45 +556,44 @@ describe('GET /search — presupuesto de tiempo', () => {
     vi.useRealTimers();
   });
 
-  // Cada lote consume 5s de reloj simulado y no devuelve nada con stock. Con la
-  // proyeccion, despues del primer lote ya se sabe que el segundo no cabe en los
-  // 8s, asi que corta con un solo lote en vez de pasarse a 10s.
-  function slowBatches() {
+  function batchesDe(ms: number, inStock = 0) {
     getPricesMock.mockReset().mockImplementation((skus: string[]) => {
-      vi.advanceTimersByTime(5000);
-      return Promise.resolve(new Map(skus.map((sku) => [sku, { price: 100, currency: 'us', inStock: 0 }])));
+      vi.advanceTimersByTime(ms);
+      return Promise.resolve(new Map(skus.map((sku) => [sku, { price: 100, currency: 'us', inStock }])));
     });
   }
 
-  it('corta la busqueda cuando se agota el presupuesto, en vez de recorrer los 300', async () => {
+  it('con lotes de 5s cotiza TODO en una ronda paralela, sin marcar parcial', async () => {
     vi.useFakeTimers();
-    slowBatches();
+    batchesDe(5000);
     const res = makeRes();
     await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body.parcial).toBe(true);
-    // Sin el presupuesto serian 6 lotes hasta los 300 candidatos; con la
-    // proyeccion no se empieza ninguno que no se alcance a pagar.
-    expect(getPricesMock).toHaveBeenCalledTimes(1);
+    // 250 candidatos = sonda de 100 + ronda de [100, 50]: tres llamadas.
+    expect(getPricesMock).toHaveBeenCalledTimes(3);
+    expect(res.body.evaluados).toBe(250);
+    expect(res.body.parcial).toBeUndefined();
+    // Se reviso todo, asi que sin_stock es una afirmacion comprobada.
+    expect(res.body.sin_resultados.motivo).toBe('sin_stock');
   });
 
-  it('no afirma sin_stock cuando no alcanzo a mirar todo', async () => {
+  it('si la sonda sola ya proyecta pasarse, no lanza la ronda y responde parcial', async () => {
     vi.useFakeTimers();
-    slowBatches();
+    batchesDe(15000);
     const res = makeRes();
     await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
 
+    expect(res.statusCode).toBe(200);
+    expect(getPricesMock).toHaveBeenCalledTimes(1);
+    expect(res.body.parcial).toBe(true);
     expect(res.body.sin_resultados.motivo).toBe('busqueda_incompleta');
     expect(res.body.sin_resultados.alternativa).toBeTruthy();
   });
 
-  it('el primer lote siempre corre, aunque ya se haya pasado el presupuesto', async () => {
+  it('la sonda siempre corre, aunque cueste mas que el presupuesto entero', async () => {
     vi.useFakeTimers();
-    getPricesMock.mockReset().mockImplementation((skus: string[]) => {
-      vi.advanceTimersByTime(30000);
-      return Promise.resolve(new Map(skus.map((sku) => [sku, { price: 100, currency: 'us', inStock: 0 }])));
-    });
+    batchesDe(30000);
     const res = makeRes();
     await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
 
@@ -602,15 +601,32 @@ describe('GET /search — presupuesto de tiempo', () => {
     expect(res.body.evaluados).toBeGreaterThan(0);
   });
 
-  it('una busqueda rapida no se marca parcial', async () => {
-    getPricesMock.mockReset().mockImplementation((skus: string[]) =>
-      Promise.resolve(new Map(skus.map((sku) => [sku, { price: 100, currency: 'us', inStock: 5 }]))),
-    );
+  it('un lote que falla en la ronda paralela no tumba la respuesta: sale parcial', async () => {
+    let llamada = 0;
+    getPricesMock.mockReset().mockImplementation((skus: string[]) => {
+      llamada++;
+      if (llamada === 2) return Promise.reject(new Error('lote caido'));
+      return Promise.resolve(new Map(skus.map((sku) => [sku, { price: 100, currency: 'us', inStock: 0 }])));
+    });
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(getPricesMock).toHaveBeenCalledTimes(3);
+    // Los 100 del lote caido quedaron sin cotizar: no se puede afirmar sin_stock.
+    expect(res.body.parcial).toBe(true);
+    expect(res.body.sin_resultados.motivo).toBe('busqueda_incompleta');
+  });
+
+  it('una busqueda rapida y satisfecha no lanza la ronda ni se marca parcial', async () => {
+    vi.useFakeTimers();
+    batchesDe(0, 5);
     const res = makeRes();
     await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
 
     expect(res.body.parcial).toBeUndefined();
     expect(res.body.productos).toHaveLength(3);
+    expect(getPricesMock).toHaveBeenCalledTimes(1);
   });
 });
 

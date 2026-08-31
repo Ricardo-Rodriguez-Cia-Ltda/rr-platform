@@ -2,7 +2,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { isAuthorized } from '@rr/http/auth';
 import { CatalogUnavailableError, getCatalog } from '@rr/providers/catalog';
 import { search, computeFacets, tokenize } from '@rr/domain/search';
-import type { Provider } from '@rr/domain/types';
+import type { NormalizedProduct } from '@rr/domain/product';
+import type { PriceInfo, Provider } from '@rr/domain/types';
 import { ProviderError } from '@rr/domain/types';
 import { resolveOrRespond } from './guards.js';
 import { firstString, type Handler } from './types.js';
@@ -14,13 +15,14 @@ const MAX_CANDIDATOS_SIN_FILTROS = 50;
 // Con filtros hay que buscar mas abajo: precio y stock solo se conocen al
 // cotizar, y en el catalogo real apenas el 27% de los productos tiene stock.
 const MAX_CANDIDATOS_CON_FILTROS = 300;
-// Techo de reloj, ademas del techo de candidatos. Recorrer los 300 son ~6 viajes
-// al mayorista: cuando ninguno pasa el filtro se recorren todos y la respuesta
-// tarda ~18s. Quien llama es un agente dentro de una conversacion de WhatsApp,
-// que se cae mucho antes de eso — el 2026-08-31 un cliente recibio "esta
-// fallando el sistema" por esta espera. Vale mas responder a tiempo diciendo
-// que la busqueda quedo a medias que responder tarde y perfecto.
-const PRESUPUESTO_MS = 8000;
+// Techo de reloj, ademas del techo de candidatos. Quien llama es un agente en
+// una conversacion de WhatsApp: el usuario acepto explicitamente ~10-15s si la
+// respuesta trae productos, pero no una espera abierta. Como el resto de los
+// lotes va en una ronda paralela que dura ~lo que un lote, el presupuesto se
+// gasta como maximo en sonda + ronda (~2 lotes). Si solo la sonda ya proyecta
+// pasarse (lote > mitad del presupuesto), no se lanza la ronda y la respuesta
+// sale `parcial` — eso paso el 2026-08-31 con el mayorista a ~7s por lote.
+const PRESUPUESTO_MS = 20000;
 
 interface Cotizado {
   sku: string;
@@ -167,41 +169,7 @@ export function createSearchHandler(provider: Provider): Handler {
     const productos: Cotizado[] = [];
     const evaluados: Cotizado[] = [];
 
-    // Se cotiza por lotes y se corta apenas se junta el limite pedido: sin
-    // filtros esto es un solo lote, igual que antes.
-    const inicio = Date.now();
-    let truncadoPorTiempo = false;
-    let ultimoLoteMs = 0;
-
-    for (let i = 0; i < candidates.length && productos.length < limit; i += provider.maxSkusPerBatch) {
-      // No basta con mirar el tiempo ya gastado: un lote solo puede costar varios
-      // segundos, asi que preguntar "¿me pase?" despues de empezarlo llega tarde.
-      // Se proyecta con lo que costo el anterior y no se empieza un lote que no
-      // se alcanza a pagar. El primero siempre corre: cortar antes devolveria
-      // cero evaluados y no habria nada que explicarle a nadie.
-      if (i > 0 && Date.now() - inicio + ultimoLoteMs > PRESUPUESTO_MS) {
-        truncadoPorTiempo = true;
-        break;
-      }
-      const inicioLote = Date.now();
-      const batch = candidates.slice(i, i + provider.maxSkusPerBatch);
-
-      let prices;
-      try {
-        prices = await provider.getPrices(batch.map((p) => p.sku));
-      } catch (error) {
-        if (error instanceof ProviderError) {
-          console.error('[search] fallo getPrices', { candidatos: batch.length, error });
-          res.status(502).json({ error: 'upstream', detail: error.message, upstream: error.detail });
-          return;
-        }
-        console.error('[search] fallo getPrices', { candidatos: batch.length, error });
-        res.status(502).json({ error: 'upstream', detail: 'Unexpected error calling provider' });
-        return;
-      }
-
-      ultimoLoteMs = Date.now() - inicioLote;
-
+    const procesar = (batch: NormalizedProduct[], prices: Map<string, PriceInfo>): void => {
       for (const p of batch) {
         const price = prices.get(p.sku);
         if (!price) continue;
@@ -221,6 +189,65 @@ export function createSearchHandler(provider: Provider): Handler {
         if (quote.precio > maxPrice) continue;
         if (onlyWithStock && (quote.stock ?? 0) <= 0) continue;
         if (productos.length < limit) productos.push(quote);
+      }
+    };
+
+    // El primer lote va solo, como sonda: en el caso comun (sin filtros, o con
+    // stock arriba del ranking) basta y no se cotiza de mas. Si no basta, el
+    // resto de los candidatos se cotiza EN PARALELO en una sola ronda: con el
+    // mayorista lento (~7s por lote), tres lotes en fila son ~20s y la
+    // conversacion de WhatsApp no aguanta; en paralelo el total es ~2 lotes de
+    // reloj. Se pidio explicito: mejor demorar ~10s y responder con productos,
+    // que responder rapido diciendo que no se alcanzo a revisar.
+    const inicio = Date.now();
+    let truncadoPorTiempo = false;
+
+    const first = candidates.slice(0, provider.maxSkusPerBatch);
+    let firstPrices;
+    try {
+      firstPrices = await provider.getPrices(first.map((p) => p.sku));
+    } catch (error) {
+      if (error instanceof ProviderError) {
+        console.error('[search] fallo getPrices', { candidatos: first.length, error });
+        res.status(502).json({ error: 'upstream', detail: error.message, upstream: error.detail });
+        return;
+      }
+      console.error('[search] fallo getPrices', { candidatos: first.length, error });
+      res.status(502).json({ error: 'upstream', detail: 'Unexpected error calling provider' });
+      return;
+    }
+    const primerLoteMs = Date.now() - inicio;
+    procesar(first, firstPrices);
+
+    if (productos.length < limit && candidates.length > first.length) {
+      // La ronda paralela dura ~lo que un lote. Si con lo que costo el primero
+      // ni siquiera eso cabe en el presupuesto, no se lanza: cotizar a medias
+      // ya esta cubierto por `parcial` y el cliente no espera indefinidamente.
+      if (primerLoteMs * 2 > PRESUPUESTO_MS) {
+        truncadoPorTiempo = true;
+      } else {
+        const restantes: NormalizedProduct[][] = [];
+        for (let i = first.length; i < candidates.length; i += provider.maxSkusPerBatch) {
+          restantes.push(candidates.slice(i, i + provider.maxSkusPerBatch));
+        }
+
+        const resultados = await Promise.allSettled(
+          restantes.map((batch) => provider.getPrices(batch.map((p) => p.sku))),
+        );
+
+        // Los lotes se procesan en el orden del ranking aunque hayan vuelto en
+        // otro orden, para que `productos` conserve la relevancia. Un lote que
+        // fallo no tumba la respuesta: sus candidatos quedaron sin cotizar y
+        // eso se declara como parcial, igual que un corte por tiempo.
+        for (let i = 0; i < restantes.length; i++) {
+          const r = resultados[i];
+          if (r.status === 'fulfilled') {
+            procesar(restantes[i], r.value);
+          } else {
+            console.error('[search] fallo getPrices en ronda paralela', { candidatos: restantes[i].length, error: r.reason });
+            truncadoPorTiempo = true;
+          }
+        }
       }
     }
 

@@ -1,8 +1,9 @@
 const API_BASE_DEFAULT = "https://api.pyxis-latam.cl/rr/captador-precios";
-// La API tiene su propio presupuesto de 8s y responde parcial antes de agotarlo,
-// asi que 15s es red de seguridad, no el caso normal. Mas alto que esto no sirve:
-// la conversacion de WhatsApp se cae antes.
-const TIMEOUT_MS = 15000;
+// La API cotiza en sonda + ronda paralela: su peor caso honesto son ~2 lotes de
+// reloj (~15s con el mayorista lento) y su presupuesto interno es 20s. El
+// usuario prefirio explicito esperar ~10-15s y recibir productos. 25s aqui es
+// la red de seguridad exterior, no el caso normal.
+const TIMEOUT_MS = 25000;
 
 function json(payload, status = 200) {
   return new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
