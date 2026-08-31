@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { isAuthorized } from '@rr/http/auth';
 import { CatalogUnavailableError, getCatalog } from '@rr/providers/catalog';
+import { getPriceCache, type CachedPrice } from '@rr/providers/price-cache';
 import { search, computeFacets, tokenize } from '@rr/domain/search';
 import type { NormalizedProduct } from '@rr/domain/product';
 import type { PriceInfo, Provider } from '@rr/domain/types';
@@ -192,6 +193,44 @@ export function createSearchHandler(provider: Provider): Handler {
       }
     };
 
+    // La busqueda conversa sobre el cache de precios antes de cotizar en vivo:
+    // lo fresco se usa siempre, sin tocar al proveedor. La cotizacion (mejor
+    // precio) jamas pasa por aca.
+    const cache = getPriceCache(provider.name);
+    const lookup = cache.get(candidates.map((p) => p.sku));
+    let maxAgeMs = 0;
+
+    const desdeCache = (p: NormalizedProduct, entry: CachedPrice): void => {
+      maxAgeMs = Math.max(maxAgeMs, Date.now() - entry.quotedAt);
+      if (entry.info) procesar([p], new Map([[p.sku, entry.info]]));
+      // info null = negativo cacheado: ni evaluado ni cotizable, igual que un
+      // SKU que la API viva no devuelve.
+    };
+
+    // Los frescos se resuelven ya, en el orden del ranking; los pendientes
+    // pasan a sonda + ronda. Recorrer `candidates` en orden (en vez de
+    // separar fresco/vivo y concatenar) es lo que mantiene `productos`
+    // ordenado por relevancia dentro de la misma respuesta.
+    const pendientes: NormalizedProduct[] = [];
+    for (const p of candidates) {
+      const entry = lookup.fresh.get(p.sku);
+      if (entry) desdeCache(p, entry);
+      else pendientes.push(p);
+    }
+
+    // Fallback compartido por sonda y ronda: un lote vivo caido se rescata del
+    // cache utilizable (mas viejo que fresco, pero todavia servible). Lo que
+    // ni ahi tiene entrada queda sin cotizar.
+    const rescatar = (batch: NormalizedProduct[]): void => {
+      let sinResolver = 0;
+      for (const p of batch) {
+        const entry = lookup.usable.get(p.sku);
+        if (entry) desdeCache(p, entry);
+        else sinResolver++;
+      }
+      if (sinResolver > 0) truncadoPorTiempo = true;
+    };
+
     // El primer lote va solo, como sonda: en el caso comun (sin filtros, o con
     // stock arriba del ranking) basta y no se cotiza de mas. Si no basta, el
     // resto de los candidatos se cotiza EN PARALELO en una sola ronda: con el
@@ -202,50 +241,65 @@ export function createSearchHandler(provider: Provider): Handler {
     const inicio = Date.now();
     let truncadoPorTiempo = false;
 
-    const first = candidates.slice(0, provider.maxSkusPerBatch);
-    let firstPrices;
-    try {
-      firstPrices = await provider.getPrices(first.map((p) => p.sku));
-    } catch (error) {
-      if (error instanceof ProviderError) {
+    // Si el cache fresco ya junto el limite pedido, no hay nada que cotizar en
+    // vivo: ni la sonda se lanza. Esto es lo que hace que una busqueda
+    // identica repetida no vuelva a llamar al proveedor.
+    if (pendientes.length > 0 && productos.length < limit) {
+      const first = pendientes.slice(0, provider.maxSkusPerBatch);
+      let firstPrices: Map<string, PriceInfo>;
+      try {
+        firstPrices = await provider.getPrices(first.map((p) => p.sku));
+        cache.put(firstPrices, first.map((p) => p.sku));
+      } catch (error) {
         console.error('[search] fallo getPrices', { candidatos: first.length, error });
-        res.status(502).json({ error: 'upstream', detail: error.message, upstream: error.detail });
-        return;
-      }
-      console.error('[search] fallo getPrices', { candidatos: first.length, error });
-      res.status(502).json({ error: 'upstream', detail: 'Unexpected error calling provider' });
-      return;
-    }
-    const primerLoteMs = Date.now() - inicio;
-    procesar(first, firstPrices);
-
-    if (productos.length < limit && candidates.length > first.length) {
-      // La ronda paralela dura ~lo que un lote. Si con lo que costo el primero
-      // ni siquiera eso cabe en el presupuesto, no se lanza: cotizar a medias
-      // ya esta cubierto por `parcial` y el cliente no espera indefinidamente.
-      if (primerLoteMs * 2 > PRESUPUESTO_MS) {
-        truncadoPorTiempo = true;
-      } else {
-        const restantes: NormalizedProduct[][] = [];
-        for (let i = first.length; i < candidates.length; i += provider.maxSkusPerBatch) {
-          restantes.push(candidates.slice(i, i + provider.maxSkusPerBatch));
-        }
-
-        const resultados = await Promise.allSettled(
-          restantes.map((batch) => provider.getPrices(batch.map((p) => p.sku))),
-        );
-
-        // Los lotes se procesan en el orden del ranking aunque hayan vuelto en
-        // otro orden, para que `productos` conserve la relevancia. Un lote que
-        // fallo no tumba la respuesta: sus candidatos quedaron sin cotizar y
-        // eso se declara como parcial, igual que un corte por tiempo.
-        for (let i = 0; i < restantes.length; i++) {
-          const r = resultados[i];
-          if (r.status === 'fulfilled') {
-            procesar(restantes[i], r.value);
+        // El cache no resolvio esto antes de la sonda (era pendiente), pero
+        // puede haber algo utilizable (mas viejo que fresco). Solo si el
+        // cache no aporta absolutamente nada — ni fresco ni utilizable — el
+        // 502 de siempre sigue siendo la respuesta honesta.
+        rescatar(first);
+        if (evaluados.length === 0 && productos.length === 0) {
+          if (error instanceof ProviderError) {
+            res.status(502).json({ error: 'upstream', detail: error.message, upstream: error.detail });
           } else {
-            console.error('[search] fallo getPrices en ronda paralela', { candidatos: restantes[i].length, error: r.reason });
-            truncadoPorTiempo = true;
+            res.status(502).json({ error: 'upstream', detail: 'Unexpected error calling provider' });
+          }
+          return;
+        }
+        firstPrices = new Map<string, PriceInfo>();
+      }
+      const primerLoteMs = Date.now() - inicio;
+      procesar(first, firstPrices);
+
+      if (productos.length < limit && pendientes.length > first.length) {
+        // La ronda paralela dura ~lo que un lote. Si con lo que costo el primero
+        // ni siquiera eso cabe en el presupuesto, no se lanza: cotizar a medias
+        // ya esta cubierto por `parcial` y el cliente no espera indefinidamente.
+        if (primerLoteMs * 2 > PRESUPUESTO_MS) {
+          truncadoPorTiempo = true;
+        } else {
+          const restantes: NormalizedProduct[][] = [];
+          for (let i = first.length; i < pendientes.length; i += provider.maxSkusPerBatch) {
+            restantes.push(pendientes.slice(i, i + provider.maxSkusPerBatch));
+          }
+
+          const resultados = await Promise.allSettled(
+            restantes.map((batch) => provider.getPrices(batch.map((p) => p.sku))),
+          );
+
+          // Los lotes se procesan en el orden del ranking aunque hayan vuelto en
+          // otro orden, para que `productos` conserve la relevancia. Un lote que
+          // fallo se rescata del cache utilizable en vez de tumbar la respuesta;
+          // lo que ni ahi tiene entrada queda sin cotizar y eso se declara como
+          // parcial, igual que un corte por tiempo.
+          for (let i = 0; i < restantes.length; i++) {
+            const r = resultados[i];
+            if (r.status === 'fulfilled') {
+              cache.put(r.value, restantes[i].map((p) => p.sku));
+              procesar(restantes[i], r.value);
+            } else {
+              console.error('[search] fallo getPrices en ronda paralela', { candidatos: restantes[i].length, error: r.reason });
+              rescatar(restantes[i]);
+            }
           }
         }
       }
@@ -272,6 +326,10 @@ export function createSearchHandler(provider: Provider): Handler {
       ...(productos.length === 0 && evaluados.length > 0
         ? { sin_resultados: explainEmpty(evaluados, onlyWithStock, truncadoPorTiempo) }
         : {}),
+      // Se declara la edad del dato mas viejo usado, fresco o utilizable, para
+      // que quien consume la respuesta sepa que no todo salio en vivo. Ausente
+      // cuando la busqueda fue 100% en vivo (nada de cache de por medio).
+      ...(maxAgeMs > 0 ? { precios_de_hace_min: Math.ceil(maxAgeMs / 60000) } : {}),
     });
   };
 }

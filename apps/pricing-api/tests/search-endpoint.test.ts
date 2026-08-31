@@ -1,6 +1,10 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { CatalogUnavailableError } from '@rr/providers/catalog';
+import { resetPriceCachesForTests } from '@rr/providers/price-cache';
 import type { NormalizedProduct } from '@rr/domain/product';
 import { ProviderError } from '@rr/domain/types';
 
@@ -71,6 +75,8 @@ const AUTH = { 'x-api-key': 'test-secret' };
 describe('GET /search', () => {
   beforeEach(() => {
     vi.stubEnv('API_SECRET_KEY', 'test-secret');
+    vi.stubEnv('CATALOG_CACHE_DIR', mkdtempSync(join(tmpdir(), 'search-cache-')));
+    resetPriceCachesForTests();
     getCatalogMock.mockReset().mockReturnValue(CATALOG);
     getPricesMock.mockReset().mockResolvedValue(
       new Map([
@@ -372,6 +378,8 @@ describe('GET /search — paginado con filtros', () => {
 
   beforeEach(() => {
     vi.stubEnv('API_SECRET_KEY', 'test-secret');
+    vi.stubEnv('CATALOG_CACHE_DIR', mkdtempSync(join(tmpdir(), 'search-cache-')));
+    resetPriceCachesForTests();
     getCatalogMock.mockReset().mockReturnValue(LARGE_CATALOG);
     getPricesMock.mockReset().mockImplementation((skus: string[]) => Promise.resolve(pricesForBatch(skus)));
   });
@@ -466,6 +474,8 @@ describe('GET /search — topes de cotizacion', () => {
 
   beforeEach(() => {
     vi.stubEnv('API_SECRET_KEY', 'test-secret');
+    vi.stubEnv('CATALOG_CACHE_DIR', mkdtempSync(join(tmpdir(), 'search-cache-')));
+    resetPriceCachesForTests();
     getCatalogMock.mockReset();
     // Sin stock: nada pasa el filtro, asi que el handler recorre todos los
     // candidatos que se permite y podemos contar las llamadas.
@@ -548,6 +558,8 @@ describe('GET /search — sonda + ronda paralela con presupuesto', () => {
 
   beforeEach(() => {
     vi.stubEnv('API_SECRET_KEY', 'test-secret');
+    vi.stubEnv('CATALOG_CACHE_DIR', mkdtempSync(join(tmpdir(), 'search-cache-')));
+    resetPriceCachesForTests();
     getCatalogMock.mockReset().mockReturnValue(LARGE_CATALOG);
   });
 
@@ -644,6 +656,8 @@ describe('GET /search — la alternativa respeta la categoria dominante', () => 
 
   beforeEach(() => {
     vi.stubEnv('API_SECRET_KEY', 'test-secret');
+    vi.stubEnv('CATALOG_CACHE_DIR', mkdtempSync(join(tmpdir(), 'search-cache-')));
+    resetPriceCachesForTests();
     getCatalogMock.mockReset().mockReturnValue(CATALOGO_CON_MOCHILA);
   });
 
@@ -676,5 +690,87 @@ describe('GET /search — la alternativa respeta la categoria dominante', () => 
     expect(res.statusCode).toBe(200);
     expect(res.body.sin_resultados.motivo).toBe('sobre_presupuesto');
     expect(res.body.sin_resultados.alternativa.categoria).toBe('Computadores');
+  });
+});
+
+// El principio del diseño: conversar sobre cache, comprometerse en vivo. Estas
+// pruebas cubren la mitad "conversar"; la de best-price cubre la otra.
+describe('GET /search — cache de precios', () => {
+  const CATALOGO = Array.from({ length: 150 }, (_, i) =>
+    makeProduct(`S${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
+  );
+
+  beforeEach(() => {
+    vi.stubEnv('API_SECRET_KEY', 'test-secret');
+    vi.stubEnv('CATALOG_CACHE_DIR', mkdtempSync(join(tmpdir(), 'search-cache-')));
+    resetPriceCachesForTests();
+    getCatalogMock.mockReset().mockReturnValue(CATALOGO);
+    getPricesMock.mockReset().mockImplementation((skus: string[]) =>
+      Promise.resolve(new Map(skus.map((sku) => [sku, { price: 100, currency: 'us', inStock: 5 }]))),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('la segunda busqueda identica no llama a Intcomex', async () => {
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), makeRes());
+    const llamadasPrimera = getPricesMock.mock.calls.length;
+    expect(llamadasPrimera).toBeGreaterThan(0);
+
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
+    expect(getPricesMock.mock.calls.length).toBe(llamadasPrimera); // ni una mas
+    expect(res.body.productos).toHaveLength(3);
+    // Uso datos de cache: la edad se declara aunque sean frescos.
+    expect(res.body.precios_de_hace_min).toBeGreaterThanOrEqual(1);
+  });
+
+  it('solo cotiza en vivo los candidatos sin cache fresco', async () => {
+    // Primera pasada con limite 3 y stock disponible: la sonda (100 SKUs)
+    // basta, asi que SOLO esos 100 quedan cacheados — los otros 50 no.
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), makeRes());
+    expect(getPricesMock).toHaveBeenCalledTimes(1);
+    getPricesMock.mockClear();
+    // Segunda pasada pidiendo mas de lo que el cache cubre: 100 frescos se
+    // resuelven del cache y SOLO los 50 restantes van en vivo.
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '200' }, AUTH), makeRes());
+    const skusPedidos = getPricesMock.mock.calls.flatMap((c: any) => c[0] as string[]);
+    expect(skusPedidos.length).toBe(50);
+    expect(skusPedidos.every((sku: string) => Number(sku.slice(1)) >= 100)).toBe(true);
+  });
+
+  it('un lote caido se sirve del cache utilizable, declarando la edad', async () => {
+    vi.useFakeTimers();
+    // Puebla el cache...
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), makeRes());
+    // ...lo envejece mas alla de fresco (20 min) y tumba a Intcomex.
+    vi.advanceTimersByTime(20 * 60 * 1000);
+    getPricesMock.mockReset().mockRejectedValue(new Error('ECONNRESET'));
+
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
+    vi.useRealTimers();
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.productos).toHaveLength(3);
+    expect(res.body.precios_de_hace_min).toBeGreaterThanOrEqual(20);
+    expect(res.body.parcial).toBeUndefined(); // todo se resolvio, nada quedo sin cotizar
+  });
+
+  it('lote caido sin cache: parcial, como hoy', async () => {
+    getPricesMock.mockReset().mockRejectedValue(new Error('ECONNRESET'));
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
+    // Sin nada fresco ni utilizable y con la sonda caida, el upstream 502 de
+    // siempre sigue siendo la respuesta honesta.
+    expect(res.statusCode).toBe(502);
+  });
+
+  it('busqueda 100% en vivo no declara edad', async () => {
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
+    expect(res.body.precios_de_hace_min).toBeUndefined();
   });
 });
