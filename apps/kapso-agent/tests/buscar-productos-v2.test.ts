@@ -110,3 +110,22 @@ describe('buscar-productos-v2: por que vino vacia', () => {
     expect(data.estado).toBe('error');
   });
 });
+
+describe('buscar-productos-v2: busqueda parcial', () => {
+  it('propaga busqueda_incompleta sin afirmar que no hay stock', async () => {
+    respondWith({
+      total: 394,
+      parcial: true,
+      productos: [],
+      sin_resultados: {
+        motivo: 'busqueda_incompleta',
+        alternativa: { nombre: 'Lenovo V15', marca: 'Lenovo', precio: 100, stock: 0 },
+      },
+    });
+    const res = await handler(request({ input: { q: 'notebook', marca: 'Lenovo' } }), env);
+    const data = (await res.json()) as any;
+    expect(data.estado).toBe('busqueda_incompleta');
+    expect(data.mensaje).not.toMatch(/ninguno con stock/i);
+    expect(data.mensaje).toMatch(/acote|acotar/i);
+  });
+});

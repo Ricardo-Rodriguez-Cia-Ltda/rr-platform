@@ -1,5 +1,8 @@
 const API_BASE_DEFAULT = "https://api.pyxis-latam.cl/rr/captador-precios";
-const TIMEOUT_MS = 25000;
+// La API tiene su propio presupuesto de 8s y responde parcial antes de agotarlo,
+// asi que 15s es red de seguridad, no el caso normal. Mas alto que esto no sirve:
+// la conversacion de WhatsApp se cae antes.
+const TIMEOUT_MS = 15000;
 
 function json(payload, status = 200) {
   return new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
@@ -106,14 +109,25 @@ async function handler(request, env) {
   if (productos.length === 0) {
     const motivo = datos.sin_resultados?.motivo;
     const alternativa = datos.sin_resultados?.alternativa;
+    // `busqueda_incompleta` no es lo mismo que `sin_stock`: la API se quedo sin
+    // presupuesto de tiempo y no alcanzo a cotizar todos los candidatos. Decir
+    // "no hay con stock" seria afirmar algo que nadie comprobo.
+    const estado = motivo === "sin_stock"
+      ? "sin_stock"
+      : motivo === "busqueda_incompleta"
+        ? "busqueda_incompleta"
+        : "sin_coincidencias";
+    const mensajes = {
+      sin_stock: "Hay productos que calzan, pero ninguno con stock disponible. Dilo tal cual y ofrece buscar sin filtrar por stock, subir el presupuesto o cambiar de marca.",
+      busqueda_incompleta: "No alcancé a revisar todo el catálogo con esos filtros. No digas que no hay: dile que acote un poco más (marca o tipo de producto) y vuelve a buscar.",
+      sin_coincidencias: "Ningún producto calzó con esos filtros. Dilo tal cual y ofrece cambiar marca, presupuesto o tipo de producto."
+    };
     return json({
-      estado: motivo === "sin_stock" ? "sin_stock" : "sin_coincidencias",
+      estado,
       total: Number.isFinite(Number(datos.total)) ? Number(datos.total) : 0,
       mostrados: 0,
       productos: [],
-      mensaje: motivo === "sin_stock"
-        ? "Hay productos que calzan, pero ninguno con stock disponible. Dilo tal cual y ofrece buscar sin filtrar por stock, subir el presupuesto o cambiar de marca."
-        : "Ningún producto calzó con esos filtros. Dilo tal cual y ofrece cambiar marca, presupuesto o tipo de producto.",
+      mensaje: mensajes[estado],
       ...(alternativa && alternativa.nombre
         ? { alternativa: { nombre: String(alternativa.nombre), marca: alternativa.marca == null ? null : String(alternativa.marca), precio: precioVenta(alternativa.precio, margen, tipoCambio), moneda: "CLP" } }
         : {}),

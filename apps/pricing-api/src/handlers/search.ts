@@ -14,6 +14,13 @@ const MAX_CANDIDATOS_SIN_FILTROS = 50;
 // Con filtros hay que buscar mas abajo: precio y stock solo se conocen al
 // cotizar, y en el catalogo real apenas el 27% de los productos tiene stock.
 const MAX_CANDIDATOS_CON_FILTROS = 300;
+// Techo de reloj, ademas del techo de candidatos. Recorrer los 300 son ~6 viajes
+// al mayorista: cuando ninguno pasa el filtro se recorren todos y la respuesta
+// tarda ~18s. Quien llama es un agente dentro de una conversacion de WhatsApp,
+// que se cae mucho antes de eso — el 2026-08-31 un cliente recibio "esta
+// fallando el sistema" por esta espera. Vale mas responder a tiempo diciendo
+// que la busqueda quedo a medias que responder tarde y perfecto.
+const PRESUPUESTO_MS = 8000;
 
 interface Cotizado {
   sku: string;
@@ -33,9 +40,16 @@ function cheapest(productos: Cotizado[]): Cotizado {
 function explainEmpty(
   evaluados: Cotizado[],
   onlyWithStock: boolean,
+  truncado: boolean,
 ): { motivo: string; alternativa: Cotizado } {
   const withStock = evaluados.filter((p) => (p.stock ?? 0) > 0);
 
+  // Si la busqueda se corto por tiempo, no se recorrieron todos los candidatos:
+  // decir "sin_stock" afirmaria algo que no se comprobo. El consumidor tiene
+  // que poder distinguir "mire todo y no hay" de "no alcance a mirar todo".
+  if (truncado) {
+    return { motivo: 'busqueda_incompleta', alternativa: cheapest(withStock.length > 0 ? withStock : evaluados) };
+  }
   if (onlyWithStock && withStock.length === 0) {
     return { motivo: 'sin_stock', alternativa: cheapest(evaluados) };
   }
@@ -135,7 +149,21 @@ export function createSearchHandler(provider: Provider): Handler {
 
     // Se cotiza por lotes y se corta apenas se junta el limite pedido: sin
     // filtros esto es un solo lote, igual que antes.
+    const inicio = Date.now();
+    let truncadoPorTiempo = false;
+    let ultimoLoteMs = 0;
+
     for (let i = 0; i < candidates.length && productos.length < limit; i += provider.maxSkusPerBatch) {
+      // No basta con mirar el tiempo ya gastado: un lote solo puede costar varios
+      // segundos, asi que preguntar "¿me pase?" despues de empezarlo llega tarde.
+      // Se proyecta con lo que costo el anterior y no se empieza un lote que no
+      // se alcanza a pagar. El primero siempre corre: cortar antes devolveria
+      // cero evaluados y no habria nada que explicarle a nadie.
+      if (i > 0 && Date.now() - inicio + ultimoLoteMs > PRESUPUESTO_MS) {
+        truncadoPorTiempo = true;
+        break;
+      }
+      const inicioLote = Date.now();
       const batch = candidates.slice(i, i + provider.maxSkusPerBatch);
 
       let prices;
@@ -151,6 +179,8 @@ export function createSearchHandler(provider: Provider): Handler {
         res.status(502).json({ error: 'upstream', detail: 'Unexpected error calling provider' });
         return;
       }
+
+      ultimoLoteMs = Date.now() - inicioLote;
 
       for (const p of batch) {
         const price = prices.get(p.sku);
@@ -183,13 +213,17 @@ export function createSearchHandler(provider: Provider): Handler {
     res.status(200).json({
       total: matches.length,
       evaluados: evaluados.length,
+      // La busqueda se corto por tiempo y quedaron candidatos sin cotizar. No es
+      // un error: es una respuesta parcial, y quien la recibe tiene que saberlo
+      // para no afirmar que reviso todo.
+      ...(truncadoPorTiempo ? { parcial: true } : {}),
       productos,
       facetas: facetsWithPrice,
       // Vacio con candidatos cotizados no es lo mismo que "no existe": hay que
       // decir por que fallo y ofrecer lo mas cercano, o el consumidor reintenta
       // la misma busqueda con otras palabras creyendo que fue un error tecnico.
       ...(productos.length === 0 && evaluados.length > 0
-        ? { sin_resultados: explainEmpty(evaluados, onlyWithStock) }
+        ? { sin_resultados: explainEmpty(evaluados, onlyWithStock, truncadoPorTiempo) }
         : {}),
     });
   };

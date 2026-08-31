@@ -536,3 +536,80 @@ describe('GET /search — topes de cotizacion', () => {
     expect(res.body.evaluados).toBe(300);
   });
 });
+
+// El techo de candidatos no acota el reloj: recorrer los 300 son ~6 viajes al
+// mayorista, y cuando ninguno pasa el filtro se recorren todos. El 2026-08-31
+// eso tardo 18s y el agente de WhatsApp, que no puede esperar tanto, le dijo a
+// un cliente "esta fallando el sistema". Vale mas responder parcial a tiempo.
+describe('GET /search — presupuesto de tiempo', () => {
+  const LARGE_CATALOG = Array.from({ length: 250 }, (_, i) =>
+    makeProduct(`S${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
+  );
+
+  beforeEach(() => {
+    vi.stubEnv('API_SECRET_KEY', 'test-secret');
+    getCatalogMock.mockReset().mockReturnValue(LARGE_CATALOG);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.useRealTimers();
+  });
+
+  // Cada lote consume 5s de reloj simulado y no devuelve nada con stock. Con la
+  // proyeccion, despues del primer lote ya se sabe que el segundo no cabe en los
+  // 8s, asi que corta con un solo lote en vez de pasarse a 10s.
+  function slowBatches() {
+    getPricesMock.mockReset().mockImplementation((skus: string[]) => {
+      vi.advanceTimersByTime(5000);
+      return Promise.resolve(new Map(skus.map((sku) => [sku, { price: 100, currency: 'us', inStock: 0 }])));
+    });
+  }
+
+  it('corta la busqueda cuando se agota el presupuesto, en vez de recorrer los 300', async () => {
+    vi.useFakeTimers();
+    slowBatches();
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.parcial).toBe(true);
+    // Sin el presupuesto serian 6 lotes hasta los 300 candidatos; con la
+    // proyeccion no se empieza ninguno que no se alcance a pagar.
+    expect(getPricesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('no afirma sin_stock cuando no alcanzo a mirar todo', async () => {
+    vi.useFakeTimers();
+    slowBatches();
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
+
+    expect(res.body.sin_resultados.motivo).toBe('busqueda_incompleta');
+    expect(res.body.sin_resultados.alternativa).toBeTruthy();
+  });
+
+  it('el primer lote siempre corre, aunque ya se haya pasado el presupuesto', async () => {
+    vi.useFakeTimers();
+    getPricesMock.mockReset().mockImplementation((skus: string[]) => {
+      vi.advanceTimersByTime(30000);
+      return Promise.resolve(new Map(skus.map((sku) => [sku, { price: 100, currency: 'us', inStock: 0 }])));
+    });
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
+
+    expect(getPricesMock).toHaveBeenCalledTimes(1);
+    expect(res.body.evaluados).toBeGreaterThan(0);
+  });
+
+  it('una busqueda rapida no se marca parcial', async () => {
+    getPricesMock.mockReset().mockImplementation((skus: string[]) =>
+      Promise.resolve(new Map(skus.map((sku) => [sku, { price: 100, currency: 'us', inStock: 5 }]))),
+    );
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
+
+    expect(res.body.parcial).toBeUndefined();
+    expect(res.body.productos).toHaveLength(3);
+  });
+});
