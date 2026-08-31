@@ -10,9 +10,13 @@ info:
 
     El surtido (SKU, nombre, marca, categoría) viene de un catálogo cacheado
     por proveedor, con hasta 24 h de antigüedad. El precio y el stock se
-    consultan en vivo en cada request, con una excepción documentada: el
+    consultan en vivo en cada request, con dos excepciones documentadas: el
     ranking de /{proveedor}/search contra Tecnoglobal puede traer precios de
-    hasta una hora, porque su API limita muy fuerte el volcado del catálogo.
+    hasta una hora, porque su API limita muy fuerte el volcado del catálogo; y
+    /search (Intcomex e Ingram) puede servir precio de un caché propio de hasta
+    15 minutos, o hasta 24 h si el proveedor cae, con la edad declarada en
+    precios_de_hace_min. /product, /price y /mejor-precio siempre cotizan en
+    vivo, sin excepción.
 
     Cada distribuidor tiene su propio SKU: no son comparables entre sí. Lo
     único común es el mpn (part number del fabricante), que es lo que usa

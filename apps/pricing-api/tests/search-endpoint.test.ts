@@ -795,4 +795,24 @@ describe('GET /search — cache de precios', () => {
     expect(res.body.evaluados).toBeGreaterThan(0);
     expect(res.body.sin_resultados?.motivo).toBe('sin_stock');
   });
+
+  // Regresion: un 200 vacio (Intcomex en un dia malo) es indistinguible de
+  // "estos SKUs no tienen precio". Si se cacheara como negativo, la busqueda
+  // dejaria de preguntarle al proveedor por 15 minutos y respondería
+  // "sin_coincidencias" falso aunque el proveedor ya este sano de nuevo.
+  it('un 200 vacio no envenena el cache: la siguiente busqueda vuelve a preguntar', async () => {
+    getPricesMock.mockReset().mockResolvedValue(new Map());
+    const primera = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), primera);
+    expect(primera.body.productos).toHaveLength(0);
+    getPricesMock.mockClear();
+
+    getPricesMock.mockImplementation((skus: string[]) =>
+      Promise.resolve(new Map(skus.map((sku) => [sku, { price: 100, currency: 'us', inStock: 5 }]))),
+    );
+    const segunda = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), segunda);
+    expect(getPricesMock).toHaveBeenCalled();
+    expect(segunda.body.productos).toHaveLength(3);
+  });
 });

@@ -69,6 +69,14 @@ describe('PriceCache: negativos', () => {
     const { fresh } = cache.get(['MUERTO']);
     expect(fresh.get('MUERTO')?.info).toBeNull();
   });
+
+  it('un lote 200 completamente vacio no cachea ningun negativo', () => {
+    const cache = new PriceCache('intcomex');
+    cache.put(new Map(), ['A', 'B']);
+    const { fresh, usable } = cache.get(['A', 'B']);
+    expect(fresh.size).toBe(0);
+    expect(usable.size).toBe(0);
+  });
 });
 
 describe('PriceCache: disco', () => {

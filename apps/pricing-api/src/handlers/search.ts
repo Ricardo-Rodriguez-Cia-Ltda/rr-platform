@@ -201,10 +201,15 @@ export function createSearchHandler(provider: Provider): Handler {
     let maxAgeMs = 0;
 
     const desdeCache = (p: NormalizedProduct, entry: CachedPrice): void => {
-      maxAgeMs = Math.max(maxAgeMs, Date.now() - entry.quotedAt);
-      if (entry.info) procesar([p], new Map([[p.sku, entry.info]]));
       // info null = negativo cacheado: ni evaluado ni cotizable, igual que un
-      // SKU que la API viva no devuelve.
+      // SKU que la API viva no devuelve. No aporta nada visible, asi que no
+      // empuja la edad declarada — solo los candidatos con precio (los que
+      // participaron de la decision, aunque despues los filtre precio_max o
+      // stock) cuentan.
+      if (entry.info) {
+        maxAgeMs = Math.max(maxAgeMs, Date.now() - entry.quotedAt);
+        procesar([p], new Map([[p.sku, entry.info]]));
+      }
     };
 
     // Los frescos se resuelven ya, en el orden del ranking; los pendientes

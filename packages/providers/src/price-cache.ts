@@ -62,6 +62,13 @@ export class PriceCache {
   }
 
   put(results: Map<string, PriceInfo>, requested: string[]): void {
+    // Un lote 200 vacio (le pasa a Intcomex en sus dias malos) es indistinguible
+    // de "estos SKUs no tienen precio": es mas probable un bache del proveedor
+    // que 100 SKUs muertos a la vez. Si no vino nada, no se escribe ningun
+    // negativo — los aciertos tampoco existen, asi que no hay nada que
+    // persistir. Un lote donde ALGUNOS vinieron si cachea el negativo de los
+    // ausentes: ese es el negativo legitimo.
+    if (results.size === 0 && requested.length > 0) return;
     const quotedAt = Date.now();
     for (const sku of requested) {
       this.entries.set(sku, { info: results.get(sku) ?? null, quotedAt });
@@ -77,11 +84,15 @@ export class PriceCache {
     try {
       mkdirSync(cacheDir(), { recursive: true });
       const shape: DiskShape = { entries: Object.fromEntries(this.entries) };
-      // Temporal + rename: dos procesos escribiendo a la vez pierden una
-      // escritura como maximo, nunca dejan un archivo a medias. Ojo: el cache
-      // de catalogo escribe directo; ese patron NO se copia aca.
-      writeFileSync(`${this.path}.tmp`, JSON.stringify(shape));
-      renameSync(`${this.path}.tmp`, this.path);
+      // Temporal por pid + rename: dos procesos escribiendo a la vez (produccion
+      // y un serve de pruebas, por ejemplo) nunca mezclan su temporal ni dejan
+      // un archivo a medias. Gana el rename del ultimo en terminar; el otro
+      // proceso pierde su delta desde su ultima escritura, pero el archivo
+      // jamas se corrompe. Ojo: el cache de catalogo escribe directo; ese
+      // patron NO se copia aca.
+      const tmpPath = `${this.path}.${process.pid}.tmp`;
+      writeFileSync(tmpPath, JSON.stringify(shape));
+      renameSync(tmpPath, this.path);
     } catch (error) {
       // Un disco que falla degrada a cache solo-memoria; no tumba la busqueda.
       console.error(`[price-cache] ${this.proveedor}: no se pudo persistir`, error);

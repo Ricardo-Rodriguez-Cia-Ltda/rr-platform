@@ -3,6 +3,7 @@ node_modules/
 .vercel/
 logs/
 cache/
+cache-e2e/
 .env
 .env.*
 !.env.example

@@ -18,9 +18,11 @@ Dos capas distintas, con propiedades distintas:
 | Dato | Origen | Frescura |
 |---|---|---|
 | Surtido (SKU, nombre, marca, categoría, MPN) | catálogo descargado de Intcomex | hasta 24 h de antigüedad |
-| Precio y stock | consulta en vivo a Intcomex en cada request | del momento |
+| Precio y stock | consulta en vivo, o caché de `/search` | `/search` puede servir precio de caché de hasta 15 min (hasta 24 h si el proveedor cae), con la edad declarada en `precios_de_hace_min`; la cotización sigue siendo siempre en vivo |
 
-El precio nunca sale de caché. Lo que puede estar desactualizado es qué
+En `/search` el precio puede salir de caché, con la edad siempre declarada. En
+`/product`, `/price` y `/mejor-precio` el precio jamás sale de caché: siempre
+es una consulta en vivo. Lo que puede estar desactualizado además es qué
 productos existen, no cuánto cuestan.
 
 > [!IMPORTANT]
@@ -99,7 +101,7 @@ Lo único común es el `mpn` (part number del fabricante).
 
 | Endpoint | Intcomex | Tecnoglobal | Ingram |
 |---|---|---|---|
-| `/search` | En vivo | Hasta **1 hora** de antigüedad | En vivo |
+| `/search` | En vivo o caché ≤15 min (≤24 h ante caída, declarado) | Hasta **1 hora** de antigüedad | En vivo o caché ≤15 min (≤24 h ante caída, declarado) |
 | `/product`, `/price` | En vivo | En vivo | En vivo |
 
 Tecnoglobal limita muy fuerte las descargas de su catálogo completo y no tiene
