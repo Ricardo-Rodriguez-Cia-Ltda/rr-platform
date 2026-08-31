@@ -1,6 +1,10 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { CatalogUnavailableError } from '@rr/providers/catalog';
+import { resetPriceCachesForTests } from '@rr/providers/price-cache';
 import type { NormalizedProduct } from '@rr/domain/product';
 import { ProviderError } from '@rr/domain/types';
 
@@ -218,6 +222,11 @@ describe('contrato de errores de la API', () => {
     vi.stubEnv('INTCOMEX_API_KEY', 'pub');
     vi.stubEnv('INTCOMEX_ACCESS_KEY', 'secret');
     vi.stubEnv('INTCOMEX_BASE_URL', 'https://x/');
+    // search ahora conversa con el cache de precios en disco; sin aislarlo,
+    // el cache real del repo (cache/prices-intcomex.json) puede filtrar HP1
+    // como "fresco" y esconder el 502 que este contrato verifica.
+    vi.stubEnv('CATALOG_CACHE_DIR', mkdtempSync(join(tmpdir(), 'error-contract-cache-')));
+    resetPriceCachesForTests();
     // Silencia los console.error de los caminos 502, que son esperados aca.
     vi.spyOn(console, 'error').mockImplementation(() => {});
 

@@ -57,6 +57,13 @@ Write-Host "Tarea CaptadorPrecios-API registrada."
 # se come las comillas y la tarea muere con codigo 1 sin escribir nada.
 # --config explicito porque, como SYSTEM, cloudflared no ve el perfil del usuario;
 # --logfile porque sin cmd no hay redireccion de salida.
+#
+# El config.yml del tunel (en ~/.cloudflared) lleva `protocol: http2`, y no es
+# opcional: con el QUIC por defecto, el 2026-08-31 el tunel paso horas ciclando
+# conexiones ("timeout: no recent network activity" — esta red degrada UDP) y
+# las functions de Kapso no llegaban a la API, aunque las pruebas desde este
+# mismo PC si pasaban, porque entran por el borde de Santiago que seguia vivo.
+# Si se recrea el tunel, conservar esa linea.
 $accionTunel = New-ScheduledTaskAction -Execute $cloudflared `
   -Argument "--config `"$configTunel`" --logfile `"$proj\logs\tunnel.log`" tunnel run"
 Register-ScheduledTask -TaskName "CaptadorPrecios-Tunnel" -Action $accionTunel -Trigger $trigger `

@@ -1,5 +1,9 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { resetPriceCachesForTests } from '@rr/providers/price-cache';
 import type { NormalizedProduct } from '@rr/domain/product';
 
 const getCatalogMock = vi.fn();
@@ -80,6 +84,10 @@ beforeEach(() => {
   vi.stubEnv('INTCOMEX_API_KEY', 'pub');
   vi.stubEnv('INTCOMEX_ACCESS_KEY', 'secret');
   vi.stubEnv('INTCOMEX_BASE_URL', 'https://x/');
+  // search ahora conversa con el cache de precios en disco; aislado para no
+  // leer ni escribir el cache real del repo durante los tests.
+  vi.stubEnv('CATALOG_CACHE_DIR', mkdtempSync(join(tmpdir(), 'provider-routes-cache-')));
+  resetPriceCachesForTests();
   getCatalogMock.mockReset().mockReturnValue(CATALOG);
   getPricesMock
     .mockReset()
@@ -96,6 +104,12 @@ describe('rutas /api/{proveedor}/...', () => {
   it('sirve /api/intcomex/search identico al alias /api/search', async () => {
     const resAlias = makeRes();
     await aliasSearch(makeReq({ q: 'probook' }, AUTH), resAlias);
+
+    // La primera llamada dejo HP1 en cache: sin reaislar, la segunda lo
+    // serviria fresco y ganaria `precios_de_hace_min`, que no es lo que esta
+    // prueba compara (paridad de rutas, no el cache).
+    vi.stubEnv('CATALOG_CACHE_DIR', mkdtempSync(join(tmpdir(), 'provider-routes-cache-')));
+    resetPriceCachesForTests();
 
     const resByRoute = makeRes();
     await searchByRoute(makeReq({ proveedor: 'intcomex', q: 'probook' }, AUTH), resByRoute);

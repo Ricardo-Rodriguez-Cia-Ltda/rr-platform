@@ -120,3 +120,39 @@ describe('intcomex.getPrice', () => {
     });
   });
 });
+
+// Intcomex bota conexiones sueltas en medio de dias normales (2026-08-31), y
+// cada una convertia la busqueda entera en un 502. Las llamadas son lecturas
+// idempotentes: un fallo de red se reintenta una vez antes de rendirse.
+describe('intcomex: reintento ante fallo de red', () => {
+  beforeEach(() => {
+    vi.stubEnv('INTCOMEX_API_KEY', 'pub-key');
+    vi.stubEnv('INTCOMEX_ACCESS_KEY', 'secret-key');
+    vi.stubEnv('INTCOMEX_BASE_URL', 'https://intcomex-test.apigee.net/v1/');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it('un fallo transitorio se reintenta y la llamada sale bien', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('ECONNRESET'))
+      .mockResolvedValueOnce(new Response(JSON.stringify([IWS_PRODUCT]), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const prices = await intcomex.getPrices(['SE001MSE01']);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(prices.get('SE001MSE01')?.price).toBeCloseTo(103.5294);
+  });
+
+  it('dos fallos seguidos si son un ProviderError', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('ECONNRESET'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(intcomex.getPrices(['SE001MSE01'])).rejects.toThrow(ProviderError);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});

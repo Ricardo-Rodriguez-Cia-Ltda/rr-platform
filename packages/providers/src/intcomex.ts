@@ -41,14 +41,22 @@ export async function fetchIws(
   const url = new URL(path, baseUrl);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
 
-  try {
-    return await fetchWithTimeout(url, {
-      headers: {
-        Authorization: `Bearer ${buildAuthToken(apiKey, accessKey, new Date())}`,
-      },
-    });
-  } catch {
-    throw new ProviderError('upstream', 'Could not reach Intcomex');
+  // Un fallo de red se reintenta UNA vez antes de rendirse. Todas las llamadas
+  // de este cliente son lecturas idempotentes, y el 2026-08-31 Intcomex estuvo
+  // botando conexiones sueltas en medio de dias normales: cada una de esas
+  // convertia la busqueda entera en un 502 y el bot le decia al cliente que
+  // habia un problema tecnico. El token se rearma en cada intento porque lleva
+  // la hora.
+  for (let intento = 0; ; intento++) {
+    try {
+      return await fetchWithTimeout(url, {
+        headers: {
+          Authorization: `Bearer ${buildAuthToken(apiKey, accessKey, new Date())}`,
+        },
+      });
+    } catch {
+      if (intento >= 1) throw new ProviderError('upstream', 'Could not reach Intcomex');
+    }
   }
 }
 

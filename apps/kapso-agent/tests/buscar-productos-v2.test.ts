@@ -126,6 +126,38 @@ describe('buscar-productos-v2: busqueda parcial', () => {
     const data = (await res.json()) as any;
     expect(data.estado).toBe('busqueda_incompleta');
     expect(data.mensaje).not.toMatch(/ninguno con stock/i);
-    expect(data.mensaje).toMatch(/acote|acotar/i);
+    expect(data.mensaje).toMatch(/reintenta/i);
+    expect(data.mensaje).toMatch(/no le pidas/i);
+  });
+});
+
+describe('buscar-productos-v2: edad de los precios', () => {
+  it('propaga precios_de_hace_min cuando la API lo declara', async () => {
+    respondWith({
+      total: 2,
+      productos: [
+        {
+          sku: 'AR155EPS14',
+          mpn: 'ERC-38B',
+          nombre: 'Cinta Epson ERC-38B negra',
+          marca: 'Epson',
+          categoria: 'Suministros',
+          precio: 11.0,
+          moneda: 'US',
+          stock: 14,
+        },
+      ],
+      precios_de_hace_min: 40,
+    });
+    const res = await handler(request({ input: { q: 'cinta' } }), env);
+    const data = (await res.json()) as any;
+    expect(data.precios_de_hace_min).toBe(40);
+  });
+
+  it('no inventa el campo cuando la API no lo trae', async () => {
+    respondWith(search);
+    const res = await handler(request({ input: { q: 'cinta epson' } }), env);
+    const data = (await res.json()) as any;
+    expect(data.precios_de_hace_min).toBeUndefined();
   });
 });

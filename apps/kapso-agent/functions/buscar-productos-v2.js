@@ -1,8 +1,9 @@
 const API_BASE_DEFAULT = "https://api.pyxis-latam.cl/rr/captador-precios";
-// La API tiene su propio presupuesto de 8s y responde parcial antes de agotarlo,
-// asi que 15s es red de seguridad, no el caso normal. Mas alto que esto no sirve:
-// la conversacion de WhatsApp se cae antes.
-const TIMEOUT_MS = 15000;
+// La API cotiza en sonda + ronda paralela: su peor caso honesto son ~2 lotes de
+// reloj (~15s con el mayorista lento) y su presupuesto interno es 20s. El
+// usuario prefirio explicito esperar ~10-15s y recibir productos. 25s aqui es
+// la red de seguridad exterior, no el caso normal.
+const TIMEOUT_MS = 25000;
 
 function json(payload, status = 200) {
   return new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
@@ -119,7 +120,7 @@ async function handler(request, env) {
         : "sin_coincidencias";
     const mensajes = {
       sin_stock: "Hay productos que calzan, pero ninguno con stock disponible. Dilo tal cual y ofrece buscar sin filtrar por stock, subir el presupuesto o cambiar de marca.",
-      busqueda_incompleta: "No alcancé a revisar todo el catálogo con esos filtros. No digas que no hay: dile que acote un poco más (marca o tipo de producto) y vuelve a buscar.",
+      busqueda_incompleta: "El catálogo no se alcanzó a revisar completo. NO le pidas más requisitos al cliente por esto: reintenta una sola vez la misma búsqueda (con categoria puesta si no la tenía), y si sigue incompleta ofrece la alternativa o lo más cercano que tengas.",
       sin_coincidencias: "Ningún producto calzó con esos filtros. Dilo tal cual y ofrece cambiar marca, presupuesto o tipo de producto."
     };
     return json({
@@ -131,7 +132,10 @@ async function handler(request, env) {
       ...(alternativa && alternativa.nombre
         ? { alternativa: { nombre: String(alternativa.nombre), marca: alternativa.marca == null ? null : String(alternativa.marca), precio: precioVenta(alternativa.precio, margen, tipoCambio), moneda: "CLP" } }
         : {}),
-      ...(rango ? { rango_precio: rango } : {})
+      ...(rango ? { rango_precio: rango } : {}),
+      ...(Number.isFinite(Number(datos.precios_de_hace_min)) && Number(datos.precios_de_hace_min) > 0
+        ? { precios_de_hace_min: Number(datos.precios_de_hace_min) }
+        : {})
     });
   }
 
@@ -140,6 +144,9 @@ async function handler(request, env) {
     total: Number.isFinite(Number(datos.total)) ? Number(datos.total) : productos.length,
     mostrados: productos.length,
     productos,
-    ...(rango ? { rango_precio: rango } : {})
+    ...(rango ? { rango_precio: rango } : {}),
+    ...(Number.isFinite(Number(datos.precios_de_hace_min)) && Number(datos.precios_de_hace_min) > 0
+      ? { precios_de_hace_min: Number(datos.precios_de_hace_min) }
+      : {})
   });
 }

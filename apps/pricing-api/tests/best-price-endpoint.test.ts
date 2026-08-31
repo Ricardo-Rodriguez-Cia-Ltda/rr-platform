@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { getPriceCache, resetPriceCachesForTests } from '@rr/providers/price-cache';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const compareMock = vi.fn();
 const resolveKeysMock = vi.fn();
@@ -311,5 +315,27 @@ describe('GET /mejor-precio', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.incompleta).toHaveLength(1);
+  });
+});
+
+// El principio del diseno (spec 2026-08-31): la cotizacion se compromete en
+// vivo, SIEMPRE. Esta prueba existe para que conectar el cache aqui sea un
+// acto deliberado que rompa la suite, no un descuido.
+describe('GET /mejor-precio ignora el cache de precios', () => {
+  it('con el cache lleno igual cotiza en vivo', async () => {
+    vi.stubEnv('CATALOG_CACHE_DIR', mkdtempSync(join(tmpdir(), 'bp-cache-')));
+    resetPriceCachesForTests();
+    // Cache lleno con un precio deliberadamente distinto al del mock vivo.
+    getPriceCache('ingram').put(new Map([['IM1', { price: 1, currency: 'USD', inStock: 99 }]]), ['IM1']);
+    getPriceCache('intcomex').put(new Map([['IM1', { price: 1, currency: 'USD', inStock: 99 }]]), ['IM1']);
+
+    const res = makeRes();
+    await handler(makeReq({ mpn: 'MPN1', marca: 'HP' }, AUTH), res);
+
+    expect(res.statusCode).toBe(200);
+    // La comparacion EN VIVO fue llamada, y su precio (100) es el que responde
+    // — no el 1 del cache.
+    expect(compareMock).toHaveBeenCalled();
+    expect(res.body.mejor.precio).toBe(100);
   });
 });

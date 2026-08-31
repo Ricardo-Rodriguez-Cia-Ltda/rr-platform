@@ -18,9 +18,11 @@ Dos capas distintas, con propiedades distintas:
 | Dato | Origen | Frescura |
 |---|---|---|
 | Surtido (SKU, nombre, marca, categoría, MPN) | catálogo descargado de Intcomex | hasta 24 h de antigüedad |
-| Precio y stock | consulta en vivo a Intcomex en cada request | del momento |
+| Precio y stock | consulta en vivo, o caché de `/search` | `/search` puede servir precio de caché de hasta 15 min (hasta 24 h si el proveedor cae), con la edad declarada en `precios_de_hace_min`; la cotización sigue siendo siempre en vivo |
 
-El precio nunca sale de caché. Lo que puede estar desactualizado es qué
+En `/search` el precio puede salir de caché, con la edad siempre declarada. En
+`/product`, `/price` y `/mejor-precio` el precio jamás sale de caché: siempre
+es una consulta en vivo. Lo que puede estar desactualizado además es qué
 productos existen, no cuánto cuestan.
 
 > [!IMPORTANT]
@@ -99,7 +101,7 @@ Lo único común es el `mpn` (part number del fabricante).
 
 | Endpoint | Intcomex | Tecnoglobal | Ingram |
 |---|---|---|---|
-| `/search` | En vivo | Hasta **1 hora** de antigüedad | En vivo |
+| `/search` | En vivo o caché ≤15 min (≤24 h ante caída, declarado) | Hasta **1 hora** de antigüedad | En vivo o caché ≤15 min (≤24 h ante caída, declarado) |
 | `/product`, `/price` | En vivo | En vivo | En vivo |
 
 Tecnoglobal limita muy fuerte las descargas de su catálogo completo y no tiene
@@ -308,10 +310,13 @@ ofrecía una mochila a quien buscó un notebook.
 ### `parcial`
 
 Cotizar es ir al mayorista, y con filtros activos la API recorre hasta 300
-candidatos en lotes. Cuando ninguno pasa el filtro los recorre todos, y eso
-tarda. Para no dejar esperando a quien llama, hay un presupuesto de **8
-segundos**: al agotarse, la respuesta trae `parcial: true` y el recorrido queda
-a medias. `evaluados` dice cuántos alcanzó a cotizar.
+candidatos. El primer lote va solo, como sonda; si no basta, el resto se cotiza
+**en una ronda paralela**, así que el peor caso honesto son ~2 lotes de reloj
+(~15 s con el mayorista lento, 2-3 s en un día normal). Hay además un
+presupuesto de **20 segundos**: si la sonda sola ya proyecta pasarse, la ronda
+no se lanza, la respuesta trae `parcial: true` y el recorrido queda a medias —
+lo mismo si un lote de la ronda falla. `evaluados` dice cuántos alcanzó a
+cotizar.
 
 Una respuesta `parcial` no es un error, y sobre todo no autoriza a afirmar que
 algo no existe: solo se sabe de los `evaluados`.
@@ -319,6 +324,12 @@ algo no existe: solo se sabe de los `evaluados`.
 En este caso **no hay que reintentar la búsqueda**. La información ya está: el
 producto existe pero no bajo esas condiciones. Lo correcto es explicárselo al
 usuario y ofrecerle la `alternativa`.
+
+### `precios_de_hace_min`
+
+Presente solo cuando la respuesta usó precios cacheados: es la edad en minutos
+del dato más viejo que participó. La cotización (`/mejor-precio`) nunca usa
+caché — esto aplica solo a la búsqueda.
 
 ### Cómo funciona el ranking (para escribir buenos `q`)
 
