@@ -289,12 +289,32 @@ campo `sin_resultados`. La consulta no calzó con el catálogo.
 }
 ```
 
-`motivo` toma uno de dos valores:
+`motivo` toma uno de tres valores:
 
 - `sin_stock` — se pidió `solo_con_stock=true` y ninguno de los evaluados tiene
   existencias. `alternativa` es el más barato de los evaluados (sin stock).
 - `sobre_presupuesto` — ninguno cae bajo `precio_max`. `alternativa` es el más
   barato **con stock** si lo hay; si no, el más barato en general.
+
+En todos los casos, `alternativa` se elige **dentro de la categoría dominante**
+de los candidatos evaluados. Sin eso, un accesorio que calza por texto (una
+mochila "Notebook carrying backpack") ganaba por ser lo más barato, y la API
+ofrecía una mochila a quien buscó un notebook.
+- `busqueda_incompleta` — la búsqueda se cortó por presupuesto de tiempo y
+  quedaron candidatos sin cotizar, así que **no se comprobó** que no haya. Viene
+  siempre junto a `parcial: true`. Acá sí conviene reintentar, pero con filtros
+  más acotados, no con las mismas palabras.
+
+### `parcial`
+
+Cotizar es ir al mayorista, y con filtros activos la API recorre hasta 300
+candidatos en lotes. Cuando ninguno pasa el filtro los recorre todos, y eso
+tarda. Para no dejar esperando a quien llama, hay un presupuesto de **8
+segundos**: al agotarse, la respuesta trae `parcial: true` y el recorrido queda
+a medias. `evaluados` dice cuántos alcanzó a cotizar.
+
+Una respuesta `parcial` no es un error, y sobre todo no autoriza a afirmar que
+algo no existe: solo se sabe de los `evaluados`.
 
 En este caso **no hay que reintentar la búsqueda**. La información ya está: el
 producto existe pero no bajo esas condiciones. Lo correcto es explicárselo al

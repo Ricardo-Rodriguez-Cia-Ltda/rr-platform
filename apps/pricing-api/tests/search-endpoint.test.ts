@@ -536,3 +536,129 @@ describe('GET /search — topes de cotizacion', () => {
     expect(res.body.evaluados).toBe(300);
   });
 });
+
+// El techo de candidatos no acota el reloj: recorrer los 300 son ~6 viajes al
+// mayorista, y cuando ninguno pasa el filtro se recorren todos. El 2026-08-31
+// eso tardo 18s y el agente de WhatsApp, que no puede esperar tanto, le dijo a
+// un cliente "esta fallando el sistema". Vale mas responder parcial a tiempo.
+describe('GET /search — presupuesto de tiempo', () => {
+  const LARGE_CATALOG = Array.from({ length: 250 }, (_, i) =>
+    makeProduct(`S${i}`, `Notebook generico ${i}`, 'HP', 'Computadores'),
+  );
+
+  beforeEach(() => {
+    vi.stubEnv('API_SECRET_KEY', 'test-secret');
+    getCatalogMock.mockReset().mockReturnValue(LARGE_CATALOG);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.useRealTimers();
+  });
+
+  // Cada lote consume 5s de reloj simulado y no devuelve nada con stock. Con la
+  // proyeccion, despues del primer lote ya se sabe que el segundo no cabe en los
+  // 8s, asi que corta con un solo lote en vez de pasarse a 10s.
+  function slowBatches() {
+    getPricesMock.mockReset().mockImplementation((skus: string[]) => {
+      vi.advanceTimersByTime(5000);
+      return Promise.resolve(new Map(skus.map((sku) => [sku, { price: 100, currency: 'us', inStock: 0 }])));
+    });
+  }
+
+  it('corta la busqueda cuando se agota el presupuesto, en vez de recorrer los 300', async () => {
+    vi.useFakeTimers();
+    slowBatches();
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.parcial).toBe(true);
+    // Sin el presupuesto serian 6 lotes hasta los 300 candidatos; con la
+    // proyeccion no se empieza ninguno que no se alcance a pagar.
+    expect(getPricesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('no afirma sin_stock cuando no alcanzo a mirar todo', async () => {
+    vi.useFakeTimers();
+    slowBatches();
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
+
+    expect(res.body.sin_resultados.motivo).toBe('busqueda_incompleta');
+    expect(res.body.sin_resultados.alternativa).toBeTruthy();
+  });
+
+  it('el primer lote siempre corre, aunque ya se haya pasado el presupuesto', async () => {
+    vi.useFakeTimers();
+    getPricesMock.mockReset().mockImplementation((skus: string[]) => {
+      vi.advanceTimersByTime(30000);
+      return Promise.resolve(new Map(skus.map((sku) => [sku, { price: 100, currency: 'us', inStock: 0 }])));
+    });
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
+
+    expect(getPricesMock).toHaveBeenCalledTimes(1);
+    expect(res.body.evaluados).toBeGreaterThan(0);
+  });
+
+  it('una busqueda rapida no se marca parcial', async () => {
+    getPricesMock.mockReset().mockImplementation((skus: string[]) =>
+      Promise.resolve(new Map(skus.map((sku) => [sku, { price: 100, currency: 'us', inStock: 5 }]))),
+    );
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
+
+    expect(res.body.parcial).toBeUndefined();
+    expect(res.body.productos).toHaveLength(3);
+  });
+});
+
+// La alternativa de una busqueda vacia debe ser del tipo de producto buscado.
+// En el catalogo real, "notebook" calza tambien con una mochila ("Notebook
+// carrying backpack") que ademas es lo mas barato: cheapest() a secas la
+// ofrecia como alternativa a quien pidio un notebook (produccion, 2026-08-31).
+describe('GET /search — la alternativa respeta la categoria dominante', () => {
+  const CATALOGO_CON_MOCHILA = [
+    ...Array.from({ length: 10 }, (_, i) =>
+      makeProduct(`N${i}`, `Lenovo Notebook 14 modelo ${i}`, 'Lenovo', 'Computadores'),
+    ),
+    makeProduct('M1', 'Lenovo Casual Backpack B210 Notebook carrying backpack', 'Lenovo', 'Maletines'),
+  ];
+
+  beforeEach(() => {
+    vi.stubEnv('API_SECRET_KEY', 'test-secret');
+    getCatalogMock.mockReset().mockReturnValue(CATALOGO_CON_MOCHILA);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('sin stock en nada, la alternativa es un notebook y no la mochila barata', async () => {
+    // La mochila vale 11 y es lo mas barato; los notebooks 500. Nada tiene stock.
+    getPricesMock.mockReset().mockImplementation((skus: string[]) =>
+      Promise.resolve(new Map(skus.map((sku) => [sku, { price: sku === 'M1' ? 11 : 500, currency: 'us', inStock: 0 }]))),
+    );
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'Lenovo', solo_con_stock: 'true', limite: '4' }, AUTH), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.sin_resultados.motivo).toBe('sin_stock');
+    expect(res.body.sin_resultados.alternativa.categoria).toBe('Computadores');
+  });
+
+  it('sobre presupuesto, la alternativa tambien sale de la categoria dominante', async () => {
+    // La mochila (200) tambien queda sobre el tope de 100: todo sobre presupuesto,
+    // pero la mochila sigue siendo lo mas barato — el cebo exacto del bug.
+    getPricesMock.mockReset().mockImplementation((skus: string[]) =>
+      Promise.resolve(new Map(skus.map((sku) => [sku, { price: sku === 'M1' ? 200 : 500, currency: 'us', inStock: 3 }]))),
+    );
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'Lenovo', precio_max: '100', limite: '4' }, AUTH), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.sin_resultados.motivo).toBe('sobre_presupuesto');
+    expect(res.body.sin_resultados.alternativa.categoria).toBe('Computadores');
+  });
+});

@@ -1,14 +1,22 @@
 const API_BASE_DEFAULT = "https://api.pyxis-latam.cl/rr/captador-precios";
-const TIMEOUT_MS = 25000;
+// La API tiene su propio presupuesto de 8s y responde parcial antes de agotarlo,
+// asi que 15s es red de seguridad, no el caso normal. Mas alto que esto no sirve:
+// la conversacion de WhatsApp se cae antes.
+const TIMEOUT_MS = 15000;
 
 function json(payload, status = 200) {
   return new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
 }
 
-function precioVenta(costo, margen) {
+// El costo del mayorista viene en dolares; el cliente compra en pesos. La
+// conversion pasa aca y no en el prompt: el agente no debe hacer aritmetica de
+// tipo de cambio, y el cliente no tiene por que convertir su propio
+// presupuesto. Se usa el mismo TIPO_CAMBIO_CLP_USD que generar-cotizacion, para
+// que el precio que se muestra en la busqueda y el de la cotizacion coincidan.
+function precioVenta(costo, margen, tipoCambio) {
   const valor = Number(costo);
   if (!Number.isFinite(valor) || valor < 0) return null;
-  return Math.round(valor * (1 + margen) * 100) / 100;
+  return Math.round(valor * (1 + margen) * tipoCambio);
 }
 
 async function handler(request, env) {
@@ -16,9 +24,13 @@ async function handler(request, env) {
   const input = body.input ?? {};
   const apiKey = String(env.API_PRECIOS_KEY ?? "").trim();
   const margen = Number(env.MARGEN ?? "0.13");
+  const tipoCambio = Number(env.TIPO_CAMBIO_CLP_USD ?? "950");
 
   if (!apiKey) return json({ estado: "error", mensaje: "La integración del catálogo no está configurada." }, 500);
   if (!Number.isFinite(margen) || margen < 0) return json({ estado: "error", mensaje: "La integración del catálogo no está disponible." }, 500);
+  // Mayor que cero: un tipo de cambio vacio coacciona a 0 y dejaria todos los
+  // precios en $0, que es peor que no mostrar nada.
+  if (!Number.isFinite(tipoCambio) || tipoCambio <= 0) return json({ estado: "error", mensaje: "La integración del catálogo no está disponible." }, 500);
 
   const q = String(input.q ?? "").trim();
   if (!q) return json({ estado: "error", mensaje: "Falta el término de búsqueda." }, 400);
@@ -32,9 +44,14 @@ async function handler(request, env) {
   if (input.categoria) params.set("categoria", String(input.categoria).trim());
   params.set("solo_con_stock", input.incluir_sin_stock === true ? "false" : "true");
 
+  // `precio_max` llega en pesos, que es como habla el cliente. La API filtra por
+  // costo del mayorista en dolares, asi que se le saca el margen y se pasa a
+  // dolares antes de mandarlo.
   if (input.precio_max !== undefined && input.precio_max !== null && input.precio_max !== "") {
-    const topeVenta = Number(input.precio_max);
-    if (Number.isFinite(topeVenta) && topeVenta > 0) params.set("precio_max", (topeVenta / (1 + margen)).toFixed(4));
+    const topeVentaCLP = Number(input.precio_max);
+    if (Number.isFinite(topeVentaCLP) && topeVentaCLP > 0) {
+      params.set("precio_max", (topeVentaCLP / tipoCambio / (1 + margen)).toFixed(4));
+    }
   }
 
   let respuesta;
@@ -73,16 +90,50 @@ async function handler(request, env) {
         marca: p.marca == null ? null : String(p.marca),
         nombre: String(p.nombre ?? ""),
         categoria: p.categoria == null ? null : String(p.categoria),
-        precio: precioVenta(p.precio, margen),
-        moneda: "USD",
+        precio: precioVenta(p.precio, margen, tipoCambio),
+        moneda: "CLP",
         disponible: Number(p.stock ?? 0) > 0
       })).filter((p) => p.sku && p.nombre && p.mpn && p.precio !== null)
     : [];
 
   const facetaPrecio = datos.facetas?.precio;
-  const min = precioVenta(facetaPrecio?.min, margen);
-  const max = precioVenta(facetaPrecio?.max, margen);
-  const rango = min !== null && max !== null ? { min, max, moneda: "USD" } : undefined;
+  const min = precioVenta(facetaPrecio?.min, margen, tipoCambio);
+  const max = precioVenta(facetaPrecio?.max, margen, tipoCambio);
+  const rango = min !== null && max !== null ? { min, max, moneda: "CLP" } : undefined;
+
+  // La API distingue "no hubo coincidencias" de "las hubo pero ninguna con
+  // stock", y lo dice en `sin_resultados.motivo`. Devolver un `ok` con la lista
+  // vacia obliga al agente a inventar una explicacion: en la conversacion del
+  // 2026-08-28 invento "tengo un problema temporal con la busqueda", que era
+  // falso y dejaba al cliente esperando por algo que no iba a llegar.
+  if (productos.length === 0) {
+    const motivo = datos.sin_resultados?.motivo;
+    const alternativa = datos.sin_resultados?.alternativa;
+    // `busqueda_incompleta` no es lo mismo que `sin_stock`: la API se quedo sin
+    // presupuesto de tiempo y no alcanzo a cotizar todos los candidatos. Decir
+    // "no hay con stock" seria afirmar algo que nadie comprobo.
+    const estado = motivo === "sin_stock"
+      ? "sin_stock"
+      : motivo === "busqueda_incompleta"
+        ? "busqueda_incompleta"
+        : "sin_coincidencias";
+    const mensajes = {
+      sin_stock: "Hay productos que calzan, pero ninguno con stock disponible. Dilo tal cual y ofrece buscar sin filtrar por stock, subir el presupuesto o cambiar de marca.",
+      busqueda_incompleta: "No alcancé a revisar todo el catálogo con esos filtros. No digas que no hay: dile que acote un poco más (marca o tipo de producto) y vuelve a buscar.",
+      sin_coincidencias: "Ningún producto calzó con esos filtros. Dilo tal cual y ofrece cambiar marca, presupuesto o tipo de producto."
+    };
+    return json({
+      estado,
+      total: Number.isFinite(Number(datos.total)) ? Number(datos.total) : 0,
+      mostrados: 0,
+      productos: [],
+      mensaje: mensajes[estado],
+      ...(alternativa && alternativa.nombre
+        ? { alternativa: { nombre: String(alternativa.nombre), marca: alternativa.marca == null ? null : String(alternativa.marca), precio: precioVenta(alternativa.precio, margen, tipoCambio), moneda: "CLP" } }
+        : {}),
+      ...(rango ? { rango_precio: rango } : {})
+    });
+  }
 
   return json({
     estado: "ok",

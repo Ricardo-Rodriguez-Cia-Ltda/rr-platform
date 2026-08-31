@@ -8,30 +8,30 @@ Functions y sale como precio de venta.
 
 - **Workflow:** `rr-isia-version2`
 - **id:** `f8fbe458-118e-4c0f-97d0-b24c2fbf151d`
-- **Estado a la fecha de este documento (2026-08-27):** `draft`, 13 nodos,
+- **Estado a la fecha de este documento (2026-08-28):** `active`, 13 nodos,
   15 aristas (verificado con `GET /workflows/{id}/definition`).
-- **No está activo.** Ver "Activación" más abajo.
+- **Los 7 nodos que invocan una function apuntan a functions `deployed`**, y el
+  cupo quedó en 5 de 5. Cualquier function nueva que haga falta desplegar exige
+  liberar cupo antes.
 
 ---
 
 ## Mapa de functions
 
-Obtenido de `GET /functions` el 2026-08-27. Los tres primeros están
-`deployed`; los tres nodos `decide` están `draft` por falta de cupo (ver
-sección dedicada).
+Obtenido de `GET /functions` el 2026-08-28. Las cuatro están `deployed`, y con
+`validar-rut` ocupan las 5 del cupo (ver sección dedicada).
 
 | name | function_id | status | usado en el nodo |
 |---|---|---|---|
 | `buscar-productos-v2` | `1ff96971-215b-48a9-9a05-947df53796c6` | deployed | tool del agente `agente_descubrimiento` |
 | `generar-cotizacion-v2` | `6583d731-d5d6-4103-9615-9bc4695aec14` | deployed | `fn_cotizar` |
 | `emitir-ordenes-compra` | `af763c0e-5952-45e6-8eac-b5e5667c0eca` | deployed | `fn_emitir_ordenes` |
-| `route-quote-decision-v2` | `b9fafa4e-3d39-4a9e-adb7-29b92a348b64` | **draft** (sin cupo) | `route_decision` |
-| `check-quote-validity-v2` | `03401bfa-9ecf-4a71-9421-40297fdcc9db` | **draft** (sin cupo) | `fn_check_validity` |
-| `route-rut-v2` | `21e65c7d-88f5-411d-a77d-7e2168d08663` | **draft** (sin cupo) | `route_rut` |
+| `router-v2` | `86b03e54-259a-4918-b84f-7fc871eede7f` | deployed | `route_decision`, `route_rut`, `fn_check_validity` |
 
 Además, `fn_validar_rut` reutiliza la function de v1 `validar-rut`
 (`68eff91b-3be5-4dfa-bf5e-7f20b7eefed3`, `deployed`) — no tiene versión v2
-propia, es compartida entre `Rayo Perez` y `rr-isia-version2`.
+propia. Era compartida con `Rayo Perez`, pero ese workflow ya no existe, así
+que hoy `rr-isia-version2` es su único consumidor.
 
 ## Secretos por function y de dónde sale cada valor
 
@@ -334,6 +334,30 @@ cargar `RESEND_API_KEY`/`RESEND_FROM_EMAIL`.
 
 ---
 
+## Rescatar una conversación atrapada en handoff
+
+Cuando un agente llama a `handoff_to_human`, la ejecución del workflow pasa a
+`status: handoff` y el bot se queda mudo en esa conversación: los mensajes
+siguientes del cliente no disparan nada, porque la ejecución sigue viva
+esperando a un humano. Hoy **nadie atiende esa casilla** — pasó el 2026-08-31
+y un cliente escribió "hola" tres veces a nadie.
+
+La API no tiene un endpoint de "liberar handoff" (`/resume` responde 422
+porque la ejecución no está `waiting`; `/cancel`, `/stop` y `/end_handoff`
+no existen). Lo que sí funciona, verificado ese mismo día:
+
+```
+PATCH /workflow_executions/{id}   body: { "workflow_execution": { "status": "ended" } }
+```
+
+Con la ejecución terminada, el siguiente mensaje entrante del cliente arranca
+una ejecución nueva desde el inicio del workflow. El id se saca de
+`GET /workflows/{workflow_id}/executions` (la que tenga `status: handoff`).
+
+Ojo: esto **descarta** el estado de la conversación (carro, cotización en
+curso); el cliente parte de cero. Para retomar donde quedó, la alternativa es
+atender el handoff de verdad desde la UI de Kapso.
+
 ## Activación del workflow
 
 **El workflow sigue en `draft` a propósito. No se activó en esta tarea.**
@@ -371,77 +395,74 @@ Antes de activar, conviene:
 
 ---
 
-## Pregunta sin resolver: los tres nodos `decide` en `draft` por falta de cupo
+## Resuelto: una function en `draft` no se puede invocar
 
-`route-quote-decision-v2`, `check-quote-validity-v2` y `route-rut-v2` quedaron
-en `draft` porque la cuenta tiene 5 de 5 Cloudflare Workers desplegados (los
-tres ejecutables de v2 más `validar-rut` y `send-quote-request-email` de v1).
-El `POST /workflows` que crea el grafo (Task 7) no objetó que estas tres
-functions estén en `draft` — la API de creación de workflows no valida el
-estado de las functions referenciadas al guardar la definición.
+**Una function en `draft` no ejecuta.** Kapso responde `422 {"error":"Function
+is not deployed"}` a `POST /functions/{id}/invoke`. Se comprobó el 2026-08-28
+contra las tres functions de ruteo, y zanja la pregunta que esta sección
+planteaba como abierta: un nodo `decide` que apunta a una function sin
+desplegar deja la conversación colgada.
 
-Eso deja una pregunta genuinamente abierta, sin evidencia que la zanje del
-todo:
+La evidencia que apuntaba en la dirección contraria —que `Rayo Perez` corrió en
+producción con sus siete routers en `draft`— ya no se sostiene: ese workflow no
+existe (`GET /workflows/155d9b86-...` devuelve 404, y `GET /workflows` lista
+solo `rr-isia-version2`). Lo más probable es que v1 estuviera igual de roto en
+cada `decide` y nadie lo notara, porque las conversaciones se atendían a mano
+antes de llegar ahí.
 
-- La documentación de Kapso dice que una function debe estar `deployed` para
-  poder ser **invocada** (no solo guardada en un grafo), lo que sugiere que
-  un nodo `decide` podría fallar en tiempo de ejecución al intentar invocar
-  una function en `draft`.
-- Pero `Rayo Perez` corrió en producción durante meses con las **siete**
-  functions de ruteo de v1 en `draft` (`check-quote-validity`,
-  `route-rejection`, `route-quote-decision`, `route-payment-method`,
-  `route-credit-result`, `route-rut`, `route-partial-credit` — todas
-  `draft` hoy mismo, confirmado con `GET /functions`), y el workflow
-  funcionaba. Eso es evidencia real, no una suposición, en la dirección
-  contraria.
+### La solución: un router fusionado
 
-No hay forma de zanjarlo sin invocar de verdad un nodo `decide` en `draft`
-dentro de una ejecución real del workflow — y eso implica activar
-`rr-isia-version2`, que esta tarea tiene prohibido hacer. Queda como el
-punto más importante a probar en la primera ejecución real (ver "Qué queda
-sin verificar").
+Las tres functions de ruteo eran de diez líneas cada una y hacían lo mismo —
+leer una variable, elegir una arista. Ahora son **una sola**, `router-v2`, y los
+tres nodos `decide` apuntan a ella.
 
-### Remedios, si en la práctica falla
+Sabe qué decisión le están pidiendo por las `available_edges` que manda cada
+nodo, que son distintivas: `accepted` solo en la decisión sobre la cotización,
+`expired` solo en la de vigencia, `invalid` solo en la del RUT. El nodo no
+manda nada extra.
 
-1. **Cambiar `decision_type` a `"llm"` en los tres nodos `decide`.** No
-   consume cupo de Cloudflare Worker (la decisión la toma el modelo del
-   agente, no una function externa). Requiere editar
-   `scripts/deploy-workflow.ts` (la función `decide()` y sus tres usos) y
-   correr `npm run kapso:workflow` de nuevo. Costo: una llamada a LLM más
-   por decisión, y la decisión deja de ser 100% determinista.
-2. **Liberar un slot de cupo borrando otra function en `draft` que no se
-   use.** De las seis functions de v1 que ya no tienen agente propio en
-   `rr-isia-version2` (`route-rejection`, `route-payment-method`,
-   `route-credit-result`, `route-partial-credit`, `chequear-credito`,
-   `notify-pending-quote`), **solo tres son huérfanas de verdad dentro de
-   `Rayo Perez`: `route-credit-result`, `route-partial-credit` y
-   `chequear-credito`.** Las otras tres siguen cableadas a un nodo cada
-   una — `route-rejection` en el nodo `function_n4route_1786100000005`,
-   `route-payment-method` en `function_paymentroute_1786100000007`, y
-   `notify-pending-quote` en `function_pending_1786100000014` (verificado
-   contra `GET /workflows/155d9b86-.../definition`, buscando el
-   `function_id` de cada una dentro del JSON de la definición). Borrar
-   cualquiera de esas tres agrega tres nodos más con `function_id: null` a
-   un workflow que ya está roto por el mismo motivo — el daño que describe
-   la sección siguiente.
+Esto no es elegancia: es aritmética de cupo. El plan permite **5** Cloudflare
+Workers desplegados y el workflow necesita cuatro functions de trabajo
+(`validar-rut`, `buscar-productos-v2`, `generar-cotizacion-v2`,
+`emitir-ordenes-compra`). Tres routers separados suman siete y no caben; uno
+suma cinco y cabe justo.
 
-   **Cómo repetir este chequeo** (la lista de arriba puede envejecer si
-   `Rayo Perez` se edita): tomar el `id` de la function candidata desde
-   `GET /functions`, y buscar ese `id` dentro de
-   `GET /workflows/155d9b86-f1f6-42cb-b40e-e623321d7a58/definition` (en los
-   `config.function_id` de los nodos `function`/`decide`, y en
-   `config.flow_agent_function_tools[].function_id` de los nodos `agent`).
-   Si no aparece ninguna coincidencia, la function es huérfana de verdad y
-   se puede considerar para liberar cupo; si aparece, borrarla rompe un nodo
-   que hoy funciona.
+### Cómo se liberó el cupo, y qué no se puede volver a tocar
 
-   En cualquier caso, **cualquier borrado de una function de v1 requiere la
-   misma autorización explícita del humano** que se pidió para el cutover de
-   Task 6, con el mismo respaldo previo en
-   `apps/kapso-agent/functions-v1-backup/`. No se debe borrar nada por cuenta
-   propia para resolver esto.
+El cupo estaba en 5 de 5. Se liberó borrando `send-quote-request-email` el
+2026-08-28: mandaba correo por Resend, que el repositorio ya no usa, y su único
+workflow (`Rayo Perez`) ya no existe. Su código quedó respaldado byte a byte en
+[`functions-v1-backup/send-quote-request-email.js`](functions-v1-backup/send-quote-request-email.js)
+(comparado contra el código vivo antes de borrar), así que el borrado es
+reversible. Después, `npm run kapso:functions` y `npm run kapso:workflow`.
 
----
+**No borrar `validar-rut`**, aunque sea de v1: el nodo `fn_validar_rut` de v2 la
+usa. Es la única function de v1 que sigue viva.
+
+El cupo volvió a quedar en 5 de 5, sin holgura. Desplegar cualquier function
+nueva exige liberar cupo antes, y de las que quedan **ninguna sobra**.
+
+### Verificación del 2026-08-28
+
+- Los seis casos de ruteo, invocando el `router-v2` **desplegado**: cotización
+  aceptada/rechazada, cotización vigente/expirada, RUT válido/inválido. Los seis
+  devolvieron la arista correcta.
+- Los 7 nodos del grafo que invocan una function apuntan a functions
+  `deployed` (cruzando `GET /workflows/{id}/definition` contra `GET /functions`).
+- `emitir-ordenes-compra` invocada de punta a punta con una cotización de humo:
+  `{"ok":true,...,"status":"sent"}`. Eso prueba de paso que el
+  `MAILER_API_KEY` de Kapso y el del proyecto `rr-mailing` en Vercel coinciden —
+  si no, el relé habría respondido `401` y la orden habría quedado `failed`.
+
+### La alternativa, si algún día no hay cupo
+
+`decision_type: "llm"` en los nodos `decide` no consume cupo de Worker: decide
+el modelo en vez de una function. Tiene un costo real que conviene no perder de
+vista: la vigencia de la cotización deja de ser una comparación de fechas y pasa
+a ser un juicio de un modelo, y de eso depende que no se emitan órdenes de
+compra contra un precio muerto. El guard de vigencia de `emitir-ordenes-compra`
+lo cubre por detrás, pero es una red, no el mecanismo.
+
 
 ## Cutover de v1: functions borradas y estado de `Rayo Perez`
 

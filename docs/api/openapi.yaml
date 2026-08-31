@@ -947,8 +947,14 @@ components:
         evaluados:
           type: integer
           description: |
-            De esos, cuántos se alcanzaron a cotizar antes de juntar `limite`.
-            Siempre menor o igual a `total`.
+            De esos, cuántos se alcanzaron a cotizar antes de juntar `limite`
+            o de agotar el presupuesto de tiempo. Siempre menor o igual a `total`.
+        parcial:
+          type: boolean
+          description: |
+            Presente y true solo si la búsqueda se cortó por presupuesto de
+            tiempo (8s) y quedaron candidatos sin cotizar. No es un error, pero
+            impide afirmar que algo no existe: solo se sabe de los `evaluados`.
         productos:
           type: array
           description: |
@@ -979,16 +985,21 @@ components:
           properties:
             motivo:
               type: string
-              enum: [sin_stock, sobre_presupuesto]
+              enum: [sin_stock, sobre_presupuesto, busqueda_incompleta]
               description: |
                 sin_stock: se pidió solo_con_stock y ninguno tiene existencias.
                 sobre_presupuesto: ninguno cae bajo precio_max.
+                busqueda_incompleta: se agotó el presupuesto de tiempo y quedaron
+                candidatos sin cotizar, así que no se comprobó que no haya.
+                Viene junto a parcial: true.
             alternativa:
               allOf:
                 - $ref: '#/components/schemas/Producto'
                 - description: |
-                    El candidato más barato: con stock si lo hay, en general si
-                    no.
+                    El candidato más barato de la categoría dominante entre los
+                    evaluados: con stock si lo hay, en general si no. Se acota a
+                    la categoría dominante para no ofrecer un accesorio que
+                    calzó por texto (una mochila) a quien buscó un notebook.
 
     RespuestaFacetas:
       allOf:
