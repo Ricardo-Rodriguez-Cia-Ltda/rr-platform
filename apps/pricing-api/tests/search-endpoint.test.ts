@@ -773,4 +773,26 @@ describe('GET /search — cache de precios', () => {
     await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '3' }, AUTH), res);
     expect(res.body.precios_de_hace_min).toBeUndefined();
   });
+
+  // Regresion: con limite=0, `productos.length < limit` (0 < 0) nunca es
+  // cierto, asi que el guard que evita relanzar la sonda cuando el cache ya
+  // satisfizo el limite no puede depender solo de esa comparacion — o la
+  // sonda jamas correria y evaluados/sin_resultados quedarian vacios, algo
+  // que el comportamiento pre-cache (sonda incondicional) nunca hacia.
+  it('con limite=0 y sin cache la sonda corre igual, y sin_resultados se puebla', async () => {
+    // Nada tiene stock: bajo limite=0 no hay productos por diseño (nunca se
+    // alcanza a empujar ninguno), pero la sonda tiene que correr igual para
+    // evaluar candidatos y poder explicar por que no hay resultados.
+    getPricesMock.mockReset().mockImplementation((skus: string[]) =>
+      Promise.resolve(new Map(skus.map((sku) => [sku, { price: 100, currency: 'us', inStock: 0 }]))),
+    );
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'HP', solo_con_stock: 'true', limite: '0' }, AUTH), res);
+
+    // Solo la sonda: con limite=0 la ronda sigue sin lanzarse, igual que hoy.
+    expect(getPricesMock).toHaveBeenCalledTimes(1);
+    expect(res.body.productos).toHaveLength(0);
+    expect(res.body.evaluados).toBeGreaterThan(0);
+    expect(res.body.sin_resultados?.motivo).toBe('sin_stock');
+  });
 });

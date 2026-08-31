@@ -243,8 +243,14 @@ export function createSearchHandler(provider: Provider): Handler {
 
     // Si el cache fresco ya junto el limite pedido, no hay nada que cotizar en
     // vivo: ni la sonda se lanza. Esto es lo que hace que una busqueda
-    // identica repetida no vuelva a llamar al proveedor.
-    if (pendientes.length > 0 && productos.length < limit) {
+    // identica repetida no vuelva a llamar al proveedor. Excepcion: con
+    // limite=0, `productos.length < limit` nunca es cierto (0 < 0 es falso),
+    // asi que sin este OR la sonda jamas correria y `evaluados`/`sin_resultados`
+    // perderian los datos que el comportamiento pre-cache siempre entregaba
+    // (la sonda ahi era incondicional). limit === 0 restaura ese caso puntual;
+    // la ronda no se toca, sigue gateada solo por `productos.length < limit`
+    // (con limite=0 nunca corria y sigue sin correr).
+    if (pendientes.length > 0 && (productos.length < limit || limit === 0)) {
       const first = pendientes.slice(0, provider.maxSkusPerBatch);
       let firstPrices: Map<string, PriceInfo>;
       try {
