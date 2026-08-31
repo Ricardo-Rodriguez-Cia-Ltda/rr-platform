@@ -334,6 +334,30 @@ cargar `RESEND_API_KEY`/`RESEND_FROM_EMAIL`.
 
 ---
 
+## Rescatar una conversación atrapada en handoff
+
+Cuando un agente llama a `handoff_to_human`, la ejecución del workflow pasa a
+`status: handoff` y el bot se queda mudo en esa conversación: los mensajes
+siguientes del cliente no disparan nada, porque la ejecución sigue viva
+esperando a un humano. Hoy **nadie atiende esa casilla** — pasó el 2026-08-31
+y un cliente escribió "hola" tres veces a nadie.
+
+La API no tiene un endpoint de "liberar handoff" (`/resume` responde 422
+porque la ejecución no está `waiting`; `/cancel`, `/stop` y `/end_handoff`
+no existen). Lo que sí funciona, verificado ese mismo día:
+
+```
+PATCH /workflow_executions/{id}   body: { "workflow_execution": { "status": "ended" } }
+```
+
+Con la ejecución terminada, el siguiente mensaje entrante del cliente arranca
+una ejecución nueva desde el inicio del workflow. El id se saca de
+`GET /workflows/{workflow_id}/executions` (la que tenga `status: handoff`).
+
+Ojo: esto **descarta** el estado de la conversación (carro, cotización en
+curso); el cliente parte de cero. Para retomar donde quedó, la alternativa es
+atender el handoff de verdad desde la UI de Kapso.
+
 ## Activación del workflow
 
 **El workflow sigue en `draft` a propósito. No se activó en esta tarea.**
