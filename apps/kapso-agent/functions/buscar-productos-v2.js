@@ -119,7 +119,7 @@ async function handler(request, env) {
         : "sin_coincidencias";
     const mensajes = {
       sin_stock: "Hay productos que calzan, pero ninguno con stock disponible. Dilo tal cual y ofrece buscar sin filtrar por stock, subir el presupuesto o cambiar de marca.",
-      busqueda_incompleta: "No alcancé a revisar todo el catálogo con esos filtros. No digas que no hay: dile que acote un poco más (marca o tipo de producto) y vuelve a buscar.",
+      busqueda_incompleta: "El catálogo no se alcanzó a revisar completo. NO le pidas más requisitos al cliente por esto: reintenta una sola vez la misma búsqueda (con categoria puesta si no la tenía), y si sigue incompleta ofrece la alternativa o lo más cercano que tengas.",
       sin_coincidencias: "Ningún producto calzó con esos filtros. Dilo tal cual y ofrece cambiar marca, presupuesto o tipo de producto."
     };
     return json({

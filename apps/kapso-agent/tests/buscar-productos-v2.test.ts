@@ -126,6 +126,7 @@ describe('buscar-productos-v2: busqueda parcial', () => {
     const data = (await res.json()) as any;
     expect(data.estado).toBe('busqueda_incompleta');
     expect(data.mensaje).not.toMatch(/ninguno con stock/i);
-    expect(data.mensaje).toMatch(/acote|acotar/i);
+    expect(data.mensaje).toMatch(/reintenta/i);
+    expect(data.mensaje).toMatch(/no le pidas/i);
   });
 });
