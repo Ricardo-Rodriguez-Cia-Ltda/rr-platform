@@ -613,3 +613,52 @@ describe('GET /search — presupuesto de tiempo', () => {
     expect(res.body.productos).toHaveLength(3);
   });
 });
+
+// La alternativa de una busqueda vacia debe ser del tipo de producto buscado.
+// En el catalogo real, "notebook" calza tambien con una mochila ("Notebook
+// carrying backpack") que ademas es lo mas barato: cheapest() a secas la
+// ofrecia como alternativa a quien pidio un notebook (produccion, 2026-08-31).
+describe('GET /search — la alternativa respeta la categoria dominante', () => {
+  const CATALOGO_CON_MOCHILA = [
+    ...Array.from({ length: 10 }, (_, i) =>
+      makeProduct(`N${i}`, `Lenovo Notebook 14 modelo ${i}`, 'Lenovo', 'Computadores'),
+    ),
+    makeProduct('M1', 'Lenovo Casual Backpack B210 Notebook carrying backpack', 'Lenovo', 'Maletines'),
+  ];
+
+  beforeEach(() => {
+    vi.stubEnv('API_SECRET_KEY', 'test-secret');
+    getCatalogMock.mockReset().mockReturnValue(CATALOGO_CON_MOCHILA);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('sin stock en nada, la alternativa es un notebook y no la mochila barata', async () => {
+    // La mochila vale 11 y es lo mas barato; los notebooks 500. Nada tiene stock.
+    getPricesMock.mockReset().mockImplementation((skus: string[]) =>
+      Promise.resolve(new Map(skus.map((sku) => [sku, { price: sku === 'M1' ? 11 : 500, currency: 'us', inStock: 0 }]))),
+    );
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'Lenovo', solo_con_stock: 'true', limite: '4' }, AUTH), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.sin_resultados.motivo).toBe('sin_stock');
+    expect(res.body.sin_resultados.alternativa.categoria).toBe('Computadores');
+  });
+
+  it('sobre presupuesto, la alternativa tambien sale de la categoria dominante', async () => {
+    // La mochila (200) tambien queda sobre el tope de 100: todo sobre presupuesto,
+    // pero la mochila sigue siendo lo mas barato — el cebo exacto del bug.
+    getPricesMock.mockReset().mockImplementation((skus: string[]) =>
+      Promise.resolve(new Map(skus.map((sku) => [sku, { price: sku === 'M1' ? 200 : 500, currency: 'us', inStock: 3 }]))),
+    );
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', marca: 'Lenovo', precio_max: '100', limite: '4' }, AUTH), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.sin_resultados.motivo).toBe('sobre_presupuesto');
+    expect(res.body.sin_resultados.alternativa.categoria).toBe('Computadores');
+  });
+});

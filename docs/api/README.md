@@ -295,6 +295,11 @@ campo `sin_resultados`. La consulta no calzó con el catálogo.
   existencias. `alternativa` es el más barato de los evaluados (sin stock).
 - `sobre_presupuesto` — ninguno cae bajo `precio_max`. `alternativa` es el más
   barato **con stock** si lo hay; si no, el más barato en general.
+
+En todos los casos, `alternativa` se elige **dentro de la categoría dominante**
+de los candidatos evaluados. Sin eso, un accesorio que calza por texto (una
+mochila "Notebook carrying backpack") ganaba por ser lo más barato, y la API
+ofrecía una mochila a quien buscó un notebook.
 - `busqueda_incompleta` — la búsqueda se cortó por presupuesto de tiempo y
   quedaron candidatos sin cotizar, así que **no se comprobó** que no haya. Viene
   siempre junto a `parcial: true`. Acá sí conviene reintentar, pero con filtros

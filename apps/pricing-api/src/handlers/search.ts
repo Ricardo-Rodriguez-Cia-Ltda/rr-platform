@@ -37,6 +37,26 @@ function cheapest(productos: Cotizado[]): Cotizado {
   return productos.reduce((a, b) => (b.precio < a.precio ? b : a));
 }
 
+// La alternativa tiene que ser del mismo tipo de producto que se busco. Entre
+// los candidatos de "notebook" se cuelan accesorios que calzan por texto (una
+// mochila "Notebook carrying backpack"), y como un accesorio es casi siempre lo
+// mas barato, `cheapest` a secas ofrecia una mochila a quien pidio un notebook
+// — paso en produccion el 2026-08-31, tres veces en una conversacion. Se toma
+// la categoria dominante entre los candidatos y se elige el mas barato de ella.
+function alternativeFrom(productos: Cotizado[]): Cotizado {
+  const porCategoria = new Map<string | null, number>();
+  for (const p of productos) porCategoria.set(p.categoria, (porCategoria.get(p.categoria) ?? 0) + 1);
+  let dominante: string | null = null;
+  let mayor = -1;
+  for (const [cat, n] of porCategoria) {
+    if (n > mayor) {
+      mayor = n;
+      dominante = cat;
+    }
+  }
+  return cheapest(productos.filter((p) => p.categoria === dominante));
+}
+
 function explainEmpty(
   evaluados: Cotizado[],
   onlyWithStock: boolean,
@@ -48,14 +68,14 @@ function explainEmpty(
   // decir "sin_stock" afirmaria algo que no se comprobo. El consumidor tiene
   // que poder distinguir "mire todo y no hay" de "no alcance a mirar todo".
   if (truncado) {
-    return { motivo: 'busqueda_incompleta', alternativa: cheapest(withStock.length > 0 ? withStock : evaluados) };
+    return { motivo: 'busqueda_incompleta', alternativa: alternativeFrom(withStock.length > 0 ? withStock : evaluados) };
   }
   if (onlyWithStock && withStock.length === 0) {
-    return { motivo: 'sin_stock', alternativa: cheapest(evaluados) };
+    return { motivo: 'sin_stock', alternativa: alternativeFrom(evaluados) };
   }
   return {
     motivo: 'sobre_presupuesto',
-    alternativa: cheapest(withStock.length > 0 ? withStock : evaluados),
+    alternativa: alternativeFrom(withStock.length > 0 ? withStock : evaluados),
   };
 }
 

@@ -996,8 +996,10 @@ components:
               allOf:
                 - $ref: '#/components/schemas/Producto'
                 - description: |
-                    El candidato más barato: con stock si lo hay, en general si
-                    no.
+                    El candidato más barato de la categoría dominante entre los
+                    evaluados: con stock si lo hay, en general si no. Se acota a
+                    la categoría dominante para no ofrecer un accesorio que
+                    calzó por texto (una mochila) a quien buscó un notebook.
 
     RespuestaFacetas:
       allOf:
