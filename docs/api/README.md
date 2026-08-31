@@ -323,6 +323,12 @@ En este caso **no hay que reintentar la búsqueda**. La información ya está: e
 producto existe pero no bajo esas condiciones. Lo correcto es explicárselo al
 usuario y ofrecerle la `alternativa`.
 
+### `precios_de_hace_min`
+
+Presente solo cuando la respuesta usó precios cacheados: es la edad en minutos
+del dato más viejo que participó. La cotización (`/mejor-precio`) nunca usa
+caché — esto aplica solo a la búsqueda.
+
 ### Cómo funciona el ranking (para escribir buenos `q`)
 
 El puntaje de cada producto suma:

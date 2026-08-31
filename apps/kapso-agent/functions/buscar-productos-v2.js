@@ -132,7 +132,10 @@ async function handler(request, env) {
       ...(alternativa && alternativa.nombre
         ? { alternativa: { nombre: String(alternativa.nombre), marca: alternativa.marca == null ? null : String(alternativa.marca), precio: precioVenta(alternativa.precio, margen, tipoCambio), moneda: "CLP" } }
         : {}),
-      ...(rango ? { rango_precio: rango } : {})
+      ...(rango ? { rango_precio: rango } : {}),
+      ...(Number.isFinite(Number(datos.precios_de_hace_min)) && Number(datos.precios_de_hace_min) > 0
+        ? { precios_de_hace_min: Number(datos.precios_de_hace_min) }
+        : {})
     });
   }
 
@@ -141,6 +144,9 @@ async function handler(request, env) {
     total: Number.isFinite(Number(datos.total)) ? Number(datos.total) : productos.length,
     mostrados: productos.length,
     productos,
-    ...(rango ? { rango_precio: rango } : {})
+    ...(rango ? { rango_precio: rango } : {}),
+    ...(Number.isFinite(Number(datos.precios_de_hace_min)) && Number(datos.precios_de_hace_min) > 0
+      ? { precios_de_hace_min: Number(datos.precios_de_hace_min) }
+      : {})
   });
 }

@@ -1001,6 +1001,12 @@ components:
                     evaluados: con stock si lo hay, en general si no. Se acota a
                     la categoría dominante para no ofrecer un accesorio que
                     calzó por texto (una mochila) a quien buscó un notebook.
+        precios_de_hace_min:
+          type: integer
+          description: |
+            Presente solo si la respuesta usó precios cacheados: edad en
+            minutos del dato más viejo que participó. La cotización
+            (/mejor-precio) nunca usa caché; esto aplica solo a la búsqueda.
 
     RespuestaFacetas:
       allOf:
