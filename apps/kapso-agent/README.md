@@ -249,6 +249,48 @@ ORDER BY updated_at DESC;
 
 ---
 
+## Persistencia de negocio (Supabase)
+
+Además de `purchase_orders` en D1 (arriba), dos functions escriben en
+Supabase (Postgres) las tablas creadas por `docs/sql/2026-08-31-persistencia.sql`
+(`clientes`, `cotizaciones`, `pedidos`):
+
+- `generar-cotizacion-v2` inserta una fila en `cotizaciones` por cada
+  cotización generada (montos, líneas, vigencia) y lee `clientes` por
+  teléfono para devolver `vars.cliente_guardado` — los siete datos de
+  facturación de la última compra, si existen. Con eso el prompt de
+  facturación (`prompts/agente-facturacion/`, desde v-03) confirma los datos
+  en un mensaje en vez de volver a pedirlos.
+- `emitir-ordenes-compra` hace upsert en `pedidos` (por `po_id`) y en
+  `clientes` (por `telefono`, y solo si el RUT no quedó como `"No
+  informado"`) una vez que las órdenes de compra del grupo terminan de
+  procesarse.
+
+**Es best-effort: nunca bloquea una venta.** Sin `SUPABASE_URL` ni
+`SUPABASE_SERVICE_KEY` cargados, las dos functions simplemente no llaman a
+Supabase (la llamada se salta antes de armar el `fetch`) y siguen
+respondiendo igual que siempre — `vars.cliente_guardado` ni aparece en la
+respuesta. Con los secretos cargados pero Supabase caído o lento, el helper
+`supabase()` nunca lanza: cotizar y emitir órdenes de compra funcionan igual,
+solo que esa vuelta no queda guardada.
+
+La llave de un cliente es su **teléfono de WhatsApp** (solo dígitos, el mismo
+que arma `telefonoDesdeContexto()` en ambas functions), no el RUT — un mismo
+número de WhatsApp es la persona que vuelve a escribir, y el RUT puede
+cambiar entre una compra y otra (persona natural vs. la empresa que
+representa).
+
+Para mirar los datos no hay endpoint propio: se entra al editor de tablas de
+Supabase (Table Editor del proyecto) y se consulta `clientes`, `cotizaciones`
+o `pedidos` directamente.
+
+Los secretos son `SUPABASE_URL` y `SUPABASE_SERVICE_KEY`. Se cargan desde
+`.env.local` — igual que el resto de secretos de este documento — y
+`scripts/deploy-functions.ts` los sube con `npm run kapso:functions` a
+`generar-cotizacion-v2` y `emitir-ordenes-compra`.
+
+---
+
 ## Smoke test contra la API real (2026-08-27)
 
 > **Nota:** este smoke test se corrió contra el código anterior a la tanda de
