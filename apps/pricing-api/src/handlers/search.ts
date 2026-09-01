@@ -105,6 +105,7 @@ export function createSearchHandler(provider: Provider): Handler {
 
     const marca = firstString(req.query.marca);
     const categoria = firstString(req.query.categoria);
+    const subcategoria = firstString(req.query.subcategoria);
     const onlyWithStock = firstString(req.query.solo_con_stock) === 'true';
 
     const rawMaxPrice = firstString(req.query.precio_max);
@@ -149,11 +150,11 @@ export function createSearchHandler(provider: Provider): Handler {
       throw error;
     }
 
-    const matches = search(catalog, { q, marca, categoria });
+    const matches = search(catalog, { q, marca, categoria, subcategoria });
     const matchedProducts = matches.map((r) => r.product);
     const facetas = computeFacets(matchedProducts);
 
-    if (matches.length > UMBRAL_AMBIGUEDAD && !marca && !categoria) {
+    if (matches.length > UMBRAL_AMBIGUEDAD && !marca && !categoria && !subcategoria) {
       res.status(409).json({
         error: 'demasiado_amplio',
         detail: `${matches.length} coincidencias. Acota con marca o categoria.`,

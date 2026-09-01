@@ -115,6 +115,11 @@ async function main() {
             q: { type: 'string' },
             marca: { type: 'string' },
             categoria: { type: 'string' },
+            subcategoria: {
+              type: 'string',
+              description:
+                'Subcategoría exacta del catálogo. Para computadores: Portátiles | Todo-en-Uno | Computadores de Mesa | Servidores | Tableta.',
+            },
             precio_max: { type: 'number', description: 'Tope de precio de venta EN PESOS CHILENOS. Nunca en dólares.' },
             limite: { type: 'integer' },
             incluir_sin_stock: { type: 'boolean', description: 'Solo en true si el cliente acepta ver productos sin stock inmediato.' },
