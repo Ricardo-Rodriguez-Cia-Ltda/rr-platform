@@ -9,11 +9,15 @@ enlace local vive en `apps/mailer/.vercel/project.json`, pero ese archivo
 está en `.gitignore` y no existe en un clon nuevo hasta que se corre
 `vercel link`.)
 
-No sabe nada de mayoristas, cotizaciones ni de la base D1 del Worker que lo
-llama — solo recibe `{ to, subject, html, text }` autenticado, decide si
-puede mandarlo, y lo manda. Toda la lógica de negocio (agrupar por
-mayorista, la reserva idempotente, qué hacer si falla) vive en quien lo
-llama, no acá.
+`POST /api/send` no sabe nada de mayoristas, cotizaciones ni de la base D1
+del Worker que lo llama — solo recibe `{ to, subject, html, text }`
+autenticado, decide si puede mandarlo, y lo manda. Toda la lógica de negocio
+(agrupar por mayorista, la reserva idempotente, qué hacer si falla) vive en
+quien lo llama, no acá.
+
+Esta app tiene un segundo endpoint, `GET /api/cotizacion/<quote_id>`, que sí
+conoce las cotizaciones: lee la fila en Supabase y devuelve el PDF. Ver la
+sección dedicada más abajo.
 
 ## Arquitectura
 
@@ -51,6 +55,27 @@ Variables), no en un `.env` del repo — no hay `.env.example` en este
 directorio porque no hay entorno local que los necesite: no existe un
 `vercel dev` de este endpoint documentado, y las pruebas (`apps/mailer/tests/send.test.ts`)
 prueban `createSendHandler` con un `Mailer` falso, sin credenciales reales.
+
+## `GET /api/cotizacion/<quote_id>` — el PDF de la cotización
+
+Dado el `quote_id` (UUID) de una fila en la tabla `cotizaciones` de
+Supabase, arma la vista con `buildCotizacionView`
+(`apps/mailer/src/cotizacion-view.ts`) y dibuja un PDF con `pdf-lib`
+(`apps/mailer/src/cotizacion.ts`), que devuelve como
+`200 application/pdf`. Si el `quote_id` no tiene forma de UUID o la fila no
+existe, `404 {"error":"cotizacion_no_encontrada"}`; si Supabase no responde
+o el fetch expira (8 s), `503 {"error":"upstream"}` — reintentable, el
+enlace no caduca por eso.
+
+Es una **capability URL**: pública a propósito, sin autenticación, porque el
+`quote_id` es un UUID inadivinable — quien lo tiene (por el link que manda
+`apps/kapso-agent`) puede ver el PDF, y nadie más. No agregar un header de
+autenticación a este endpoint sin repensar ese diseño primero.
+
+Necesita `SUPABASE_URL` y `SUPABASE_SERVICE_KEY` cargadas en el proyecto
+`rr-mailing` de Vercel (las mismas que usa `generar-cotizacion-v2` en
+Kapso). Si faltan, responde `503 {"error":"falta_configuracion","faltan":[...]}`
+nombrando cuáles — nunca sus valores.
 
 ## Cómo se despliega
 
@@ -172,3 +197,13 @@ lista → 403 sin llamar al transporte, cuerpo incompleto → 400, método
 distinto de POST → 405, caso feliz → 200 con el `id`, y dos casos del fallo
 de transporte → 502 (con y sin `codigo`), verificando en ambos que la
 credencial nunca aparece en la respuesta.
+
+`apps/mailer/tests/cotizacion.test.ts` prueba `createCotizacionHandler` y
+`drawCotizacion` con Supabase mockeado vía `vi.stubGlobal('fetch', ...)`: PDF
+válido de una página con los headers correctos, id sin forma de UUID → 404
+sin tocar Supabase, cotización inexistente → 404, sin `SUPABASE_URL`/`SUPABASE_SERVICE_KEY`
+→ 503 nombrando las que faltan, fila sin `numero` → archivo `cotizacion-SN.pdf`,
+un fetch que falla → 503 `upstream`, sin teléfono no consulta `/clientes`, y
+dos pruebas estructurales de `drawCotizacion`: más de 18 líneas pasa a una
+segunda página, y una línea con todos los campos `undefined` (normalizados a
+0 por `buildCotizacionView`) no revienta el dibujo.

@@ -1,0 +1,249 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
+import { firstString } from '@rr/http/http';
+import { buildCotizacionView, type ClienteRow, type CotizacionRow, type CotizacionView } from './cotizacion-view.js';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const REQUIRED_ENV = ['SUPABASE_URL', 'SUPABASE_SERVICE_KEY'] as const;
+const TIMEOUT_MS = 8000;
+
+export interface CotizacionEnv {
+  SUPABASE_URL?: string;
+  SUPABASE_SERVICE_KEY?: string;
+}
+
+// null => la llamada fallo (red, timeout, status no-2xx): el caller responde
+// 503 "upstream", nunca 404 -- eso confundiria "no existe" con "no se pudo
+// preguntar".
+async function supabaseGet(env: Required<CotizacionEnv>, path: string): Promise<unknown[] | null> {
+  const base = env.SUPABASE_URL.replace(/\/+$/, '');
+  try {
+    const r = await fetch(`${base}/rest/v1${path}`, {
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!r.ok) return null;
+    return (await r.json()) as unknown[];
+  } catch {
+    return null;
+  }
+}
+
+export function createCotizacionHandler() {
+  return async function handler(
+    req: VercelRequest,
+    res: VercelResponse,
+    env: CotizacionEnv = process.env as CotizacionEnv,
+  ): Promise<void> {
+    const id = firstString(req.query.id) ?? '';
+
+    // El id llega crudo en la URL: se valida ANTES de tocar Supabase, para
+    // que un intento de path traversal o inyeccion ni siquiera dispare un
+    // fetch.
+    if (!UUID_RE.test(id)) {
+      res.status(404).json({ error: 'cotizacion_no_encontrada' });
+      return;
+    }
+
+    const faltan = REQUIRED_ENV.filter((name) => !env[name]);
+    if (faltan.length > 0) {
+      res.status(503).json({ error: 'falta_configuracion', faltan });
+      return;
+    }
+    const supaEnv = env as Required<CotizacionEnv>;
+
+    const rows = await supabaseGet(supaEnv, `/cotizaciones?quote_id=eq.${id}&limit=1`);
+    if (rows === null) {
+      res.status(503).json({ error: 'upstream' });
+      return;
+    }
+    const row = rows[0] as CotizacionRow | undefined;
+    if (!row) {
+      res.status(404).json({ error: 'cotizacion_no_encontrada' });
+      return;
+    }
+
+    let cliente: ClienteRow | null = null;
+    if (row.telefono) {
+      const clientes = await supabaseGet(supaEnv, `/clientes?telefono=eq.${encodeURIComponent(row.telefono)}&limit=1`);
+      if (clientes === null) {
+        res.status(503).json({ error: 'upstream' });
+        return;
+      }
+      cliente = (clientes[0] as ClienteRow | undefined) ?? null;
+    }
+
+    const view = buildCotizacionView(row, cliente);
+    const bytes = await drawCotizacion(view);
+
+    res.status(200);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${view.archivo}"`);
+    res.send(Buffer.from(bytes));
+  };
+}
+
+// --- dibujo del PDF --------------------------------------------------------
+
+const PAGE_W = 595;
+const PAGE_H = 842;
+const MARGIN = 35;
+const AZUL = rgb(0.23, 0.23, 0.7);
+const GRIS = rgb(0.45, 0.45, 0.45);
+const NEGRO = rgb(0, 0, 0);
+const MAX_FILAS_POR_PAGINA = 18; // el caso real es 1-5 lineas; es solo un tope de seguridad
+
+const COL = {
+  codigo: { x: MARGIN, w: 70 },
+  descripcion: { x: MARGIN + 70, w: 260 },
+  cantidad: { x: MARGIN + 70 + 260, w: 60 },
+  valor: { x: MARGIN + 70 + 260 + 60, w: 70 },
+  total: { x: MARGIN + 70 + 260 + 60 + 70, w: 70 },
+};
+const TABLA_DERECHA = COL.total.x + COL.total.w;
+
+function truncar(font: PDFFont, texto: string, anchoMax: number, size: number): string {
+  if (font.widthOfTextAtSize(texto, size) <= anchoMax) return texto;
+  let recortado = texto;
+  while (recortado.length > 0 && font.widthOfTextAtSize(recortado + '…', size) > anchoMax) {
+    recortado = recortado.slice(0, -1);
+  }
+  return recortado.length > 0 ? recortado + '…' : '…';
+}
+
+export async function drawCotizacion(view: CotizacionView): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const helv = await doc.embedFont(StandardFonts.Helvetica);
+  const helvBold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+  let page: PDFPage = doc.addPage([PAGE_W, PAGE_H]);
+  let y = PAGE_H - 40;
+
+  const centrado = (texto: string, size: number, font: PDFFont, atY: number, color = NEGRO) => {
+    const w = font.widthOfTextAtSize(texto, size);
+    page.drawText(texto, { x: (PAGE_W - w) / 2, y: atY, size, font, color });
+  };
+  const derecha = (texto: string, size: number, font: PDFFont, xDerecha: number, atY: number, color = NEGRO) => {
+    const w = font.widthOfTextAtSize(texto, size);
+    page.drawText(texto, { x: xDerecha - w, y: atY, size, font, color });
+  };
+
+  // Monograma: no hay logo separado en "idea pdf/" (solo el mockup completo,
+  // que no se incrusta) -- va el monograma "R" dibujado a mano.
+  page.drawRectangle({ x: MARGIN, y: y - 50, width: 50, height: 50, borderColor: AZUL, borderWidth: 1.5 });
+  const anchoR = helvBold.widthOfTextAtSize('R', 28);
+  page.drawText('R', { x: MARGIN + (50 - anchoR) / 2, y: y - 36, size: 28, font: helvBold, color: AZUL });
+
+  // Membrete centrado. La fecha va en su propia linea (no junto al titulo):
+  // el titulo centrado en bold14 es ancho, y compartir altura con la fecha
+  // alineada a la derecha las hacia chocar cuando el nombre de la empresa
+  // ocupaba mas de la mitad del ancho de la pagina.
+  centrado('RICARDO RODRIGUEZ & CIA. LTDA.', 14, helvBold, y - 8);
+  centrado('DIVISION INFORMATICA', 9, helv, y - 22);
+  centrado('R.U.T.: 89.912.300-K', 9, helv, y - 34);
+  derecha(view.fechaLarga, 9, helv, PAGE_W - MARGIN, y - 46);
+
+  y -= 65;
+  page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_W - MARGIN, y }, thickness: 1, color: GRIS });
+  y -= 20;
+
+  centrado(`COTIZACION N° ${view.numero}`, 13, helvBold, y);
+  y -= 25;
+
+  // Bloque cliente
+  page.drawText('Señores:', { x: MARGIN, y, size: 10, font: helv });
+  y -= 14;
+  if (view.cliente) {
+    page.drawText(view.cliente.razonSocial, { x: MARGIN, y, size: 10, font: helvBold });
+    y -= 14;
+    if (view.cliente.rut) {
+      page.drawText(`R.U.T.: ${view.cliente.rut}`, { x: MARGIN, y, size: 10, font: helv });
+      y -= 14;
+    }
+  } else {
+    page.drawText('Presente', { x: MARGIN, y, size: 10, font: helv });
+    y -= 14;
+  }
+  y -= 10;
+
+  // Parrafo de cortesia
+  page.drawText('De acuerdo a lo solicitado, tenemos el agrado de cotizar a usted lo siguiente:', {
+    x: MARGIN,
+    y,
+    size: 10,
+    font: helv,
+  });
+  y -= 20;
+
+  const dibujarEncabezadoTabla = () => {
+    page.drawText('Código', { x: COL.codigo.x, y, size: 9, font: helvBold });
+    page.drawText('Descripción', { x: COL.descripcion.x, y, size: 9, font: helvBold });
+    derecha('Cantidad', 9, helvBold, COL.cantidad.x + COL.cantidad.w, y);
+    derecha('Valor', 9, helvBold, COL.valor.x + COL.valor.w, y);
+    derecha('Total', 9, helvBold, COL.total.x + COL.total.w, y);
+    y -= 3;
+    page.drawLine({ start: { x: MARGIN, y }, end: { x: TABLA_DERECHA, y }, thickness: 0.75, color: NEGRO });
+    y -= 14;
+  };
+  dibujarEncabezadoTabla();
+
+  const ALTO_FILA = 14;
+  let filasEnPagina = 0;
+  for (const linea of view.lineas) {
+    if (filasEnPagina >= MAX_FILAS_POR_PAGINA) {
+      page = doc.addPage([PAGE_W, PAGE_H]);
+      y = PAGE_H - 40;
+      dibujarEncabezadoTabla();
+      filasEnPagina = 0;
+    }
+    page.drawText(linea.codigo, { x: COL.codigo.x, y, size: 9, font: helv });
+    const desc = truncar(helv, linea.descripcion, COL.descripcion.w - 5, 8);
+    page.drawText(desc, { x: COL.descripcion.x, y, size: 8, font: helv });
+    derecha(String(linea.cantidad), 9, helv, COL.cantidad.x + COL.cantidad.w, y);
+    derecha(linea.valorUnitario, 9, helv, COL.valor.x + COL.valor.w, y);
+    derecha(linea.total, 9, helv, COL.total.x + COL.total.w, y);
+    y -= ALTO_FILA;
+    filasEnPagina++;
+  }
+
+  y -= 6;
+  page.drawLine({ start: { x: MARGIN, y }, end: { x: TABLA_DERECHA, y }, thickness: 0.75, color: NEGRO });
+  y -= 16;
+
+  // Neto / IVA / Total alineados a la derecha, Total en bold
+  derecha(`Neto: ${view.netoFmt}`, 9, helv, TABLA_DERECHA, y);
+  y -= 13;
+  derecha(`IVA: ${view.ivaFmt}`, 9, helv, TABLA_DERECHA, y);
+  y -= 13;
+  derecha(`Total: ${view.totalFmt}`, 10, helvBold, TABLA_DERECHA, y);
+  y -= 24;
+
+  // Observaciones
+  page.drawText('Observaciones:', { x: MARGIN, y, size: 9, font: helvBold });
+  y -= 13;
+  const observaciones = ['Valores en pesos chilenos.'];
+  if (view.vigenciaTexto) observaciones.push(view.vigenciaTexto);
+  observaciones.push('CONSULTAS AL FONO: +56-2-23641111');
+  for (const obs of observaciones) {
+    page.drawText(`•  ${obs}`, { x: MARGIN, y, size: 8, font: helv });
+    y -= 11;
+  }
+  y -= 8;
+
+  page.drawText('Sin otro particular, saluda atentamente a usted.', { x: MARGIN, y, size: 9, font: helv });
+
+  // Pie de pagina, chico y gris
+  const piePagina = [
+    'WWW.RICARDORODRIGUEZ.CL',
+    'Los productos vendidos cuentan con la garantia del fabricante; consulte condiciones y plazos con su ejecutivo.',
+    'José M. Infante #2629 Ñuñoa · Santiago — CHILE · e-mail: ventas@ricardorodriguez.cl',
+  ];
+  piePagina.forEach((linea, i) => {
+    centrado(linea, 7, helv, 40 - i * 9, GRIS);
+  });
+
+  return doc.save();
+}
