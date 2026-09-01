@@ -27,7 +27,8 @@ function error(payload, status) {
 async function supabase(env, method, path, body) {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return null;
   try {
-    const r = await fetch(`${env.SUPABASE_URL}/rest/v1${path}`, {
+    const base = String(env.SUPABASE_URL).replace(/\/+$/, "");
+    const r = await fetch(`${base}/rest/v1${path}`, {
       method,
       headers: {
         apikey: env.SUPABASE_SERVICE_KEY,
@@ -206,8 +207,15 @@ async function handler(request, env) {
   // existe) de vuelta al flujo para que facturacion confirme en vez de pedir.
   const telefono = telefonoDesdeContexto(body.execution_context);
   let clienteGuardado = null;
+  let persistencia;
   if (env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY) {
-    const [_, filas] = await Promise.all([
+    const [cotizacionGuardada, filas] = await Promise.all([
+      // Prefer: merge-duplicates es inerte hoy — quote_id es un UUID fresco
+      // en cada cotizacion, asi que nunca colisiona con una fila existente.
+      // El dia que una re-cotizacion reutilice un quote_id (para corregirlo
+      // en vez de crear uno nuevo), esa colision se resolveria en silencio
+      // pisando la fila vieja: la columna `version` existe justamente para
+      // ese caso, y ese dia el POST tiene que empezar a usarla en la query.
       supabase(env, "POST", "/cotizaciones", {
         quote_id: quote.quote_id,
         version: String(quote.version),
@@ -223,6 +231,7 @@ async function handler(request, env) {
         : Promise.resolve(null)
     ]);
     if (Array.isArray(filas) && filas.length > 0) clienteGuardado = filas[0];
+    persistencia = cotizacionGuardada !== null ? "ok" : "fallo";
   }
 
   const varsRespuesta = {
@@ -237,6 +246,7 @@ async function handler(request, env) {
   return json({
     estado: "ok",
     quote,
-    vars: varsRespuesta
+    vars: varsRespuesta,
+    ...(persistencia !== undefined ? { persistencia } : {})
   });
 }

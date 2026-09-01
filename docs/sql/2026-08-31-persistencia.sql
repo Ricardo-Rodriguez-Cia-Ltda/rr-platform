@@ -37,7 +37,15 @@ create table if not exists pedidos (
   razon_social    text,
   lineas          jsonb not null,
   neto_grupo_clp  bigint,
-  estado          text not null,
+  estado          text not null, -- processing | sent | failed  (espejo del estado en D1)
   email_id        text,
   created_at      timestamptz not null default now()
 );
+
+-- RLS activada sin policies: el unico acceso legitimo es la service_role de
+-- las functions, que bypasea RLS por definicion. Sin esto, el rol `anon` de
+-- Supabase (cuya clave NO es secreta por diseno) tiene grants por defecto
+-- sobre public y podria leer o borrar toda la PII de clientes.
+alter table clientes     enable row level security;
+alter table cotizaciones enable row level security;
+alter table pedidos      enable row level security;

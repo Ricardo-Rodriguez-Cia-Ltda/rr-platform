@@ -291,6 +291,7 @@ describe('generar-cotizacion-v2: persistencia', () => {
     expect(cuerpos[0].telefono).toBe('56941757584');
     expect(cuerpos[0].total_clp).toBe(data.vars.quote_total_clp);
     expect(Array.isArray(cuerpos[0].lineas)).toBe(true);
+    expect(data.persistencia).toBe('ok');
   });
 
   it('sin fila en Supabase, cliente_guardado es null', async () => {
@@ -305,6 +306,7 @@ describe('generar-cotizacion-v2: persistencia', () => {
     const data = (await res.json()) as any;
     expect(data.estado).toBe('ok');
     expect(data.vars.cliente_guardado).toBeNull();
+    expect(data.persistencia).toBe('fallo');
   });
 
   it('sin telefono en el contexto no llama a /clientes y la cotizacion va con telefono null', async () => {

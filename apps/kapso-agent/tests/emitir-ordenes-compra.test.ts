@@ -46,6 +46,10 @@ function fakeD1(options: { failInsert?: (key: string) => boolean } = {}) {
                   row.updated_at = args[args.length - 2];
                   // En el UPDATE a 'failed' el primer bind es el mensaje de error.
                   if (sql.includes("'failed'")) row.error = args[0];
+                  // En el UPDATE a 'sent' el primer bind es el email_id que
+                  // devolvio el rele: sin capturarlo aca, una re-invocacion no
+                  // puede probar que el email_id del envio real sobrevive.
+                  if (sql.includes("'sent'")) row.email_id = args[0];
                 }
                 return { success: true };
               }
@@ -529,5 +533,43 @@ describe('emitir-ordenes-compra: persistencia', () => {
     await handler(request(BODY_SIN_TELEFONO), ENV_SB());
     expect(urls.some((u) => u.includes('/clientes'))).toBe(false);
     expect(cuerpos[0][0].telefono).toBeNull();
+  });
+
+  // Con 6 de 7 campos informados (falta billing_giro) el upsert de cliente
+  // tiene que omitirse por completo, sin que eso afecte al pedido: el correo
+  // ya salio y la venta no depende de esta escritura de memoria.
+  it('con un campo de facturacion sin informar, no hace upsert de cliente pero el pedido se guarda igual', async () => {
+    const urls: string[] = [];
+    const cuerpos: any[] = [];
+    routeFetch({ supabase: (url, init) => { urls.push(url); if (url.includes('/pedidos')) cuerpos.push(JSON.parse(String(init?.body))); return {}; } });
+    const { billing_giro: _giro, ...billingSinGiro } = billing;
+    const body = {
+      execution_context: {
+        vars: { quote_result: quoteDosProveedores, quote_confirmed: true, quote_customer_name: 'Vicente Pareja', ...billingSinGiro },
+        context: { phone_number: '+56 9 4175 7584' },
+      },
+    };
+    await handler(request(body), ENV_SB());
+    expect(urls.some((u) => u.includes('/clientes'))).toBe(false);
+    expect(urls.some((u) => u.includes('/pedidos'))).toBe(true);
+    expect(cuerpos[0]).toHaveLength(2);
+  });
+
+  // Hallazgo de la revision final: una re-invocacion (candado D1 = 'duplicate')
+  // no puede pisar la fila buena del primer envio. El estado y el email_id de
+  // la segunda fila /pedidos tienen que ser los que quedaron en D1 la primera
+  // vez, no el literal "duplicate" con email_id null.
+  it('la re-invocacion no pisa el email_id del envio real con "duplicate"/null', async () => {
+    const cuerpos: any[] = [];
+    routeFetch({ supabase: (url, init) => { if (url.includes('/pedidos')) cuerpos.push(JSON.parse(String(init?.body))); return {}; } });
+    const environment = ENV_SB(); // MISMO entorno (mismo D1) para las dos invocaciones
+    await handler(request(BODY_DOS_PROVEEDORES), environment);
+    await handler(request(BODY_DOS_PROVEEDORES), environment);
+
+    expect(cuerpos).toHaveLength(2);
+    for (const fila of cuerpos[1]) {
+      expect(fila.estado).toBe('sent');
+      expect(fila.email_id).toBe('email-1');
+    }
   });
 });
