@@ -70,7 +70,7 @@ const FUNCTIONS = [
   // si difieren, el precio que ve el cliente en la busqueda no coincide con el
   // de su cotizacion.
   { name: 'buscar-productos-v2', secrets: ['API_PRECIOS_KEY', 'MARGEN', 'TIPO_CAMBIO_CLP_USD'] },
-  { name: 'generar-cotizacion-v2', secrets: ['API_PRECIOS_KEY', 'MARGEN', 'TIPO_CAMBIO_CLP_USD', 'IVA_RATE', 'COTIZACION_VALID_HOURS', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY'] },
+  { name: 'generar-cotizacion-v2', secrets: ['API_PRECIOS_KEY', 'MARGEN', 'TIPO_CAMBIO_CLP_USD', 'IVA_RATE', 'COTIZACION_VALID_HOURS', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'KAPSO_API_KEY', 'COTIZACION_PDF_BASE'] },
   { name: 'emitir-ordenes-compra', secrets: ['MARGEN', 'MAILER_URL', 'MAILER_API_KEY', 'OC_EMAIL_DESTINO', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY'] },
   // Un solo router para los tres nodos `decide`. El plan de Kapso permite 5
   // Workers desplegados y las cuatro de arriba ya ocupan cuatro; tres routers
@@ -89,6 +89,8 @@ const VALUES: Record<string, string> = {
   OC_EMAIL_DESTINO: process.env.OC_EMAIL_DESTINO ?? 'pyxis.latam@gmail.com',
   SUPABASE_URL: process.env.SUPABASE_URL ?? '',
   SUPABASE_SERVICE_KEY: process.env.SUPABASE_SERVICE_KEY ?? '',
+  KAPSO_API_KEY: process.env.KAPSO_API_KEY ?? '',
+  COTIZACION_PDF_BASE: 'https://rr-mailing.vercel.app/api/cotizacion',
 };
 
 function printSummary(

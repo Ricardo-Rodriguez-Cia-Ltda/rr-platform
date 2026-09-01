@@ -18,7 +18,7 @@ function escapar(valor) {
 // --- persistencia (Supabase) ---------------------------------------------
 // Memoria del negocio, no un eslabon del flujo: nunca lanza, 4s de timeout,
 // y sin secretos configurados no hace nada. Ver el spec 2026-08-31.
-async function supabase(env, method, path, body) {
+async function supabase(env, method, path, body, prefer) {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return null;
   try {
     const base = String(env.SUPABASE_URL).replace(/\/+$/, "");
@@ -28,7 +28,7 @@ async function supabase(env, method, path, body) {
         apikey: env.SUPABASE_SERVICE_KEY,
         Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
         "Content-Type": "application/json",
-        Prefer: method === "POST" ? "resolution=merge-duplicates,return=minimal" : "count=none"
+        Prefer: prefer || (method === "POST" ? "resolution=merge-duplicates,return=minimal" : "count=none")
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(4000)

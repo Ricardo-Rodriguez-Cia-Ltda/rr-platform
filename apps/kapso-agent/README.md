@@ -55,6 +55,8 @@ falta.
 | `emitir-ordenes-compra` | `MAILER_API_KEY` | La misma clave cargada como `MAILER_API_KEY` en el proyecto `rr-mailing` de Vercel — tiene que coincidir en los dos lados, si no todo envío falla con `401 no_autorizado` desde el relé |
 | `generar-cotizacion-v2`, `emitir-ordenes-compra` | `SUPABASE_URL` | Settings → API del proyecto Supabase, vía `.env.local` |
 | `generar-cotizacion-v2`, `emitir-ordenes-compra` | `SUPABASE_SERVICE_KEY` | Settings → API del proyecto Supabase, vía `.env.local` |
+| `generar-cotizacion-v2` | `KAPSO_API_KEY` | `KAPSO_API_KEY` de `.env.local` (la misma que usa el script de deploy) |
+| `generar-cotizacion-v2` | `COTIZACION_PDF_BASE` | Constante `VALUES.COTIZACION_PDF_BASE` en `scripts/deploy-functions.ts` (`https://rr-mailing.vercel.app/api/cotizacion`) |
 
 ### Correo: relé propio, ya no Resend
 
