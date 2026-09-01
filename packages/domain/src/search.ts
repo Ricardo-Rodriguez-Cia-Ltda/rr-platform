@@ -76,16 +76,27 @@ function scoreProduct(
   const compactedMpn = tokenize(product.mpn ?? '').join('');
   const brandTokens = new Set(tokenize(product.marca ?? ''));
   const nameTokens = tokenize(product.nombre ?? '');
-  const descriptionTokens = new Set(nameTokens);
-  // Secuencia expandida SOLO para el bono de spec (ver abajo): un Set plano
-  // de tokens del nombre no alcanza para esa comprobacion porque no exige
-  // que las dos partes vengan del mismo lugar. Confirmado en vivo (ronda de
-  // arreglo 1, 2026-09-01): el termino "16gb" puntuaba +3 contra "Notebook
-  // 16 pulgadas - 8 GB RAM - SSD", donde el "16" viene de "pulgadas" y el
-  // "gb" viene de "8 GB" — campos distintos, ninguno es la spec real. La
-  // membresia global daba falsos positivos entre campos; la adyacencia
-  // sobre la secuencia real del nombre es la spec de verdad.
+  // Secuencia expandida: los tokens compuestos (ssd1tb) parten en sus
+  // subpartes en su misma posicion (-> ssd, 1, tb). Se reutiliza para dos
+  // cosas con reglas DELIBERADAMENTE distintas (ronda de arreglo 2,
+  // 2026-09-01):
+  //
+  // 1. Match directo (`descriptionTokens`, abajo): membresia de un termino
+  //    UNICO. Es seguro unir nombre + subpartes en un solo Set porque cada
+  //    verificacion mira una sola palabra a la vez, nunca cruza campos: "ssd"
+  //    vs "Kingston SSD1TB NVMe M.2" tiene que seguir matcheando (regresion
+  //    real: sin las subpartes en el Set, "ssd" perdia el match completo
+  //    contra el token pegado).
+  // 2. Bono de spec (mas abajo): EMPAREJAMIENTO de dos partes ("32"+"gb").
+  //    Ahi la union en un Set no alcanza — no exige que las dos partes
+  //    vengan del mismo lugar del nombre. Confirmado en vivo (ronda de
+  //    arreglo 1): el termino "16gb" puntuaba +3 contra "Notebook 16
+  //    pulgadas - 8 GB RAM - SSD", donde el "16" viene de "pulgadas" y el
+  //    "gb" viene de "8 GB" — campos distintos, ninguno es la spec real. Por
+  //    eso el bono exige adyacencia real sobre la secuencia expandida, nunca
+  //    membresia de Set.
   const expandedNameTokens = expandTokensPreservingAdjacency(nameTokens);
+  const descriptionTokens = new Set([...nameTokens, ...expandedNameTokens]);
 
   // El MPN aporta a lo sumo PESO_MPN_EXACTO por producto, sin importar en
   // cuantos tokens se parta: un MPN de dos tokens no vale mas que uno de uno.

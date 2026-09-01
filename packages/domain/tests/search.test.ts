@@ -168,6 +168,24 @@ describe('matching consciente de specs', () => {
     expect(skus).toContain('SD001KIN01');
   });
 
+  // Ronda de arreglo 2 (2026-09-01): al restringir el bono de spec a
+  // adyacencia (ronda 1), las subpartes dejaron de agregarse a
+  // descriptionTokens y un termino de UNA sola palabra como "ssd" perdio el
+  // match directo contra el token pegado "ssd1tb". Membresia de un termino
+  // unico no cruza campos (a diferencia del bono de dos partes), asi que es
+  // seguro volver a unir nombre + subpartes para el match directo.
+  it('q="ssd" (una sola palabra) matchea directo contra el token pegado "ssd1tb"', () => {
+    const resultado = search(CATALOGO_SPECS, { q: 'ssd' }).find((r) => r.product.sku === 'SD001KIN01');
+    expect(resultado).toBeDefined();
+    expect(resultado!.score).toBe(3);
+  });
+
+  it('q="ssd1tb" pegado tal cual tambien matchea (el token original sigue en el Set)', () => {
+    const resultado = search(CATALOGO_SPECS, { q: 'ssd1tb' }).find((r) => r.product.sku === 'SD001KIN01');
+    expect(resultado).toBeDefined();
+    expect(resultado!.score).toBe(3);
+  });
+
   it('el bonus de spec se otorga una sola vez (no dobla PESO_DESCRIPCION)', () => {
     // "32gb" matchea via el camino spec (32 + gb), nunca directo (no existe
     // el token "32gb" en el nombre). Si sumara dos veces el score subiria a 6.
