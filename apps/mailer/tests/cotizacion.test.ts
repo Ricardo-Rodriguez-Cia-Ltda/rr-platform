@@ -111,6 +111,46 @@ describe('GET /api/cotizacion/[id]', () => {
     expect(res.statusCode).toBe(200);
     expect(fetchSpy).toHaveBeenCalledTimes(1); // solo /cotizaciones, nunca /clientes
   });
+
+  it('un nombre con mojibake real de Ingram (U+0081) no revienta: sale 200 con "?" en el PDF', async () => {
+    stubSupabase([{ ...ROW, lineas: [{ ...ROW.lineas[0], nombre: 'CARTUCHO PÃG' }] }]);
+    const res = makeRes();
+    await createCotizacionHandler()(makeReq({ id: ROW.quote_id }), res, ENV);
+    expect(res.statusCode).toBe(200);
+    const bytes: Buffer = res.body as Buffer;
+    const doc = await PDFDocument.load(bytes);
+    expect(doc.getPageCount()).toBe(1);
+  }, 15000);
+
+  it('una razon social con "″" (U+2033, fuera de WinAnsi) no revienta: sale 200', async () => {
+    const fetchSpy = vi.fn(async (url: any) =>
+      new Response(
+        JSON.stringify(
+          String(url).includes('/clientes') ? [{ razon_social: 'Cliente 5″ SpA', rut: '1-9' }] : [ROW],
+        ),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    const res = makeRes();
+    await createCotizacionHandler()(makeReq({ id: ROW.quote_id }), res, ENV);
+    expect(res.statusCode).toBe(200);
+    const bytes: Buffer = res.body as Buffer;
+    const doc = await PDFDocument.load(bytes);
+    expect(doc.getPageCount()).toBe(1);
+  }, 15000);
+
+  it('si drawCotizacion revienta (inyectado), responde 503 upstream y loguea solo el quote_id', async () => {
+    stubSupabase([ROW]);
+    const res = makeRes();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const drawQueRevienta = async () => { throw new Error('WinAnsi cannot encode "X"'); };
+    await createCotizacionHandler(drawQueRevienta)(makeReq({ id: ROW.quote_id }), res, ENV);
+    expect(res.statusCode).toBe(503);
+    expect(res.jsonBody?.error).toBe('upstream');
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(ROW.quote_id));
+    errorSpy.mockRestore();
+  });
 });
 
 describe('drawCotizacion', () => {

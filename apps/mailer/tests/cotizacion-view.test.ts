@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCotizacionView, formatCLP, type CotizacionRow } from '../src/cotizacion-view.js';
+import { buildCotizacionView, formatCLP, sanitizeWinAnsi, type CotizacionRow } from '../src/cotizacion-view.js';
 
 // 2026-09-01T22:45:00.000Z son las 18:45 en Santiago: el primer sabado de
 // septiembre 2026 (dia 5) es cuando Chile continental vuelve a UTC-3, asi que
@@ -27,6 +27,31 @@ describe('formatCLP', () => {
   });
 });
 
+describe('sanitizeWinAnsi', () => {
+  it('deja intacto el ASCII imprimible y el rango Latin-1 (\\xA0-\\xFF)', () => {
+    expect(sanitizeWinAnsi('HP EliteBook G1i - Notebook 14"')).toBe('HP EliteBook G1i - Notebook 14"');
+    expect(sanitizeWinAnsi('Ñuñoa, José, cotización — válido °C')).toBe('Ñuñoa, José, cotización — válido °C');
+  });
+
+  it('deja intactos los especiales cp1252 de \\x80-\\x9F que pdf-lib SI mapea en WinAnsi', () => {
+    // €, comillas curvas, guion largo, viñeta: todos tienen glifo asignado
+    // en cp1252/WinAnsi pese a vivir en el bloque 0x80-0x9F.
+    expect(sanitizeWinAnsi('€10 — “cita” • fin')).toBe('€10 — “cita” • fin');
+  });
+
+  it('reemplaza por "?" un caracter fuera de WinAnsi -- el mojibake real de Ingram', () => {
+    // U+0081 es un byte de cp1252 sin caracter asignado. Llego real en 44
+    // nombres del catalogo de Ingram (0,27% del catalogo) y hacia lanzar a
+    // drawText con Helvetica -- reventando el endpoint con 500 determinista.
+    expect(sanitizeWinAnsi('CARTUCHO PÃG')).toBe('CARTUCHO PÃ?G');
+    // U+009D es el otro byte real observado, sin caracter asignado tampoco.
+    expect(sanitizeWinAnsi('TONERHP')).toBe('TONER?HP');
+    // U+2033 (″, doble prima) no es WinAnsi y puede llegar tecleado por el
+    // cliente en razon_social.
+    expect(sanitizeWinAnsi('Monitor 27″')).toBe('Monitor 27?');
+  });
+});
+
 describe('buildCotizacionView', () => {
   it('arma numero, archivo y montos formateados', () => {
     const v = buildCotizacionView(ROW, null);
@@ -37,7 +62,7 @@ describe('buildCotizacionView', () => {
     expect(v.totalFmt).toBe('$7.269.680');
   });
 
-  it('sin numero (fila anterior al ALTER) sale S/N, no revienta', () => {
+  it('numero null (rama defensiva -- el identity rellena retroactivamente, no es un caso esperado) sale S/N, no revienta', () => {
     const v = buildCotizacionView({ ...ROW, numero: null }, null);
     expect(v.numero).toBe('S/N');
     expect(v.archivo).toBe('cotizacion-SN.pdf');
@@ -50,11 +75,22 @@ describe('buildCotizacionView', () => {
     expect(v.vigenciaTexto).toContain('18:45');
   });
 
-  it('el codigo de cada linea es el MPN, con fallback al SKU del proveedor', () => {
+  it('el codigo de cada linea es el MPN; sin MPN sale "—" (el SKU del mayorista no se imprime en documentos de cliente)', () => {
     const v = buildCotizacionView(ROW, null);
     expect(v.lineas[0].codigo).toBe('D6UF9AT#ABM');
     const sinMpn = buildCotizacionView({ ...ROW, lineas: [{ ...ROW.lineas[0], mpn: null, sku_proveedor: 'NT030HPQ58' }] }, null);
-    expect(sinMpn.lineas[0].codigo).toBe('NT030HPQ58');
+    expect(sinMpn.lineas[0].codigo).toBe('—');
+  });
+
+  it('sanitiza descripcion, codigo y razon social contra caracteres fuera de WinAnsi (mojibake real de Ingram)', () => {
+    const rowSucia: CotizacionRow = {
+      ...ROW,
+      lineas: [{ ...ROW.lineas[0], mpn: 'CARTRIDGE', nombre: 'CARTUCHO PÃG' }],
+    };
+    const v = buildCotizacionView(rowSucia, { razon_social: 'Cliente 5″ SpA', rut: '1-9' });
+    expect(v.lineas[0].codigo).toBe('CART?RIDGE');
+    expect(v.lineas[0].descripcion).toBe('CARTUCHO PÃ?G');
+    expect(v.cliente?.razonSocial).toBe('Cliente 5? SpA');
   });
 
   it('con cliente guardado va la razon social; sin el, null', () => {

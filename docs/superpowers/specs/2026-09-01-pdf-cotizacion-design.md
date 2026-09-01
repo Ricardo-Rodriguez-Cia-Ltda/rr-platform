@@ -125,7 +125,7 @@ incrusta el mockup completo.
 |---|---|
 | Cotización inexistente | 404 con cuerpo JSON `{ error: "cotizacion_no_encontrada" }` |
 | Supabase caído o pausado | 503; el link puede reintentarse — y el envío original desde la function habría fallado como `pdf: "fallo"` sin bloquear nada |
-| Sin `numero` (fila anterior al ALTER) | El PDF sale con `N° S/N`; no revienta |
+| Sin `numero` (rama defensiva) | El PDF sale con `N° S/N`; no revienta. En Postgres, `generated always as identity` rellena retroactivamente todas las filas existentes al correr el ALTER (`docs/sql/2026-09-01-numero-cotizacion.sql`), así que esta rama no es un caso esperado en producción — protege contra la columna faltante o una consulta que no la trajo, no contra filas "viejas" |
 | Sin cliente guardado | Bloque `Presente` genérico |
 | El envío a Kapso/Meta falla | `pdf: "fallo"` en la respuesta de la function; la conversación sigue |
 | Vercel sin las env de Supabase | El endpoint responde 503 nombrando las variables que faltan (patrón del relé), nunca sus valores |
@@ -165,3 +165,9 @@ incrusta el mockup completo.
   versión cacheada.
 - **Dependencia nueva de producción** (`pdf-lib`) en `apps/mailer` — la segunda
   del repo tras nodemailer.
+- **Orden aceptado: el PDF llega antes que el texto.** El documento sale del
+  lado de `generar-cotizacion-v2` (esta function), y el resumen en texto lo
+  compone el agente después — el cliente ve primero el adjunto, luego la
+  explicación. Es una decisión aceptada, no un defecto: el envío a Kapso
+  agrega hasta 5 s de latencia a la respuesta cuando la plataforma está
+  lenta (mismo timeout que el `fetch` del POST).

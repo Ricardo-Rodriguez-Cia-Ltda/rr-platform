@@ -32,7 +32,10 @@ async function supabaseGet(env: Required<CotizacionEnv>, path: string): Promise<
   }
 }
 
-export function createCotizacionHandler() {
+// `draw` es inyectable solo para pruebas -- ver `apps/mailer/tests/cotizacion.test.ts`,
+// el caso que fuerza el 503 cuando drawCotizacion revienta. En produccion
+// siempre corre el `drawCotizacion` real, de mas abajo en este archivo.
+export function createCotizacionHandler(draw: (view: CotizacionView) => Promise<Uint8Array> = drawCotizacion) {
   return async function handler(
     req: VercelRequest,
     res: VercelResponse,
@@ -77,7 +80,21 @@ export function createCotizacionHandler() {
     }
 
     const view = buildCotizacionView(row, cliente);
-    const bytes = await drawCotizacion(view);
+
+    // sanitizeWinAnsi en buildCotizacionView cubre el caso conocido (mojibake
+    // de Ingram), pero drawCotizacion sigue sin try/catch propio: cualquier
+    // otra forma de reventar el dibujo (fuente, layout) no puede tumbar la
+    // respuesta con un 500 sin cuerpo. Se degrada a 503 "upstream" -- el
+    // mismo contrato que un fallo de Supabase, asi que el link sigue siendo
+    // reintentable. Solo se loguea el quote_id, nunca datos del cliente.
+    let bytes: Uint8Array;
+    try {
+      bytes = await draw(view);
+    } catch {
+      console.error(`cotizacion ${row.quote_id}: drawCotizacion revento`);
+      res.status(503).json({ error: 'upstream' });
+      return;
+    }
 
     res.status(200);
     res.setHeader('Content-Type', 'application/pdf');

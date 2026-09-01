@@ -247,11 +247,25 @@ async function handler(request, env) {
     // exito de return=representation), no solo ausencia de fallo: `null`
     // (el POST fallo) y `undefined` (nunca se intento, sin secretos de
     // Supabase) quedan ambos afuera, porque mandar el link sin probar que la
-    // fila existe es garantizar un 404 al cliente.
-    if (Array.isArray(postCotizacion) && telefono && phoneNumberId) {
-      const numero = postCotizacion[0]?.numero != null
-        ? String(postCotizacion[0].numero)
-        : String(quote.quote_id).slice(0, 8);
+    // fila existe es garantizar un 404 al cliente. Sin evidencia de
+    // persistencia, "fallo" -- no importa si telefono/phoneNumberId estan.
+    if (!Array.isArray(postCotizacion)) {
+      pdf = "fallo";
+    } else if (!telefono || !phoneNumberId) {
+      // La cotizacion SI quedo guardada, pero no hay a quien mandarle el PDF
+      // -- invocaciones sinteticas o el canal de prueba, que no traen
+      // `phone_number` o `phone_number_id` en el contexto. Distinto de
+      // "fallo": no es un error, es que no hay destinatario.
+      pdf = "sin_destinatario";
+    } else {
+      // Sin numero (rama defensiva: el ALTER de docs/sql/2026-09-01-numero-cotizacion.sql
+      // rellena retroactivamente todas las filas existentes, asi que esto no
+      // deberia pasar en produccion -- solo si el POST no lo devolvio por
+      // alguna razon) el archivo cae a "cotizacion-SN.pdf" -- alineado con el
+      // Content-Disposition del endpoint y el "N° S/N" del documento (ver
+      // apps/mailer/src/cotizacion-view.ts).
+      const numero = postCotizacion[0]?.numero != null ? String(postCotizacion[0].numero) : null;
+      const filename = numero != null ? `cotizacion-${numero}.pdf` : "cotizacion-SN.pdf";
       const base = String(env.COTIZACION_PDF_BASE).replace(/\/+$/, "");
       try {
         const r = await fetch(`https://api.kapso.ai/meta/whatsapp/v24.0/${phoneNumberId}/messages`, {
@@ -263,7 +277,7 @@ async function handler(request, env) {
             type: "document",
             document: {
               link: `${base}/${quote.quote_id}`,
-              filename: `cotizacion-${numero}.pdf`,
+              filename,
               caption: "Tu cotización formal en PDF 📄"
             }
           }),
@@ -273,8 +287,6 @@ async function handler(request, env) {
       } catch (_) {
         pdf = "fallo";
       }
-    } else {
-      pdf = "fallo";
     }
   }
 

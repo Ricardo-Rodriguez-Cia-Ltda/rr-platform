@@ -359,12 +359,12 @@ describe('generar-cotizacion-v2: PDF por WhatsApp', () => {
     expect(envios[0].body.document.filename).toBe('cotizacion-1600001.pdf');
   });
 
-  it('si Supabase no devolvio numero, el filename cae a los 8 primeros del quote_id', async () => {
+  it('si Supabase no devolvio numero, el filename cae a "cotizacion-SN.pdf" (alineado con el "N° S/N" del documento)', async () => {
     const envios: any[] = [];
     routeFetch({ supabase: (url) => (url.includes('/cotizaciones') ? [{}] : []), kapso: (url, init) => { envios.push(JSON.parse(String(init?.body))); return {}; } });
     const res = await handler(request({ execution_context: { vars: CART_VARS, ...CTX_FULL } }), ENV_PDF);
-    const data = (await res.json()) as any;
-    expect(envios[0].document.filename).toBe(`cotizacion-${String(data.vars.quote_id).slice(0, 8)}.pdf`);
+    await res.json();
+    expect(envios[0].document.filename).toBe('cotizacion-SN.pdf');
   });
 
   it('si el guardado de la cotizacion fallo, NO se intenta el PDF', async () => {
@@ -390,6 +390,30 @@ describe('generar-cotizacion-v2: PDF por WhatsApp', () => {
     const res = await handler(request({ execution_context: { vars: CART_VARS, ...CTX_FULL } }), ENV_SB); // sin KAPSO_API_KEY ni base
     expect(kapsoCalls).toHaveLength(0);
     expect(((await res.json()) as any).pdf).toBeUndefined();
+  });
+
+  // "sin_destinatario" es distinto de "fallo": la cotizacion SI quedo
+  // guardada (persistencia confirmada), pero no hay a quien mandarle el PDF
+  // -- invocaciones sinteticas o el canal de prueba no traen `phone_number`
+  // o `phone_number_id`. "fallo" se reserva para persistencia no confirmada
+  // o el POST a Kapso que fallo/no-ok.
+  it('con persistencia confirmada pero sin phone_number_id en el contexto, pdf es "sin_destinatario"', async () => {
+    const kapsoCalls: string[] = [];
+    routeFetch({ supabase: (url) => (url.includes('/cotizaciones') ? [{ numero: 1600001 }] : []), kapso: (url) => { kapsoCalls.push(url); return {}; } });
+    // Trae phone_number pero no system.whatsapp_config.phone_number_id.
+    const ctxSinPhoneNumberId = { context: { phone_number: '+56 9 4175 7584' } };
+    const res = await handler(request({ execution_context: { vars: CART_VARS, ...ctxSinPhoneNumberId } }), ENV_PDF);
+    expect(kapsoCalls).toHaveLength(0);
+    expect(((await res.json()) as any).pdf).toBe('sin_destinatario');
+  });
+
+  it('con persistencia confirmada pero sin telefono en el contexto, pdf es "sin_destinatario"', async () => {
+    const kapsoCalls: string[] = [];
+    routeFetch({ supabase: (url) => (url.includes('/cotizaciones') ? [{ numero: 1600001 }] : []), kapso: (url) => { kapsoCalls.push(url); return {}; } });
+    const ctxSinTelefono = { context: {}, system: { whatsapp_config: { phone_number_id: '1286605217864083' } } };
+    const res = await handler(request({ execution_context: { vars: CART_VARS, ...ctxSinTelefono } }), ENV_PDF);
+    expect(kapsoCalls).toHaveLength(0);
+    expect(((await res.json()) as any).pdf).toBe('sin_destinatario');
   });
 
   // Los secretos del PDF pueden estar cargados sin que Supabase lo este (son

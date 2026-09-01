@@ -65,7 +65,24 @@ Supabase, arma la vista con `buildCotizacionView`
 `200 application/pdf`. Si el `quote_id` no tiene forma de UUID o la fila no
 existe, `404 {"error":"cotizacion_no_encontrada"}`; si Supabase no responde
 o el fetch expira (8 s), `503 {"error":"upstream"}` — reintentable, el
-enlace no caduca por eso.
+enlace no caduca por eso. Si `drawCotizacion` revienta dibujando el PDF
+(p.ej. algo fuera del alfabeto que `sanitizeWinAnsi` no haya anticipado),
+también responde `503 {"error":"upstream"}` en vez de un 500 crudo, logueando
+solo el `quote_id` — nunca datos del cliente.
+
+El nombre de archivo cae a `cotizacion-SN.pdf` cuando la fila trae
+`numero: null`. Es una rama **defensiva**, no un caso esperado: en Postgres,
+`add column ... generated always as identity` rellena retroactivamente todas
+las filas existentes al correr el ALTER (`docs/sql/2026-09-01-numero-cotizacion.sql`),
+así que ninguna fila real debería llegar sin `numero` una vez aplicado.
+
+Los nombres de producto y la razón social del cliente pasan por
+`sanitizeWinAnsi` antes de dibujarse: `pdf-lib` usa la codificación WinAnsi
+(cp1252) con Helvetica, y un carácter fuera de ese repertorio hace lanzar a
+`drawText`. Esto no es teórico — 44 productos reales del catálogo de Ingram
+(0,27% del catálogo) traen mojibake (bytes de cp1252 sin carácter asignado,
+p.ej. U+0081, U+009D) que reventaba el endpoint con 500 antes de este
+saneo; cualquier carácter no representable se reemplaza por `?`.
 
 Es una **capability URL**: pública a propósito, sin autenticación, porque el
 `quote_id` es un UUID inadivinable — quien lo tiene (por el link que manda
@@ -123,7 +140,7 @@ tocar cualquiera sin entender las otras dos rompe el despliegue:
    vacío. `salida-vacia` es un directorio generado en cada build (nunca
    parte del árbol de `apps/mailer`) con un único `index.html` de una línea,
    solo para satisfacer ese requisito — esta app no sirve nada estático,
-   solo la función en `api/send.ts`.
+   solo las dos funciones en `api/` (`send.ts` y `cotizacion/[id].ts`).
 
 **Esto es deliberado. No lo "arregles" quitando `buildCommand` o apuntando
 `outputDirectory` a otra cosa** — sin los tres juntos, o vuelve el install
@@ -203,7 +220,17 @@ credencial nunca aparece en la respuesta.
 válido de una página con los headers correctos, id sin forma de UUID → 404
 sin tocar Supabase, cotización inexistente → 404, sin `SUPABASE_URL`/`SUPABASE_SERVICE_KEY`
 → 503 nombrando las que faltan, fila sin `numero` → archivo `cotizacion-SN.pdf`,
-un fetch que falla → 503 `upstream`, sin teléfono no consulta `/clientes`, y
-dos pruebas estructurales de `drawCotizacion`: más de 18 líneas pasa a una
-segunda página, y una línea con todos los campos `undefined` (normalizados a
-0 por `buildCotizacionView`) no revienta el dibujo.
+un fetch que falla → 503 `upstream`, sin teléfono no consulta `/clientes`, un
+nombre con mojibake real de Ingram (U+0081) o una razón social con `″`
+(U+2033) salen `200` en vez de reventar, `drawCotizacion` inyectado para que
+reviente responde `503 upstream` logueando solo el `quote_id`, y dos pruebas
+estructurales de `drawCotizacion`: más de 18 líneas pasa a una segunda
+página, y una línea con todos los campos `undefined` (normalizados a 0 por
+`buildCotizacionView`) no revienta el dibujo.
+
+`apps/mailer/tests/cotizacion-view.test.ts` prueba además `sanitizeWinAnsi`
+directamente: deja intacto el ASCII imprimible, el rango Latin-1 y los 27
+caracteres especiales de cp1252 (`€`, comillas curvas, guion largo, etc.)
+que `pdf-lib` sí sabe codificar en WinAnsi; reemplaza por `?` cualquier otro
+carácter, con los dos bytes de mojibake reales observados en Ingram
+(U+0081, U+009D) como caso concreto.
