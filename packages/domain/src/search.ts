@@ -44,6 +44,29 @@ function specSubparts(token: string): string[] {
   return segmentos.filter((s) => s.length >= 2 || /^\d+$/.test(s));
 }
 
+/**
+ * Tokens del nombre, en orden, con los tokens compuestos (ssd1tb) partidos
+ * en sus subpartes en el mismo lugar de la secuencia (-> ssd, 1, tb). A
+ * diferencia de un Set plano, esto preserva la adyacencia real del nombre.
+ */
+function expandTokensPreservingAdjacency(nameTokens: string[]): string[] {
+  const expandido: string[] = [];
+  for (const token of nameTokens) {
+    const sub = specSubparts(token);
+    if (sub.length > 0) expandido.push(...sub);
+    else expandido.push(token);
+  }
+  return expandido;
+}
+
+/** true si `a` y `b` aparecen consecutivos, en ese orden, en `tokens`. */
+function hasAdjacentPair(tokens: string[], a: string, b: string): boolean {
+  for (let i = 0; i < tokens.length - 1; i++) {
+    if (tokens[i] === a && tokens[i + 1] === b) return true;
+  }
+  return false;
+}
+
 function scoreProduct(
   product: NormalizedProduct,
   terms: string[],
@@ -54,9 +77,15 @@ function scoreProduct(
   const brandTokens = new Set(tokenize(product.marca ?? ''));
   const nameTokens = tokenize(product.nombre ?? '');
   const descriptionTokens = new Set(nameTokens);
-  for (const token of nameTokens) {
-    for (const sub of specSubparts(token)) descriptionTokens.add(sub);
-  }
+  // Secuencia expandida SOLO para el bono de spec (ver abajo): un Set plano
+  // de tokens del nombre no alcanza para esa comprobacion porque no exige
+  // que las dos partes vengan del mismo lugar. Confirmado en vivo (ronda de
+  // arreglo 1, 2026-09-01): el termino "16gb" puntuaba +3 contra "Notebook
+  // 16 pulgadas - 8 GB RAM - SSD", donde el "16" viene de "pulgadas" y el
+  // "gb" viene de "8 GB" — campos distintos, ninguno es la spec real. La
+  // membresia global daba falsos positivos entre campos; la adyacencia
+  // sobre la secuencia real del nombre es la spec de verdad.
+  const expandedNameTokens = expandTokensPreservingAdjacency(nameTokens);
 
   // El MPN aporta a lo sumo PESO_MPN_EXACTO por producto, sin importar en
   // cuantos tokens se parta: un MPN de dos tokens no vale mas que uno de uno.
@@ -76,10 +105,11 @@ function scoreProduct(
       score += PESO_DESCRIPCION;
     } else {
       // Lado consulta: "32gb" tambien puntua como descripcion si sus DOS
-      // partes ("32" y "gb") estan en los tokens del nombre. Una sola vez,
-      // nunca ademas del match directo de arriba.
+      // partes ("32" y "gb") aparecen CONSECUTIVAS, en ese orden, en el
+      // nombre expandido. Una sola vez, nunca ademas del match directo de
+      // arriba.
       const specMatch = SPEC_TERM.exec(term);
-      if (specMatch && descriptionTokens.has(specMatch[1]) && descriptionTokens.has(specMatch[2])) {
+      if (specMatch && hasAdjacentPair(expandedNameTokens, specMatch[1], specMatch[2])) {
         score += PESO_DESCRIPCION;
       }
     }

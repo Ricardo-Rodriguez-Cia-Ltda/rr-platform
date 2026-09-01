@@ -146,6 +146,11 @@ describe('matching consciente de specs', () => {
     producto('NB016HP02', 'MPN-NB016', 'HP - Notebook - 16 GB - DDR5', 'HP'),
     producto('SD001KIN01', 'MPN-SD001', 'Kingston SSD1TB NVMe M.2', 'Kingston', 'Almacenamiento'),
     producto('CP001INT01', 'MPN-CP001', 'Intel Core i5 - Procesador', 'Intel'),
+    // Falso positivo confirmado en vivo (ronda de arreglo 1, 2026-09-01): "16"
+    // viene de "16 pulgadas" y "gb" viene de "8 GB", campos distintos. El
+    // bono de "16gb" NO debe otorgarse aqui: membresia plana en un Set no
+    // exige que las dos partes vengan del mismo lugar del nombre.
+    producto('NB016PUL01', 'MPN-NB016PUL', 'Notebook 16 pulgadas - 8 GB RAM - SSD', 'Generico'),
   ];
 
   it('q="notebook 32GB" encuentra el notebook de 32 GB separado en el nombre, y lo puntua mas arriba', () => {
@@ -168,6 +173,15 @@ describe('matching consciente de specs', () => {
     // el token "32gb" en el nombre). Si sumara dos veces el score subiria a 6.
     const resultado = search(CATALOGO_SPECS, { q: '32GB' }).find((r) => r.product.sku === 'NB032HP01');
     expect(resultado?.score).toBe(3);
+  });
+
+  it('el bono de spec exige adyacencia real: "16gb" no matchea "16 pulgadas ... 8 GB" (campos distintos)', () => {
+    const resultados = search(CATALOGO_SPECS, { q: 'notebook 16GB' });
+    const falsoPositivo = resultados.find((r) => r.product.sku === 'NB016PUL01');
+    expect(falsoPositivo).toBeDefined();
+    // Solo "notebook" matchea (descripcion, +3). Si el bono de spec se diera
+    // por membresia plana, subiria a 6.
+    expect(falsoPositivo!.score).toBe(3);
   });
 
   it('un termino que no es spec (no calza el patron numero+letras) no cambia su comportamiento', () => {
