@@ -70,8 +70,8 @@ const FUNCTIONS = [
   // si difieren, el precio que ve el cliente en la busqueda no coincide con el
   // de su cotizacion.
   { name: 'buscar-productos-v2', secrets: ['API_PRECIOS_KEY', 'MARGEN', 'TIPO_CAMBIO_CLP_USD'] },
-  { name: 'generar-cotizacion-v2', secrets: ['API_PRECIOS_KEY', 'MARGEN', 'TIPO_CAMBIO_CLP_USD', 'IVA_RATE', 'COTIZACION_VALID_HOURS'] },
-  { name: 'emitir-ordenes-compra', secrets: ['MARGEN', 'MAILER_URL', 'MAILER_API_KEY', 'OC_EMAIL_DESTINO'] },
+  { name: 'generar-cotizacion-v2', secrets: ['API_PRECIOS_KEY', 'MARGEN', 'TIPO_CAMBIO_CLP_USD', 'IVA_RATE', 'COTIZACION_VALID_HOURS', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY'] },
+  { name: 'emitir-ordenes-compra', secrets: ['MARGEN', 'MAILER_URL', 'MAILER_API_KEY', 'OC_EMAIL_DESTINO', 'SUPABASE_URL', 'SUPABASE_SERVICE_KEY'] },
   // Un solo router para los tres nodos `decide`. El plan de Kapso permite 5
   // Workers desplegados y las cuatro de arriba ya ocupan cuatro; tres routers
   // separados no caben. Ver el comentario de cabecera de router-v2.js.
@@ -87,6 +87,8 @@ const VALUES: Record<string, string> = {
   MAILER_URL: process.env.MAILER_URL ?? '',
   MAILER_API_KEY: process.env.MAILER_API_KEY ?? '',
   OC_EMAIL_DESTINO: process.env.OC_EMAIL_DESTINO ?? 'pyxis.latam@gmail.com',
+  SUPABASE_URL: process.env.SUPABASE_URL ?? '',
+  SUPABASE_SERVICE_KEY: process.env.SUPABASE_SERVICE_KEY ?? '',
 };
 
 function printSummary(

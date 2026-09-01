@@ -21,6 +21,40 @@ function error(payload, status) {
   return json({ ...payload, vars: { ...SIN_COTIZACION } }, status);
 }
 
+// --- persistencia (Supabase) ---------------------------------------------
+// Memoria del negocio, no un eslabon del flujo: nunca lanza, 4s de timeout,
+// y sin secretos configurados no hace nada. Ver el spec 2026-08-31.
+async function supabase(env, method, path, body) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return null;
+  try {
+    const base = String(env.SUPABASE_URL).replace(/\/+$/, "");
+    const r = await fetch(`${base}/rest/v1${path}`, {
+      method,
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: method === "POST" ? "resolution=merge-duplicates,return=minimal" : "count=none"
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(4000)
+    });
+    if (!r.ok) return null;
+    const text = await r.text();
+    return text ? JSON.parse(text) : {};
+  } catch (_) {
+    return null;
+  }
+}
+
+// El telefono de WhatsApp es la llave del cliente: llega solo, en el contexto.
+function telefonoDesdeContexto(executionContext) {
+  const ctx = executionContext?.context || {};
+  const crudo = ctx.phone_number || ctx.contact?.wa_id || "";
+  const digitos = String(crudo).replace(/\D/g, "");
+  return digitos.length > 0 ? digitos : null;
+}
+
 async function consultar(base, apiKey, params) {
   let respuesta;
   try {
@@ -169,15 +203,50 @@ async function handler(request, env) {
     valid_until: new Date(ahora.getTime() + horas * 3600000).toISOString()
   };
 
+  // Persistencia best-effort: la cotizacion al registro, y el cliente (si
+  // existe) de vuelta al flujo para que facturacion confirme en vez de pedir.
+  const telefono = telefonoDesdeContexto(body.execution_context);
+  let clienteGuardado = null;
+  let persistencia;
+  if (env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY) {
+    const [cotizacionGuardada, filas] = await Promise.all([
+      // Prefer: merge-duplicates es inerte hoy — quote_id es un UUID fresco
+      // en cada cotizacion, asi que nunca colisiona con una fila existente.
+      // El dia que una re-cotizacion reutilice un quote_id (para corregirlo
+      // en vez de crear uno nuevo), esa colision se resolveria en silencio
+      // pisando la fila vieja: la columna `version` existe justamente para
+      // ese caso, y ese dia el POST tiene que empezar a usarla en la query.
+      supabase(env, "POST", "/cotizaciones", {
+        quote_id: quote.quote_id,
+        version: String(quote.version),
+        telefono,
+        neto_clp: quote.neto_clp,
+        iva_clp: quote.iva_clp,
+        total_clp: quote.total_clp,
+        valida_hasta: quote.valid_until,
+        lineas: quote.lineas
+      }),
+      telefono
+        ? supabase(env, "GET", `/clientes?telefono=eq.${telefono}&select=rut,razon_social,giro,direccion,comuna,ciudad,email&limit=1`)
+        : Promise.resolve(null)
+    ]);
+    if (Array.isArray(filas) && filas.length > 0) clienteGuardado = filas[0];
+    persistencia = cotizacionGuardada !== null ? "ok" : "fallo";
+  }
+
+  const varsRespuesta = {
+    quote_result: quote,
+    quote_id: quote.quote_id,
+    quote_version: quote.version,
+    quote_total_clp: quote.total_clp,
+    quote_valid_until: quote.valid_until
+  };
+  if (env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY) varsRespuesta.cliente_guardado = clienteGuardado;
+
   return json({
     estado: "ok",
     quote,
-    vars: {
-      quote_result: quote,
-      quote_id: quote.quote_id,
-      quote_version: quote.version,
-      quote_total_clp: quote.total_clp,
-      quote_valid_until: quote.valid_until
-    }
+    vars: varsRespuesta,
+    ...(persistencia !== undefined ? { persistencia } : {})
   });
 }

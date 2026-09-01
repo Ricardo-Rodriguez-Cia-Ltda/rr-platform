@@ -46,6 +46,10 @@ function fakeD1(options: { failInsert?: (key: string) => boolean } = {}) {
                   row.updated_at = args[args.length - 2];
                   // En el UPDATE a 'failed' el primer bind es el mensaje de error.
                   if (sql.includes("'failed'")) row.error = args[0];
+                  // En el UPDATE a 'sent' el primer bind es el email_id que
+                  // devolvio el rele: sin capturarlo aca, una re-invocacion no
+                  // puede probar que el email_id del envio real sobrevive.
+                  if (sql.includes("'sent'")) row.email_id = args[0];
                 }
                 return { success: true };
               }
@@ -100,6 +104,27 @@ function resendOk() {
 
 function bodies(spy: ReturnType<typeof resendOk>): string[] {
   return spy.mock.calls.map((c: any[]) => String((c[1] as RequestInit).body));
+}
+
+// Enruta fetch por URL: lo que va a supabase.test pasa por el callback (un
+// throw simula caida, el retorno se envuelve en Response 200 JSON); el resto
+// sigue yendo al mock del rele de correo (mismo formato que resendOk: 200 con
+// {id: 'email-1'}), que es lo que estas pruebas de persistencia necesitan
+// para que la emision del correo no interfiera con lo que se prueba.
+function routeFetch(handlers: {
+  supabase?: (url: string, init?: RequestInit) => unknown;
+}) {
+  const spy = vi.fn(async (url: string, init?: RequestInit) => {
+    const href = String(url);
+    if (href.startsWith('https://supabase.test')) {
+      if (!handlers.supabase) throw new Error('llamada inesperada a supabase');
+      const resultado = handlers.supabase(href, init);
+      return new Response(JSON.stringify(resultado), { status: 200 });
+    }
+    return new Response(JSON.stringify({ id: 'email-1' }), { status: 200 });
+  });
+  vi.stubGlobal('fetch', spy);
+  return spy;
 }
 
 async function issue(environment: Record<string, unknown>, extra: Record<string, unknown> = {}) {
@@ -410,6 +435,141 @@ describe('emitir-ordenes-compra', () => {
     for (const [, init] of spy.mock.calls as unknown as [string, RequestInit][]) {
       const cuerpo = JSON.parse(String(init.body));
       expect(cuerpo.to).toBe('pyxis.latam@gmail.com');
+    }
+  });
+});
+
+// La persistencia es memoria del negocio, no un eslabon: estas pruebas
+// verifican tanto que se use como que su ausencia no cambie nada.
+describe('emitir-ordenes-compra: persistencia', () => {
+  // Dos proveedores, cotizacion propia (quote_id distinto de la de arriba)
+  // para no chocar con la idempotencia de D1 de las otras pruebas.
+  const quoteDosProveedores = {
+    quote_id: 'q-persistencia',
+    version: 1,
+    lineas: [
+      { mpn: 'A-1', marca: 'Epson', nombre: 'Cinta A', cantidad: 2, proveedor: 'ingram', sku_proveedor: 'ING-1', precio_unitario_usd: 11.3, precio_unitario_clp: 10735, subtotal_neto_clp: 21470, disponible: true, abastecimiento: 'stock_inmediato', comparacion: 'completa', ofertas_consideradas: 3, ahorro_vs_peor_clp: 0 },
+      { mpn: 'B-1', marca: 'HP', nombre: 'Toner', cantidad: 3, proveedor: 'intcomex', sku_proveedor: 'IC-9', precio_unitario_usd: 56.5, precio_unitario_clp: 53675, subtotal_neto_clp: 161025, disponible: false, abastecimiento: 'por_comprar_importar', comparacion: 'completa', ofertas_consideradas: 2, ahorro_vs_peor_clp: 0 },
+    ],
+    neto_clp: 182495,
+    iva_clp: 34674,
+    total_clp: 217169,
+    proveedores_incompletos: [],
+    valid_until: new Date(Date.now() + 3 * 3600_000).toISOString(),
+  };
+
+  const billing = {
+    billing_rut: '21099234-0',
+    billing_razon_social: 'Vicente Pareja',
+    billing_giro: 'Servicios',
+    billing_direccion: 'Holanda 222',
+    billing_comuna: 'Ñuñoa',
+    billing_ciudad: 'Santiago',
+    billing_email: 'parejavice@gmail.com',
+  };
+
+  const BODY_DOS_PROVEEDORES = {
+    execution_context: {
+      vars: { quote_result: quoteDosProveedores, quote_confirmed: true, quote_customer_name: 'Vicente Pareja', ...billing },
+      context: { phone_number: '+56 9 4175 7584' },
+    },
+  };
+
+  const BODY_SIN_TELEFONO = {
+    execution_context: {
+      vars: { quote_result: quoteDosProveedores, quote_confirmed: true, quote_customer_name: 'Vicente Pareja', ...billing },
+    },
+  };
+
+  // Funciones, no constantes: cada prueba necesita su propio D1 fresco, si no
+  // la idempotencia de la segunda prueba que reusa BODY_DOS_PROVEEDORES vería
+  // la orden de la primera ya como 'sent' y todo el resto correría 'duplicate'.
+  const ENV_SB = () => ({ ...env(), SUPABASE_URL: 'https://supabase.test', SUPABASE_SERVICE_KEY: 'clave-de-prueba' });
+  const ENV_SIN_SUPABASE = () => env();
+
+  it('guarda una fila de pedido por proveedor, con las lineas del grupo', async () => {
+    const cuerpos: any[] = [];
+    routeFetch({ supabase: (url, init) => { if (url.includes('/pedidos')) cuerpos.push(JSON.parse(String(init?.body))); return {}; } });
+    await handler(request(BODY_DOS_PROVEEDORES), ENV_SB());
+    expect(cuerpos).toHaveLength(1);           // un solo POST con arreglo
+    expect(cuerpos[0]).toHaveLength(2);        // dos proveedores = dos filas
+    const proveedores = cuerpos[0].map((p: any) => p.proveedor).sort();
+    expect(proveedores).toEqual(['ingram', 'intcomex']);
+    expect(cuerpos[0][0].estado).toBe('sent');
+    expect(cuerpos[0][0].rut).toBe('21099234-0');
+  });
+
+  it('hace upsert del cliente confirmado por telefono', async () => {
+    const urls: string[] = [];
+    const cuerpos: any[] = [];
+    routeFetch({ supabase: (url, init) => { urls.push(url); if (url.includes('/clientes')) cuerpos.push(JSON.parse(String(init?.body))); return {}; } });
+    await handler(request(BODY_DOS_PROVEEDORES), ENV_SB());
+    expect(urls.some((u) => u.includes('/clientes?on_conflict=telefono'))).toBe(true);
+    expect(cuerpos[0].telefono).toBe('56941757584');
+    expect(cuerpos[0].razon_social).toBe('Vicente Pareja');
+  });
+
+  it('con Supabase caido, la emision completa igual y persistencia es fallo', async () => {
+    routeFetch({ supabase: () => { throw new Error('ECONNRESET'); } });
+    const res = await handler(request(BODY_DOS_PROVEEDORES), ENV_SB());
+    const data = (await res.json()) as any;
+    expect(data.ok).toBe(true);
+    expect(data.vars.purchase_orders_ok).toBe(true);
+    expect(data.persistencia).toBe('fallo');
+  });
+
+  it('sin secretos, ni llama a Supabase ni agrega el campo', async () => {
+    const urls: string[] = [];
+    routeFetch({ supabase: (url) => { urls.push(url); return {}; } });
+    const res = await handler(request(BODY_DOS_PROVEEDORES), ENV_SIN_SUPABASE());
+    expect(urls).toHaveLength(0);
+    expect(((await res.json()) as any).persistencia).toBeUndefined();
+  });
+
+  it('sin telefono en contexto, el pedido se guarda con telefono null y el cliente no se toca', async () => {
+    const urls: string[] = [];
+    const cuerpos: any[] = [];
+    routeFetch({ supabase: (url, init) => { urls.push(url); if (url.includes('/pedidos')) cuerpos.push(JSON.parse(String(init?.body))); return {}; } });
+    await handler(request(BODY_SIN_TELEFONO), ENV_SB());
+    expect(urls.some((u) => u.includes('/clientes'))).toBe(false);
+    expect(cuerpos[0][0].telefono).toBeNull();
+  });
+
+  // Con 6 de 7 campos informados (falta billing_giro) el upsert de cliente
+  // tiene que omitirse por completo, sin que eso afecte al pedido: el correo
+  // ya salio y la venta no depende de esta escritura de memoria.
+  it('con un campo de facturacion sin informar, no hace upsert de cliente pero el pedido se guarda igual', async () => {
+    const urls: string[] = [];
+    const cuerpos: any[] = [];
+    routeFetch({ supabase: (url, init) => { urls.push(url); if (url.includes('/pedidos')) cuerpos.push(JSON.parse(String(init?.body))); return {}; } });
+    const { billing_giro: _giro, ...billingSinGiro } = billing;
+    const body = {
+      execution_context: {
+        vars: { quote_result: quoteDosProveedores, quote_confirmed: true, quote_customer_name: 'Vicente Pareja', ...billingSinGiro },
+        context: { phone_number: '+56 9 4175 7584' },
+      },
+    };
+    await handler(request(body), ENV_SB());
+    expect(urls.some((u) => u.includes('/clientes'))).toBe(false);
+    expect(urls.some((u) => u.includes('/pedidos'))).toBe(true);
+    expect(cuerpos[0]).toHaveLength(2);
+  });
+
+  // Hallazgo de la revision final: una re-invocacion (candado D1 = 'duplicate')
+  // no puede pisar la fila buena del primer envio. El estado y el email_id de
+  // la segunda fila /pedidos tienen que ser los que quedaron en D1 la primera
+  // vez, no el literal "duplicate" con email_id null.
+  it('la re-invocacion no pisa el email_id del envio real con "duplicate"/null', async () => {
+    const cuerpos: any[] = [];
+    routeFetch({ supabase: (url, init) => { if (url.includes('/pedidos')) cuerpos.push(JSON.parse(String(init?.body))); return {}; } });
+    const environment = ENV_SB(); // MISMO entorno (mismo D1) para las dos invocaciones
+    await handler(request(BODY_DOS_PROVEEDORES), environment);
+    await handler(request(BODY_DOS_PROVEEDORES), environment);
+
+    expect(cuerpos).toHaveLength(2);
+    for (const fila of cuerpos[1]) {
+      expect(fila.estado).toBe('sent');
+      expect(fila.email_id).toBe('email-1');
     }
   });
 });

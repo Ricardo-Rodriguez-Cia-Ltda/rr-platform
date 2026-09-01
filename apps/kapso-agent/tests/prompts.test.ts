@@ -127,6 +127,40 @@ describe('un solo vigente por agente', () => {
   });
 });
 
+// Segunda vez que se cuela este bug: la tabla del README quedo apuntando a
+// una version vieja mientras el directorio del agente ya tenia otra marcada
+// `vigente` (paso con agente-facturacion, README en v-02 mientras v-03 ya
+// era la vigente). `scripts/deploy-workflow.ts` despliega por la marca
+// `vigente` de los archivos, no por lo que dice el README, asi que un README
+// desactualizado no rompe el despliegue — pero si engaña a quien lo lee.
+describe('el README coincide con la version marcada vigente', () => {
+  it.each(AGENTS)('%s: la version del indice es la que esta marcada vigente', (agent) => {
+    const root = agent.slice(0, agent.lastIndexOf('/'));
+    const name = agent.slice(agent.lastIndexOf('/') + 1);
+    const readme = readFileSync(`${root}/README.md`, 'utf8');
+
+    const fila = readme.split('\n').find((line) => line.includes(`(${name}/)`));
+    expect(fila, `${name} no aparece en la tabla de ${root}/README.md`).toBeDefined();
+
+    const celdas = fila!.split('|').map((c) => c.trim()).filter((c) => c !== '');
+    const versionEnReadme = celdas[celdas.length - 1];
+
+    const vigente = versionsOf(agent).find((v) => field(v.content, 'Estado') === 'vigente');
+
+    if (!/^v-\d+$/.test(versionEnReadme)) {
+      // El README no declara una version numerada como vigente (p. ej.
+      // "— (borrador)"): entonces ningun archivo del agente debe estar
+      // marcado `vigente`.
+      expect(vigente, `${name}: el README no marca vigente pero hay un v-NN.md que si`).toBeUndefined();
+      return;
+    }
+
+    expect(vigente, `${name}: el README dice "${versionEnReadme}" vigente pero ningun archivo esta marcado vigente`).toBeDefined();
+    const versionReal = vigente!.file.match(/\/(v-\d+)\.md$/)?.[1];
+    expect(versionReal, `${name}: el README dice "${versionEnReadme}" pero la version vigente es "${versionReal}"`).toBe(versionEnReadme);
+  });
+});
+
 // La arista `fn_cotizar → agente_presentacion` es incondicional: el nodo
 // tambien corre cuando `generar-cotizacion-v2` respondio un error. La function
 // limpia `quote_result`, y la otra mitad del arreglo es la regla del prompt que

@@ -53,6 +53,8 @@ falta.
 | `emitir-ordenes-compra` | `OC_EMAIL_DESTINO` | `process.env.OC_EMAIL_DESTINO` si existe, si no `pyxis.latam@gmail.com` (fallback en el script) |
 | `emitir-ordenes-compra` | `MAILER_URL` | La URL desplegada de `apps/mailer` (proyecto `rr-mailing` en Vercel), `https://rr-mailing.vercel.app/api/send` |
 | `emitir-ordenes-compra` | `MAILER_API_KEY` | La misma clave cargada como `MAILER_API_KEY` en el proyecto `rr-mailing` de Vercel — tiene que coincidir en los dos lados, si no todo envío falla con `401 no_autorizado` desde el relé |
+| `generar-cotizacion-v2`, `emitir-ordenes-compra` | `SUPABASE_URL` | Settings → API del proyecto Supabase, vía `.env.local` |
+| `generar-cotizacion-v2`, `emitir-ordenes-compra` | `SUPABASE_SERVICE_KEY` | Settings → API del proyecto Supabase, vía `.env.local` |
 
 ### Correo: relé propio, ya no Resend
 
@@ -246,6 +248,55 @@ ORDER BY updated_at DESC;
    una vez que D1 responda resuelve el caso.
 5. Si el error es de configuración (secreto faltante), no reintentar hasta
    corregir el secreto: seguirá fallando igual y solo ensucia la tabla.
+
+---
+
+## Persistencia de negocio (Supabase)
+
+Además de `purchase_orders` en D1 (arriba), dos functions escriben en
+Supabase (Postgres) las tablas creadas por `docs/sql/2026-08-31-persistencia.sql`
+(`clientes`, `cotizaciones`, `pedidos`):
+
+- `generar-cotizacion-v2` inserta una fila en `cotizaciones` por cada
+  cotización generada (montos, líneas, vigencia) y lee `clientes` por
+  teléfono para devolver `vars.cliente_guardado` — los siete datos de
+  facturación de la última compra, si existen. Con eso el prompt de
+  facturación (`prompts/agente-facturacion/`, desde v-03) confirma los datos
+  en un mensaje en vez de volver a pedirlos.
+- `emitir-ordenes-compra` hace upsert en `pedidos` (por `po_id`) y en
+  `clientes` (por `telefono`, y solo si el RUT no quedó como `"No
+  informado"`) una vez que las órdenes de compra del grupo terminan de
+  procesarse.
+
+**Es best-effort: nunca bloquea una venta.** Sin `SUPABASE_URL` ni
+`SUPABASE_SERVICE_KEY` cargados, las dos functions simplemente no llaman a
+Supabase (la llamada se salta antes de armar el `fetch`) y siguen
+respondiendo igual que siempre — `vars.cliente_guardado` ni aparece en la
+respuesta. Con los secretos cargados pero Supabase caído o lento, el helper
+`supabase()` nunca lanza: cotizar y emitir órdenes de compra funcionan igual,
+solo que esa vuelta no queda guardada.
+
+La llave de un cliente es su **teléfono de WhatsApp** (solo dígitos, el mismo
+que arma `telefonoDesdeContexto()` en ambas functions), no el RUT — un mismo
+número de WhatsApp es la persona que vuelve a escribir, y el RUT puede
+cambiar entre una compra y otra (persona natural vs. la empresa que
+representa).
+
+Para mirar los datos no hay endpoint propio: se entra al editor de tablas de
+Supabase (Table Editor del proyecto) y se consulta `clientes`, `cotizaciones`
+o `pedidos` directamente.
+
+Los secretos son `SUPABASE_URL` y `SUPABASE_SERVICE_KEY`. Se cargan desde
+`.env.local` — igual que el resto de secretos de este documento — y
+`scripts/deploy-functions.ts` los sube con `npm run kapso:functions` a
+`generar-cotizacion-v2` y `emitir-ordenes-compra`.
+
+Con el proyecto en el plan free de Supabase, este se pausa tras ~7 días sin
+uso: la primera cotización o emisión después de la pausa lo despierta, y esa
+vuelta (y solo esa) suma hasta 4 s de latencia — el mismo timeout que usa el
+helper `supabase()`, así que en el peor caso esa escritura se cuenta como
+`fallo` sin haber llegado a intentarlo de verdad. Las siguientes llamadas ya
+corren contra el proyecto despierto.
 
 ---
 

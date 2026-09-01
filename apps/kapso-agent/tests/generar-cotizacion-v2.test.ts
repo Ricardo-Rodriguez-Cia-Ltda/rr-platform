@@ -36,6 +36,34 @@ async function quote(
   return { data: (await res.json()) as any, status: res.status, spy };
 }
 
+// El fixture de carro que ya usan las pruebas de arriba, como vars completas.
+const CART_VARS = { cart_items: cart };
+
+// Enruta fetch por URL: lo que va a supabase.test pasa por el callback (un
+// throw simula caida, el retorno se envuelve en Response 200 JSON); el resto
+// delega en la misma cola de respuestas de la API de precios que usan las
+// pruebas de arriba (bestPriceOk por defecto, que es lo que el carro de una
+// linea necesita para cotizar).
+function routeFetch(handlers: {
+  supabase?: (url: string, init?: RequestInit) => unknown;
+  precios?: Array<{ payload: unknown; status?: number }>;
+}) {
+  const preciosQueue: Array<{ payload: unknown; status?: number }> = handlers.precios ?? [{ payload: bestPriceOk }];
+  const spy = vi.fn(async (url: string, init?: RequestInit) => {
+    const href = String(url);
+    if (href.startsWith('https://supabase.test')) {
+      if (!handlers.supabase) throw new Error('llamada inesperada a supabase');
+      const resultado = handlers.supabase(href, init);
+      return new Response(JSON.stringify(resultado), { status: 200 });
+    }
+    const next = preciosQueue.shift();
+    if (!next) throw new Error('llamada de mas a fetch');
+    return new Response(JSON.stringify(next.payload), { status: next.status ?? 200 });
+  });
+  vi.stubGlobal('fetch', spy);
+  return spy;
+}
+
 // Recorre recursivamente un valor visitando cada par (clave, valor). Es lo
 // unico que detecta una fuga de costo enterrada en un objeto anidado: mirar
 // una sola linea contra un solo literal no cubre la cabecera, ni `vars`, ni
@@ -234,5 +262,69 @@ describe('generar-cotizacion-v2', () => {
   it('rechaza un margen de cero', async () => {
     const { status } = await quote(cart, [], { ...env, MARGEN: '' });
     expect(status).toBe(500);
+  });
+});
+
+// La persistencia es memoria del negocio, no un eslabon: estas pruebas
+// verifican tanto que se use como que su ausencia no cambie nada.
+describe('generar-cotizacion-v2: persistencia', () => {
+  const ENV_SB = { ...env, SUPABASE_URL: 'https://supabase.test', SUPABASE_SERVICE_KEY: 'clave-de-prueba' };
+  const CTX = { context: { phone_number: '+56 9 4175 7584' } };
+  const CLIENTE = { rut: '21099234-0', razon_social: 'Vicente Pareja', giro: 'Servicios', direccion: 'Holanda 222', comuna: 'Ñuñoa', ciudad: 'Santiago', email: 'parejavice@gmail.com' };
+
+  it('carga al cliente por telefono normalizado y lo devuelve en vars', async () => {
+    const llamadasSupabase: string[] = [];
+    routeFetch({ supabase: (url) => { llamadasSupabase.push(url); return url.includes('/clientes') ? [CLIENTE] : {}; } });
+    const res = await handler(request({ execution_context: { vars: CART_VARS, ...CTX } }), ENV_SB);
+    const data = (await res.json()) as any;
+    expect(data.vars.cliente_guardado).toEqual(CLIENTE);
+    expect(llamadasSupabase.some((u) => u.includes('telefono=eq.56941757584'))).toBe(true);
+  });
+
+  it('guarda la cotizacion con sus totales y lineas', async () => {
+    const cuerpos: any[] = [];
+    routeFetch({ supabase: (url, init) => { if (url.includes('/cotizaciones')) cuerpos.push(JSON.parse(String(init?.body))); return url.includes('/clientes') ? [] : {}; } });
+    const res = await handler(request({ execution_context: { vars: CART_VARS, ...CTX } }), ENV_SB);
+    const data = (await res.json()) as any;
+    expect(cuerpos).toHaveLength(1);
+    expect(cuerpos[0].quote_id).toBe(data.vars.quote_id);
+    expect(cuerpos[0].telefono).toBe('56941757584');
+    expect(cuerpos[0].total_clp).toBe(data.vars.quote_total_clp);
+    expect(Array.isArray(cuerpos[0].lineas)).toBe(true);
+    expect(data.persistencia).toBe('ok');
+  });
+
+  it('sin fila en Supabase, cliente_guardado es null', async () => {
+    routeFetch({ supabase: (url) => (url.includes('/clientes') ? [] : {}) });
+    const res = await handler(request({ execution_context: { vars: CART_VARS, ...CTX } }), ENV_SB);
+    expect(((await res.json()) as any).vars.cliente_guardado).toBeNull();
+  });
+
+  it('con Supabase caido, la cotizacion sale igual y cliente_guardado es null', async () => {
+    routeFetch({ supabase: () => { throw new Error('ECONNRESET'); } });
+    const res = await handler(request({ execution_context: { vars: CART_VARS, ...CTX } }), ENV_SB);
+    const data = (await res.json()) as any;
+    expect(data.estado).toBe('ok');
+    expect(data.vars.cliente_guardado).toBeNull();
+    expect(data.persistencia).toBe('fallo');
+  });
+
+  it('sin telefono en el contexto no llama a /clientes y la cotizacion va con telefono null', async () => {
+    const urls: string[] = [];
+    const cuerpos: any[] = [];
+    routeFetch({ supabase: (url, init) => { urls.push(url); if (url.includes('/cotizaciones')) cuerpos.push(JSON.parse(String(init?.body))); return {}; } });
+    await handler(request({ execution_context: { vars: CART_VARS } }), ENV_SB);
+    expect(urls.some((u) => u.includes('/clientes'))).toBe(false);
+    expect(cuerpos[0]?.telefono).toBeNull();
+  });
+
+  it('sin secretos, no llama a Supabase y responde como siempre', async () => {
+    const urls: string[] = [];
+    routeFetch({ supabase: (url) => { urls.push(url); return {}; } });
+    const res = await handler(request({ execution_context: { vars: CART_VARS, ...CTX } }), env); // env SIN supabase
+    expect(urls).toHaveLength(0);
+    const data = (await res.json()) as any;
+    expect(data.estado).toBe('ok');
+    expect(data.vars.cliente_guardado).toBeUndefined();
   });
 });

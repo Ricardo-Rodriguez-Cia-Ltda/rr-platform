@@ -15,6 +15,40 @@ function escapar(valor) {
     .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 }
 
+// --- persistencia (Supabase) ---------------------------------------------
+// Memoria del negocio, no un eslabon del flujo: nunca lanza, 4s de timeout,
+// y sin secretos configurados no hace nada. Ver el spec 2026-08-31.
+async function supabase(env, method, path, body) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return null;
+  try {
+    const base = String(env.SUPABASE_URL).replace(/\/+$/, "");
+    const r = await fetch(`${base}/rest/v1${path}`, {
+      method,
+      headers: {
+        apikey: env.SUPABASE_SERVICE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: method === "POST" ? "resolution=merge-duplicates,return=minimal" : "count=none"
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(4000)
+    });
+    if (!r.ok) return null;
+    const text = await r.text();
+    return text ? JSON.parse(text) : {};
+  } catch (_) {
+    return null;
+  }
+}
+
+// El telefono de WhatsApp es la llave del cliente: llega solo, en el contexto.
+function telefonoDesdeContexto(executionContext) {
+  const ctx = executionContext?.context || {};
+  const crudo = ctx.phone_number || ctx.contact?.wa_id || "";
+  const digitos = String(crudo).replace(/\D/g, "");
+  return digitos.length > 0 ? digitos : null;
+}
+
 async function handler(request, env) {
   const body = await request.json().catch(() => ({}));
   const vars = body.execution_context?.vars || {};
@@ -62,6 +96,10 @@ async function handler(request, env) {
   const cliente = String(vars.quote_customer_name || "No informado");
   const rut = String(vars.billing_rut || "No informado");
   const razon = String(vars.billing_razon_social || "No informado");
+  const giro = String(vars.billing_giro || "No informado");
+  const direccion = String(vars.billing_direccion || "No informado");
+  const comuna = String(vars.billing_comuna || "No informado");
+  const ciudad = String(vars.billing_ciudad || "No informado");
   const email = String(vars.billing_email || "No informado");
   const incompletos = Array.isArray(quote.proveedores_incompletos) ? quote.proveedores_incompletos : [];
 
@@ -75,11 +113,34 @@ async function handler(request, env) {
   }
 
   const resultados = [];
+  const filasPedidos = [];
+  const telefono = telefonoDesdeContexto(body.execution_context);
 
   for (const [proveedor, lineas] of grupos) {
     const orderKey = `${quote.quote_id}:${version}:${proveedor}`;
     const poId = `oc-${orderKey.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
     const ahora = new Date().toISOString();
+
+    // Una fila de /pedidos por rama de la maquina de estados de abajo; las
+    // cinco ramas solo difieren en `estado` y `email_id`, asi que arman la
+    // fila igual (mismo proveedor, mismas lineas) via este closure en vez de
+    // repetir el objeto cinco veces con margen para que alguna copia se
+    // desincronice de las demas.
+    const registrarPedido = (estado, emailId) => {
+      filasPedidos.push({
+        po_id: poId,
+        quote_id: quote.quote_id,
+        quote_version: version,
+        proveedor,
+        telefono,
+        rut: rut === "No informado" ? null : rut,
+        razon_social: razon === "No informado" ? null : razon,
+        lineas,
+        neto_grupo_clp: lineas.reduce((suma, l) => suma + (Number(l.subtotal_neto_clp) || 0), 0),
+        estado,
+        email_id: emailId
+      });
+    };
 
     let saltar = false;
     try {
@@ -87,7 +148,7 @@ async function handler(request, env) {
         "INSERT INTO purchase_orders (order_key, po_id, quote_id, quote_version, proveedor, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'processing', ?, ?)"
       ).bind(orderKey, poId, String(quote.quote_id), version, proveedor, ahora, ahora).run();
     } catch (_) {
-      const existente = await env.DB.prepare("SELECT po_id, status, updated_at FROM purchase_orders WHERE order_key = ? LIMIT 1").bind(orderKey).first();
+      const existente = await env.DB.prepare("SELECT po_id, status, email_id, updated_at FROM purchase_orders WHERE order_key = ? LIMIT 1").bind(orderKey).first();
 
       if (!existente) {
         // El INSERT fallo y ademas no hay fila: no fue un choque de clave, fue
@@ -95,6 +156,7 @@ async function handler(request, env) {
         // idempotencia no existe, y cada reintento reenviaria esta misma orden
         // al mayorista. Se aborta esta orden; las demas siguen.
         resultados.push({ proveedor, po_id: poId, status: "failed", lineas: lineas.length });
+        registrarPedido("failed", null);
         saltar = true;
       } else {
         const estado = String(existente.status || "");
@@ -108,6 +170,11 @@ async function handler(request, env) {
 
         if (estado !== "failed" && !abandonada) {
           resultados.push({ proveedor, po_id: String(existente.po_id || poId), status: "duplicate", lineas: lineas.length });
+          // El estado y el email_id de la fila son los de D1 (la verdad de lo
+          // que de verdad paso), nunca el literal "duplicate": una segunda
+          // invocacion no puede pisar el email_id de un envio real con null
+          // solo porque esta corrida no volvio a mandar el correo.
+          registrarPedido(estado, existente.email_id ?? null);
           saltar = true;
         } else {
           await env.DB.prepare("UPDATE purchase_orders SET status = 'processing', error = NULL, updated_at = ? WHERE order_key = ?").bind(ahora, orderKey).run();
@@ -163,6 +230,7 @@ async function handler(request, env) {
       await env.DB.prepare("UPDATE purchase_orders SET status = 'failed', error = ?, updated_at = ? WHERE order_key = ?")
         .bind(mensaje, new Date().toISOString(), orderKey).run();
       resultados.push({ proveedor, po_id: poId, status: "failed", lineas: lineas.length });
+      registrarPedido("failed", null);
       continue;
     }
 
@@ -176,15 +244,47 @@ async function handler(request, env) {
       await env.DB.prepare("UPDATE purchase_orders SET status = 'failed', error = ?, updated_at = ? WHERE order_key = ?")
         .bind(mensaje, new Date().toISOString(), orderKey).run();
       resultados.push({ proveedor, po_id: poId, status: "failed", lineas: lineas.length });
+      registrarPedido("failed", null);
       continue;
     }
 
     await env.DB.prepare("UPDATE purchase_orders SET status = 'sent', email_id = ?, error = NULL, updated_at = ? WHERE order_key = ?")
       .bind(cuerpo.id || null, new Date().toISOString(), orderKey).run();
     resultados.push({ proveedor, po_id: poId, status: "sent", lineas: lineas.length });
+    registrarPedido("sent", cuerpo.id || null);
   }
 
   const todasOk = resultados.every((r) => r.status === "sent" || r.status === "duplicate");
+
+  // Registro de negocio, best-effort. D1 ya guardo la verdad tecnica; esto es
+  // lo que el humano quiere mirar despues. Un fallo se declara, no se esconde.
+  let persistencia;
+  if (env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY) {
+    const escrituras = [supabase(env, "POST", "/pedidos?on_conflict=po_id", filasPedidos)];
+    // Upsert solo si los siete campos de facturacion llegaron informados: un
+    // agente que cerro con 5 de 7 (una reentrada por RUT invalido, un
+    // handoff a medio llenar) no debe pisar la fila buena que ya estaba
+    // guardada de una compra anterior con "No informado". La venta no se
+    // toca por esto — el correo de la orden ya salio —, solo se omite esta
+    // escritura de memoria.
+    const datosClienteCompletos = telefono
+      && [rut, razon, giro, direccion, comuna, ciudad, email].every((campo) => campo !== "No informado");
+    if (datosClienteCompletos) {
+      escrituras.push(supabase(env, "POST", "/clientes?on_conflict=telefono", {
+        telefono,
+        rut,
+        razon_social: razon,
+        giro,
+        direccion,
+        comuna,
+        ciudad,
+        email,
+        updated_at: new Date().toISOString()
+      }));
+    }
+    const resultadosEscritura = await Promise.all(escrituras);
+    persistencia = resultadosEscritura.every((r) => r !== null) ? "ok" : "fallo";
+  }
 
   return json({
     ok: true,
@@ -193,6 +293,7 @@ async function handler(request, env) {
       purchase_orders_result: resultados,
       purchase_orders_count: resultados.length,
       purchase_orders_ok: todasOk
-    }
+    },
+    ...(persistencia !== undefined ? { persistencia } : {})
   });
 }
