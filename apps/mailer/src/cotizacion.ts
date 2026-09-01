@@ -1,7 +1,19 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
+import { PDFDocument, StandardFonts, type PDFFont, type PDFPage } from 'pdf-lib';
 import { firstString } from '@rr/http/http';
 import { buildCotizacionView, type ClienteRow, type CotizacionRow, type CotizacionView } from './cotizacion-view.js';
+import {
+  PAGE_W,
+  PAGE_H,
+  MARGIN,
+  GRIS,
+  NEGRO,
+  truncar,
+  centrado as centradoEn,
+  derecha as derechaEn,
+  dibujarMembrete,
+  dibujarPie,
+} from './pdf-comunes.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const REQUIRED_ENV = ['SUPABASE_URL', 'SUPABASE_SERVICE_KEY'] as const;
@@ -104,13 +116,9 @@ export function createCotizacionHandler(draw: (view: CotizacionView) => Promise<
 }
 
 // --- dibujo del PDF --------------------------------------------------------
+// El membrete, el pie y los helpers de layout viven en pdf-comunes.ts,
+// compartidos con la orden de compra (orden.ts).
 
-const PAGE_W = 595;
-const PAGE_H = 842;
-const MARGIN = 35;
-const AZUL = rgb(0.23, 0.23, 0.7);
-const GRIS = rgb(0.45, 0.45, 0.45);
-const NEGRO = rgb(0, 0, 0);
 const MAX_FILAS_POR_PAGINA = 18; // el caso real es 1-5 lineas; es solo un tope de seguridad
 
 const COL = {
@@ -122,50 +130,20 @@ const COL = {
 };
 const TABLA_DERECHA = COL.total.x + COL.total.w;
 
-function truncar(font: PDFFont, texto: string, anchoMax: number, size: number): string {
-  if (font.widthOfTextAtSize(texto, size) <= anchoMax) return texto;
-  let recortado = texto;
-  while (recortado.length > 0 && font.widthOfTextAtSize(recortado + '…', size) > anchoMax) {
-    recortado = recortado.slice(0, -1);
-  }
-  return recortado.length > 0 ? recortado + '…' : '…';
-}
-
 export async function drawCotizacion(view: CotizacionView): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const helv = await doc.embedFont(StandardFonts.Helvetica);
   const helvBold = await doc.embedFont(StandardFonts.HelveticaBold);
 
   let page: PDFPage = doc.addPage([PAGE_W, PAGE_H]);
-  let y = PAGE_H - 40;
 
-  const centrado = (texto: string, size: number, font: PDFFont, atY: number, color = NEGRO) => {
-    const w = font.widthOfTextAtSize(texto, size);
-    page.drawText(texto, { x: (PAGE_W - w) / 2, y: atY, size, font, color });
-  };
-  const derecha = (texto: string, size: number, font: PDFFont, xDerecha: number, atY: number, color = NEGRO) => {
-    const w = font.widthOfTextAtSize(texto, size);
-    page.drawText(texto, { x: xDerecha - w, y: atY, size, font, color });
-  };
+  // Cierran sobre `page`, que se reasigna cuando la tabla salta de pagina.
+  const centrado = (texto: string, size: number, font: PDFFont, atY: number, color = NEGRO) =>
+    centradoEn(page, texto, size, font, atY, color);
+  const derecha = (texto: string, size: number, font: PDFFont, xDerecha: number, atY: number, color = NEGRO) =>
+    derechaEn(page, texto, size, font, xDerecha, atY, color);
 
-  // Monograma: no hay logo separado en "idea pdf/" (solo el mockup completo,
-  // que no se incrusta) -- va el monograma "R" dibujado a mano.
-  page.drawRectangle({ x: MARGIN, y: y - 50, width: 50, height: 50, borderColor: AZUL, borderWidth: 1.5 });
-  const anchoR = helvBold.widthOfTextAtSize('R', 28);
-  page.drawText('R', { x: MARGIN + (50 - anchoR) / 2, y: y - 36, size: 28, font: helvBold, color: AZUL });
-
-  // Membrete centrado. La fecha va en su propia linea (no junto al titulo):
-  // el titulo centrado en bold14 es ancho, y compartir altura con la fecha
-  // alineada a la derecha las hacia chocar cuando el nombre de la empresa
-  // ocupaba mas de la mitad del ancho de la pagina.
-  centrado('RICARDO RODRIGUEZ & CIA. LTDA.', 14, helvBold, y - 8);
-  centrado('DIVISION INFORMATICA', 9, helv, y - 22);
-  centrado('R.U.T.: 89.912.300-K', 9, helv, y - 34);
-  derecha(view.fechaLarga, 9, helv, PAGE_W - MARGIN, y - 46);
-
-  y -= 65;
-  page.drawLine({ start: { x: MARGIN, y }, end: { x: PAGE_W - MARGIN, y }, thickness: 1, color: GRIS });
-  y -= 20;
+  let y = dibujarMembrete(page, helv, helvBold, view.fechaLarga);
 
   centrado(`COTIZACION N° ${view.numero}`, 13, helvBold, y);
   y -= 25;
@@ -252,15 +230,7 @@ export async function drawCotizacion(view: CotizacionView): Promise<Uint8Array> 
 
   page.drawText('Sin otro particular, saluda atentamente a usted.', { x: MARGIN, y, size: 9, font: helv });
 
-  // Pie de pagina, chico y gris
-  const piePagina = [
-    'WWW.RICARDORODRIGUEZ.CL',
-    'Los productos vendidos cuentan con la garantia del fabricante; consulte condiciones y plazos con su ejecutivo.',
-    'José M. Infante #2629 Ñuñoa · Santiago — CHILE · e-mail: ventas@ricardorodriguez.cl',
-  ];
-  piePagina.forEach((linea, i) => {
-    centrado(linea, 7, helv, 40 - i * 9, GRIS);
-  });
+  dibujarPie(page, helv);
 
   return doc.save();
 }
