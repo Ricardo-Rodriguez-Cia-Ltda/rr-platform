@@ -243,8 +243,13 @@ async function handler(request, env) {
   let pdf;
   if (env.KAPSO_API_KEY && env.COTIZACION_PDF_BASE) {
     const phoneNumberId = body.execution_context?.system?.whatsapp_config?.phone_number_id;
-    if (postCotizacion !== null && telefono && phoneNumberId) {
-      const numero = Array.isArray(postCotizacion) && postCotizacion[0]?.numero != null
+    // Se exige evidencia POSITIVA de persistencia (un array, la forma real de
+    // exito de return=representation), no solo ausencia de fallo: `null`
+    // (el POST fallo) y `undefined` (nunca se intento, sin secretos de
+    // Supabase) quedan ambos afuera, porque mandar el link sin probar que la
+    // fila existe es garantizar un 404 al cliente.
+    if (Array.isArray(postCotizacion) && telefono && phoneNumberId) {
+      const numero = postCotizacion[0]?.numero != null
         ? String(postCotizacion[0].numero)
         : String(quote.quote_id).slice(0, 8);
       const base = String(env.COTIZACION_PDF_BASE).replace(/\/+$/, "");

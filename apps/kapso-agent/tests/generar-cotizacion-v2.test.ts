@@ -391,4 +391,17 @@ describe('generar-cotizacion-v2: PDF por WhatsApp', () => {
     expect(kapsoCalls).toHaveLength(0);
     expect(((await res.json()) as any).pdf).toBeUndefined();
   });
+
+  // Los secretos del PDF pueden estar cargados sin que Supabase lo este (son
+  // independientes en deploy-functions.ts). Sin Supabase no hay forma de
+  // probar que la fila existe, asi que tiene que fallar cerrado en vez de
+  // mandar un link que apunta a nada.
+  it('con los secretos del PDF pero sin los de Supabase, no hay persistencia posible y pdf es fallo', async () => {
+    const kapsoCalls: string[] = [];
+    const ENV_PDF_SIN_SB = { ...env, KAPSO_API_KEY: 'kapso-de-prueba', COTIZACION_PDF_BASE: 'https://pdf.test/api/cotizacion' };
+    routeFetch({ kapso: (url) => { kapsoCalls.push(url); return {}; } });
+    const res = await handler(request({ execution_context: { vars: CART_VARS, ...CTX_FULL } }), ENV_PDF_SIN_SB);
+    expect(kapsoCalls).toHaveLength(0);
+    expect(((await res.json()) as any).pdf).toBe('fallo');
+  });
 });
