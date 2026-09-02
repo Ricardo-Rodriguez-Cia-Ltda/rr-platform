@@ -57,10 +57,10 @@ paths:
         Devuelve productos del catálogo que calzan con `q`, ya cotizados contra
         el proveedor.
 
-        Si la consulta calza más de 25 productos y no se envió `marca` ni
-        `categoria`, responde 409 con las facetas disponibles para que el
-        consumidor desambigüe en vez de adivinar. Un 409 no es un fallo: es una
-        petición de acotar.
+        Si la consulta calza más de 25 productos y no se envió `marca`,
+        `categoria` ni `subcategoria`, responde 409 con las facetas
+        disponibles para que el consumidor desambigüe en vez de adivinar. Un
+        409 no es un fallo: es una petición de acotar.
 
         Una respuesta 200 con `productos: []` y campo `sin_resultados` significa
         que sí hay productos que calzan pero ninguno cumple `precio_max` o
@@ -94,6 +94,15 @@ paths:
           schema:
             type: string
           example: Computadores
+        - name: subcategoria
+          in: query
+          required: false
+          description: |
+            Filtro exacto contra cualquiera de las `subcategorias` del
+            producto, mismas reglas que `marca`.
+          schema:
+            type: string
+          example: Portátiles
         - name: precio_max
           in: query
           required: false
@@ -135,7 +144,7 @@ paths:
         '409':
           description: |
             Demasiadas coincidencias sin filtros. Repreguntar usando `facetas` y
-            volver a llamar con `marca` o `categoria`.
+            volver a llamar con `marca`, `categoria` o `subcategoria`.
           content:
             application/json:
               schema:
@@ -423,6 +432,12 @@ paths:
           description: Filtro exacto por categoría del catálogo de ese proveedor.
           schema:
             type: string
+        - name: subcategoria
+          in: query
+          required: false
+          description: Filtro exacto contra cualquiera de las subcategorías del producto.
+          schema:
+            type: string
       responses:
         '200':
           description: Búsqueda resuelta (puede venir con lista vacía)
@@ -441,7 +456,7 @@ paths:
         '409':
           description: |
             Demasiadas coincidencias sin filtros. Repreguntar usando facetas y
-            volver a llamar con marca o categoria.
+            volver a llamar con marca, categoria o subcategoria.
           content:
             application/json:
               schema:
@@ -884,13 +899,19 @@ components:
 
     Facetas:
       type: object
-      required: [marca, categoria]
+      required: [marca, categoria, subcategoria]
       properties:
         marca:
           type: array
           items: { $ref: '#/components/schemas/ConteoFaceta' }
         categoria:
           type: array
+          items: { $ref: '#/components/schemas/ConteoFaceta' }
+        subcategoria:
+          type: array
+          description: |
+            Un producto puede tener varias subcategorias; cuenta una vez en
+            cada una.
           items: { $ref: '#/components/schemas/ConteoFaceta' }
 
     ConteoFaceta:

@@ -18,7 +18,7 @@ function escapar(valor) {
 // --- persistencia (Supabase) ---------------------------------------------
 // Memoria del negocio, no un eslabon del flujo: nunca lanza, 4s de timeout,
 // y sin secretos configurados no hace nada. Ver el spec 2026-08-31.
-async function supabase(env, method, path, body) {
+async function supabase(env, method, path, body, prefer) {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return null;
   try {
     const base = String(env.SUPABASE_URL).replace(/\/+$/, "");
@@ -28,7 +28,7 @@ async function supabase(env, method, path, body) {
         apikey: env.SUPABASE_SERVICE_KEY,
         Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
         "Content-Type": "application/json",
-        Prefer: method === "POST" ? "resolution=merge-duplicates,return=minimal" : "count=none"
+        Prefer: prefer || (method === "POST" ? "resolution=merge-duplicates,return=minimal" : "count=none")
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(4000)
@@ -121,11 +121,23 @@ async function handler(request, env) {
     const poId = `oc-${orderKey.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
     const ahora = new Date().toISOString();
 
+    // El detalle con costos se calcula ANTES de la idempotencia: la fila de
+    // /pedidos lo persiste en TODAS las ramas (tambien failed/duplicate), y
+    // el PDF de la orden (GET /api/orden/<po_id>) se dibuja desde ahi.
+    const detalle = lineas.map((linea) => {
+      const costoUnitario = Math.round((Number(linea.precio_unitario_usd) / (1 + margen)) * 100) / 100;
+      return { ...linea, costo_unitario_usd: costoUnitario, costo_total_usd: Math.round(costoUnitario * Number(linea.cantidad) * 100) / 100 };
+    });
+    const totalUsd = Math.round(detalle.reduce((suma, l) => suma + l.costo_total_usd, 0) * 100) / 100;
+
     // Una fila de /pedidos por rama de la maquina de estados de abajo; las
     // cinco ramas solo difieren en `estado` y `email_id`, asi que arman la
     // fila igual (mismo proveedor, mismas lineas) via este closure en vez de
     // repetir el objeto cinco veces con margen para que alguna copia se
-    // desincronice de las demas.
+    // desincronice de las demas. Las lineas guardadas son el `detalle` (un
+    // superconjunto de las lineas de la cotizacion: agrega los costos), no
+    // las lineas peladas: sin costo guardado, el PDF de la orden no tendria
+    // que mostrar.
     const registrarPedido = (estado, emailId) => {
       filasPedidos.push({
         po_id: poId,
@@ -135,8 +147,8 @@ async function handler(request, env) {
         telefono,
         rut: rut === "No informado" ? null : rut,
         razon_social: razon === "No informado" ? null : razon,
-        lineas,
-        neto_grupo_clp: lineas.reduce((suma, l) => suma + (Number(l.subtotal_neto_clp) || 0), 0),
+        lineas: detalle,
+        neto_grupo_clp: detalle.reduce((suma, l) => suma + (Number(l.subtotal_neto_clp) || 0), 0),
         estado,
         email_id: emailId
       });
@@ -183,12 +195,6 @@ async function handler(request, env) {
     }
     if (saltar) continue;
 
-    const detalle = lineas.map((linea) => {
-      const costoUnitario = Math.round((Number(linea.precio_unitario_usd) / (1 + margen)) * 100) / 100;
-      return { ...linea, costo_unitario_usd: costoUnitario, costo_total_usd: Math.round(costoUnitario * Number(linea.cantidad) * 100) / 100 };
-    });
-    const totalUsd = Math.round(detalle.reduce((suma, l) => suma + l.costo_total_usd, 0) * 100) / 100;
-
     const filas = detalle.map((l) =>
       `<tr><td>${escapar(l.sku_proveedor)}</td><td>${escapar(l.mpn || "-")}</td><td>${escapar(l.nombre)}</td><td>${escapar(l.cantidad)}</td><td>US$ ${escapar(l.costo_unitario_usd)}</td><td>US$ ${escapar(l.costo_total_usd)}</td><td>${escapar(l.abastecimiento)}</td></tr>`
     ).join("");
@@ -197,10 +203,19 @@ async function handler(request, env) {
       ? `<p><b>Ojo:</b> al cotizar no respondieron ${escapar(incompletos.join(", "))}. El precio ganador lo es solo entre los que sí respondieron.</p>`
       : "";
 
+    // Link al PDF formal de esta orden (GET /api/orden/<po_id> en el rele).
+    // La URL contiene el UUID de la cotizacion: mismo modelo capability-URL
+    // que el PDF de cotizacion. Ojo que el documento lleva COSTOS: es tan
+    // interno como este mismo correo.
+    const pdfBase = String(env.ORDEN_PDF_BASE || "").trim().replace(/\/+$/, "");
+    const pdfUrl = pdfBase ? `${pdfBase}/${poId}` : null;
+    const pdfHtml = pdfUrl ? `<p><b>PDF de la orden:</b> <a href="${escapar(pdfUrl)}">${escapar(pdfUrl)}</a></p>` : "";
+
     const html = `<h2>Orden de compra ${escapar(poId)}</h2>`
       + `<p><b>Mayorista:</b> ${escapar(proveedor.toUpperCase())}<br><b>Cotización:</b> ${escapar(quote.quote_id)} v${escapar(version)}</p>`
       + `<table border="1" cellpadding="4" cellspacing="0"><tr><th>SKU ${escapar(proveedor)}</th><th>MPN</th><th>Producto</th><th>Cant.</th><th>Costo unit.</th><th>Costo total</th><th>Abastecimiento</th></tr>${filas}</table>`
       + `<p><b>Total de esta orden:</b> US$ ${escapar(totalUsd)}</p>`
+      + pdfHtml
       + `<h3>Cliente</h3><p>${escapar(cliente)}<br>RUT: ${escapar(rut)}<br>Razón social: ${escapar(razon)}<br>Email: ${escapar(email)}</p>`
       + `<p>Pago del cliente: contado.</p>${aviso}`;
 
@@ -210,6 +225,7 @@ async function handler(request, env) {
       `Cotización: ${quote.quote_id} v${version}`,
       ...detalle.map((l) => `${l.sku_proveedor} | ${l.mpn || "-"} | ${l.nombre} | ${l.cantidad} x US$ ${l.costo_unitario_usd} = US$ ${l.costo_total_usd}`),
       `Total: US$ ${totalUsd}`,
+      ...(pdfUrl ? [`PDF: ${pdfUrl}`] : []),
       `Cliente: ${cliente} | RUT ${rut} | ${razon} | ${email}`,
       "Pago del cliente: contado."
     ].join("\n");

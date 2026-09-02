@@ -8,7 +8,7 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p apps/backoffice/tsconfig.json",
     "build:packages": "tsc -p packages/domain/tsconfig.build.json && tsc -p packages/http/tsconfig.build.json && tsc -p packages/mailer/tsconfig.build.json && tsc -p packages/providers/tsconfig.build.json",
     "check": "npm run check -w @rr/pricing-api",
     "docs:vocabulario": "npm run docs:vocabulario -w @rr/pricing-api",

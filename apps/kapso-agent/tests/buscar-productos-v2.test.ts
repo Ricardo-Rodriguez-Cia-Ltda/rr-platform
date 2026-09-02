@@ -49,6 +49,13 @@ describe('buscar-productos-v2', () => {
     expect(data.opciones.marcas).toEqual(['HP']);
   });
 
+  it('propaga subcategoria como parametro de la busqueda', async () => {
+    const spy = respondWith(search);
+    await handler(request({ input: { q: 'notebook', subcategoria: 'Portátiles' } }), env);
+    const url = new URL((spy.mock.calls[0] as any)?.[0] as string);
+    expect(url.searchParams.get('subcategoria')).toBe('Portátiles');
+  });
+
   it('descarta productos sin mpn: sin mpn no hay comparacion posible', async () => {
     respondWith({ ...search, productos: [{ ...search.productos[0], mpn: null }] });
     const res = await handler(request({ input: { q: 'cinta' } }), env);

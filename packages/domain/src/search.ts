@@ -7,6 +7,7 @@ export interface SearchFilters {
   q: string;
   marca?: string;
   categoria?: string;
+  subcategoria?: string;
 }
 
 export interface ScoredProduct {
@@ -17,12 +18,54 @@ export interface ScoredProduct {
 export interface Facets {
   marca: { valor: string; n: number }[];
   categoria: { valor: string; n: number }[];
+  subcategoria: { valor: string; n: number }[];
 }
 
 const PESO_MPN_EXACTO = 100;
 const PESO_MARCA = 10;
 const PESO_DESCRIPCION = 3;
 
+// Un termino de consulta como "32gb" o "1tb" tokeniza a una sola palabra
+// (digitos y letras pegados, sin separador), pero el catalogo suele traer la
+// spec separada en el nombre ("32 GB"). Sin esto, "no hay notebooks con
+// 32GB" era falso: habia 157, pero el termino pegado del cliente nunca
+// calzaba contra los dos tokens sueltos del catalogo (medido en vivo,
+// 2026-09-01).
+const SPEC_TERM = /^(\d+(?:\.\d+)?)([a-z]+)$/;
+
+/**
+ * Subpartes de un token partiendo en la frontera digito<->letra (ssd1tb ->
+ * ssd, 1, tb). Solo las de largo >= 2 o puramente numericas: una letra suelta
+ * como la "i" de "i5" es ruido, no una spec.
+ */
+function specSubparts(token: string): string[] {
+  const segmentos = token.match(/\p{L}+|\p{N}+/gu) ?? [];
+  if (segmentos.length <= 1) return [];
+  return segmentos.filter((s) => s.length >= 2 || /^\d+$/.test(s));
+}
+
+/**
+ * Tokens del nombre, en orden, con los tokens compuestos (ssd1tb) partidos
+ * en sus subpartes en el mismo lugar de la secuencia (-> ssd, 1, tb). A
+ * diferencia de un Set plano, esto preserva la adyacencia real del nombre.
+ */
+function expandTokensPreservingAdjacency(nameTokens: string[]): string[] {
+  const expandido: string[] = [];
+  for (const token of nameTokens) {
+    const sub = specSubparts(token);
+    if (sub.length > 0) expandido.push(...sub);
+    else expandido.push(token);
+  }
+  return expandido;
+}
+
+/** true si `a` y `b` aparecen consecutivos, en ese orden, en `tokens`. */
+function hasAdjacentPair(tokens: string[], a: string, b: string): boolean {
+  for (let i = 0; i < tokens.length - 1; i++) {
+    if (tokens[i] === a && tokens[i + 1] === b) return true;
+  }
+  return false;
+}
 
 function scoreProduct(
   product: NormalizedProduct,
@@ -32,7 +75,28 @@ function scoreProduct(
   const normalizedMpn = normalize(product.mpn ?? '');
   const compactedMpn = tokenize(product.mpn ?? '').join('');
   const brandTokens = new Set(tokenize(product.marca ?? ''));
-  const descriptionTokens = new Set(tokenize(product.nombre ?? ''));
+  const nameTokens = tokenize(product.nombre ?? '');
+  // Secuencia expandida: los tokens compuestos (ssd1tb) parten en sus
+  // subpartes en su misma posicion (-> ssd, 1, tb). Se reutiliza para dos
+  // cosas con reglas DELIBERADAMENTE distintas (ronda de arreglo 2,
+  // 2026-09-01):
+  //
+  // 1. Match directo (`descriptionTokens`, abajo): membresia de un termino
+  //    UNICO. Es seguro unir nombre + subpartes en un solo Set porque cada
+  //    verificacion mira una sola palabra a la vez, nunca cruza campos: "ssd"
+  //    vs "Kingston SSD1TB NVMe M.2" tiene que seguir matcheando (regresion
+  //    real: sin las subpartes en el Set, "ssd" perdia el match completo
+  //    contra el token pegado).
+  // 2. Bono de spec (mas abajo): EMPAREJAMIENTO de dos partes ("32"+"gb").
+  //    Ahi la union en un Set no alcanza — no exige que las dos partes
+  //    vengan del mismo lugar del nombre. Confirmado en vivo (ronda de
+  //    arreglo 1): el termino "16gb" puntuaba +3 contra "Notebook 16
+  //    pulgadas - 8 GB RAM - SSD", donde el "16" viene de "pulgadas" y el
+  //    "gb" viene de "8 GB" — campos distintos, ninguno es la spec real. Por
+  //    eso el bono exige adyacencia real sobre la secuencia expandida, nunca
+  //    membresia de Set.
+  const expandedNameTokens = expandTokensPreservingAdjacency(nameTokens);
+  const descriptionTokens = new Set([...nameTokens, ...expandedNameTokens]);
 
   // El MPN aporta a lo sumo PESO_MPN_EXACTO por producto, sin importar en
   // cuantos tokens se parta: un MPN de dos tokens no vale mas que uno de uno.
@@ -48,7 +112,18 @@ function scoreProduct(
 
   for (const term of terms) {
     if (brandTokens.has(term)) score += PESO_MARCA;
-    if (descriptionTokens.has(term)) score += PESO_DESCRIPCION;
+    if (descriptionTokens.has(term)) {
+      score += PESO_DESCRIPCION;
+    } else {
+      // Lado consulta: "32gb" tambien puntua como descripcion si sus DOS
+      // partes ("32" y "gb") aparecen CONSECUTIVAS, en ese orden, en el
+      // nombre expandido. Una sola vez, nunca ademas del match directo de
+      // arriba.
+      const specMatch = SPEC_TERM.exec(term);
+      if (specMatch && hasAdjacentPair(expandedNameTokens, specMatch[1], specMatch[2])) {
+        score += PESO_DESCRIPCION;
+      }
+    }
   }
   return score;
 }
@@ -56,6 +131,7 @@ function scoreProduct(
 export function search(catalog: NormalizedProduct[], filters: SearchFilters): ScoredProduct[] {
   const marca = filters.marca ? normalize(filters.marca) : undefined;
   const categoria = filters.categoria ? normalize(filters.categoria) : undefined;
+  const subcategoria = filters.subcategoria ? normalize(filters.subcategoria) : undefined;
   // Lo que ya se filtro no debe volver a puntuar: si se pide marca=HP, la
   // palabra "HP" de la consulta sumaria en los 800 productos de la marca y
   // ahogaria al termino que de verdad discrimina ("notebook"), devolviendo
@@ -63,6 +139,7 @@ export function search(catalog: NormalizedProduct[], filters: SearchFilters): Sc
   const filterTokens = new Set([
     ...tokenize(filters.marca ?? ''),
     ...tokenize(filters.categoria ?? ''),
+    ...tokenize(filters.subcategoria ?? ''),
   ]);
   const terms = [...new Set(tokenize(filters.q))].filter((t) => !filterTokens.has(t));
   const normalizedQuery = normalize(filters.q).trim();
@@ -71,6 +148,7 @@ export function search(catalog: NormalizedProduct[], filters: SearchFilters): Sc
   for (const product of catalog) {
     if (marca && normalize(product.marca ?? '') !== marca) continue;
     if (categoria && normalize(product.categoria ?? '') !== categoria) continue;
+    if (subcategoria && !product.subcategorias.some((s) => normalize(s) === subcategoria)) continue;
 
     const score = terms.length === 0 ? 1 : scoreProduct(product, terms, normalizedQuery);
     if (score > 0) results.push({ product, score });
@@ -94,5 +172,6 @@ export function computeFacets(productos: NormalizedProduct[]): Facets {
   return {
     marca: count(productos.map((p) => p.marca)),
     categoria: count(productos.map((p) => p.categoria)),
+    subcategoria: count(productos.flatMap((p) => p.subcategorias)),
   };
 }

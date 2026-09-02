@@ -39,6 +39,10 @@ async function quote(
 // El fixture de carro que ya usan las pruebas de arriba, como vars completas.
 const CART_VARS = { cart_items: cart };
 
+// env con Supabase de prueba, compartido por las pruebas de persistencia y
+// las del PDF (que ademas necesitan que la cotizacion haya quedado guardada).
+const ENV_SB = { ...env, SUPABASE_URL: 'https://supabase.test', SUPABASE_SERVICE_KEY: 'clave-de-prueba' };
+
 // Enruta fetch por URL: lo que va a supabase.test pasa por el callback (un
 // throw simula caida, el retorno se envuelve en Response 200 JSON); el resto
 // delega en la misma cola de respuestas de la API de precios que usan las
@@ -46,6 +50,7 @@ const CART_VARS = { cart_items: cart };
 // linea necesita para cotizar).
 function routeFetch(handlers: {
   supabase?: (url: string, init?: RequestInit) => unknown;
+  kapso?: (url: string, init?: RequestInit) => unknown;
   precios?: Array<{ payload: unknown; status?: number }>;
 }) {
   const preciosQueue: Array<{ payload: unknown; status?: number }> = handlers.precios ?? [{ payload: bestPriceOk }];
@@ -54,6 +59,11 @@ function routeFetch(handlers: {
     if (href.startsWith('https://supabase.test')) {
       if (!handlers.supabase) throw new Error('llamada inesperada a supabase');
       const resultado = handlers.supabase(href, init);
+      return new Response(JSON.stringify(resultado), { status: 200 });
+    }
+    if (href.startsWith('https://api.kapso.ai')) {
+      if (!handlers.kapso) throw new Error('llamada inesperada a kapso');
+      const resultado = handlers.kapso(href, init);
       return new Response(JSON.stringify(resultado), { status: 200 });
     }
     const next = preciosQueue.shift();
@@ -268,7 +278,6 @@ describe('generar-cotizacion-v2', () => {
 // La persistencia es memoria del negocio, no un eslabon: estas pruebas
 // verifican tanto que se use como que su ausencia no cambie nada.
 describe('generar-cotizacion-v2: persistencia', () => {
-  const ENV_SB = { ...env, SUPABASE_URL: 'https://supabase.test', SUPABASE_SERVICE_KEY: 'clave-de-prueba' };
   const CTX = { context: { phone_number: '+56 9 4175 7584' } };
   const CLIENTE = { rut: '21099234-0', razon_social: 'Vicente Pareja', giro: 'Servicios', direccion: 'Holanda 222', comuna: 'Ñuñoa', ciudad: 'Santiago', email: 'parejavice@gmail.com' };
 
@@ -326,5 +335,97 @@ describe('generar-cotizacion-v2: persistencia', () => {
     const data = (await res.json()) as any;
     expect(data.estado).toBe('ok');
     expect(data.vars.cliente_guardado).toBeUndefined();
+  });
+});
+
+describe('generar-cotizacion-v2: PDF por WhatsApp', () => {
+  const ENV_PDF = { ...ENV_SB, KAPSO_API_KEY: 'kapso-de-prueba', COTIZACION_PDF_BASE: 'https://pdf.test/api/cotizacion' };
+  const CTX_FULL = { context: { phone_number: '+56 9 4175 7584' }, system: { whatsapp_config: { phone_number_id: '1286605217864083' } } };
+
+  it('manda el documento con el link, filename por numero y al telefono del contexto', async () => {
+    const envios: Array<{ url: string; body: any }> = [];
+    routeFetch({
+      supabase: (url) => (url.includes('/cotizaciones') ? [{ numero: 1600001 }] : []),
+      kapso: (url, init) => { envios.push({ url, body: JSON.parse(String(init?.body)) }); return { messages: [{ id: 'wamid.X' }] }; },
+    });
+    const res = await handler(request({ execution_context: { vars: CART_VARS, ...CTX_FULL } }), ENV_PDF);
+    const data = (await res.json()) as any;
+    expect(data.pdf).toBe('enviado');
+    expect(envios).toHaveLength(1);
+    expect(envios[0].url).toContain('/meta/whatsapp/v24.0/1286605217864083/messages');
+    expect(envios[0].body.type).toBe('document');
+    expect(envios[0].body.to).toBe('56941757584');
+    expect(envios[0].body.document.link).toBe(`https://pdf.test/api/cotizacion/${data.vars.quote_id}`);
+    expect(envios[0].body.document.filename).toBe('cotizacion-1600001.pdf');
+  });
+
+  it('si Supabase no devolvio numero, el filename cae a "cotizacion-SN.pdf" (alineado con el "N° S/N" del documento)', async () => {
+    const envios: any[] = [];
+    routeFetch({ supabase: (url) => (url.includes('/cotizaciones') ? [{}] : []), kapso: (url, init) => { envios.push(JSON.parse(String(init?.body))); return {}; } });
+    const res = await handler(request({ execution_context: { vars: CART_VARS, ...CTX_FULL } }), ENV_PDF);
+    await res.json();
+    expect(envios[0].document.filename).toBe('cotizacion-SN.pdf');
+  });
+
+  it('si el guardado de la cotizacion fallo, NO se intenta el PDF', async () => {
+    const kapsoCalls: string[] = [];
+    routeFetch({ supabase: (url) => { if (url.includes('/cotizaciones')) throw new Error('caido'); return []; }, kapso: (url) => { kapsoCalls.push(url); return {}; } });
+    const res = await handler(request({ execution_context: { vars: CART_VARS, ...CTX_FULL } }), ENV_PDF);
+    expect(kapsoCalls).toHaveLength(0);
+    expect(((await res.json()) as any).pdf).toBe('fallo');
+  });
+
+  it('si Kapso falla, pdf es fallo y todo lo demas queda intacto', async () => {
+    routeFetch({ supabase: (url) => (url.includes('/cotizaciones') ? [{ numero: 1 }] : []), kapso: () => { throw new Error('ECONNRESET'); } });
+    const res = await handler(request({ execution_context: { vars: CART_VARS, ...CTX_FULL } }), ENV_PDF);
+    const data = (await res.json()) as any;
+    expect(data.estado).toBe('ok');
+    expect(data.pdf).toBe('fallo');
+    expect(data.vars.quote_id).toBeTruthy();
+  });
+
+  it('sin los secretos nuevos, ni lo intenta y el campo no aparece', async () => {
+    const kapsoCalls: string[] = [];
+    routeFetch({ supabase: () => [], kapso: (url) => { kapsoCalls.push(url); return {}; } });
+    const res = await handler(request({ execution_context: { vars: CART_VARS, ...CTX_FULL } }), ENV_SB); // sin KAPSO_API_KEY ni base
+    expect(kapsoCalls).toHaveLength(0);
+    expect(((await res.json()) as any).pdf).toBeUndefined();
+  });
+
+  // "sin_destinatario" es distinto de "fallo": la cotizacion SI quedo
+  // guardada (persistencia confirmada), pero no hay a quien mandarle el PDF
+  // -- invocaciones sinteticas o el canal de prueba no traen `phone_number`
+  // o `phone_number_id`. "fallo" se reserva para persistencia no confirmada
+  // o el POST a Kapso que fallo/no-ok.
+  it('con persistencia confirmada pero sin phone_number_id en el contexto, pdf es "sin_destinatario"', async () => {
+    const kapsoCalls: string[] = [];
+    routeFetch({ supabase: (url) => (url.includes('/cotizaciones') ? [{ numero: 1600001 }] : []), kapso: (url) => { kapsoCalls.push(url); return {}; } });
+    // Trae phone_number pero no system.whatsapp_config.phone_number_id.
+    const ctxSinPhoneNumberId = { context: { phone_number: '+56 9 4175 7584' } };
+    const res = await handler(request({ execution_context: { vars: CART_VARS, ...ctxSinPhoneNumberId } }), ENV_PDF);
+    expect(kapsoCalls).toHaveLength(0);
+    expect(((await res.json()) as any).pdf).toBe('sin_destinatario');
+  });
+
+  it('con persistencia confirmada pero sin telefono en el contexto, pdf es "sin_destinatario"', async () => {
+    const kapsoCalls: string[] = [];
+    routeFetch({ supabase: (url) => (url.includes('/cotizaciones') ? [{ numero: 1600001 }] : []), kapso: (url) => { kapsoCalls.push(url); return {}; } });
+    const ctxSinTelefono = { context: {}, system: { whatsapp_config: { phone_number_id: '1286605217864083' } } };
+    const res = await handler(request({ execution_context: { vars: CART_VARS, ...ctxSinTelefono } }), ENV_PDF);
+    expect(kapsoCalls).toHaveLength(0);
+    expect(((await res.json()) as any).pdf).toBe('sin_destinatario');
+  });
+
+  // Los secretos del PDF pueden estar cargados sin que Supabase lo este (son
+  // independientes en deploy-functions.ts). Sin Supabase no hay forma de
+  // probar que la fila existe, asi que tiene que fallar cerrado en vez de
+  // mandar un link que apunta a nada.
+  it('con los secretos del PDF pero sin los de Supabase, no hay persistencia posible y pdf es fallo', async () => {
+    const kapsoCalls: string[] = [];
+    const ENV_PDF_SIN_SB = { ...env, KAPSO_API_KEY: 'kapso-de-prueba', COTIZACION_PDF_BASE: 'https://pdf.test/api/cotizacion' };
+    routeFetch({ kapso: (url) => { kapsoCalls.push(url); return {}; } });
+    const res = await handler(request({ execution_context: { vars: CART_VARS, ...CTX_FULL } }), ENV_PDF_SIN_SB);
+    expect(kapsoCalls).toHaveLength(0);
+    expect(((await res.json()) as any).pdf).toBe('fallo');
   });
 });

@@ -150,7 +150,7 @@ Ramifica siempre por `error`, nunca por el texto de `detail`.
 | 401 | `unauthorized` | Falta `x-api-key` o es incorrecta | Problema de configuración. No reintentar. |
 | 404 | `not_found` | El producto no existe, o (`/product`, `/price`) el proveedor no le tiene precio asignado | No reintentar en general. Excepción: en `/mejor-precio`, si `incompleta` trae `catalogo_no_disponible` (no se revisaron todos los catálogos), sí conviene reintentar. Ver `/mejor-precio`. |
 | 405 | `method_not_allowed` | Se usó un verbo distinto de GET | Usar GET. |
-| 409 | `demasiado_amplio` | La búsqueda calza demasiados productos | Acotar con `marca` o `categoria`. Ver abajo. |
+| 409 | `demasiado_amplio` | La búsqueda calza demasiados productos | Acotar con `marca`, `categoria` o `subcategoria`. Ver abajo. |
 | 409 | `ambiguo` | El MPN existe bajo varias marcas | Repetir con `marca=`. Ver `/mejor-precio`. |
 | 409 | `no_comparable` | El producto no tiene MPN y marca, así que no se puede comparar | No reintentar. Ese producto queda fuera del mejor precio. |
 | 413 | `payload_too_large` | El cuerpo de un POST supera 1 MB | Corregir la llamada. No reintentar. |
@@ -185,6 +185,7 @@ precio y stock reales.
 | `q` | string | **sí** | — | Texto libre. Debe contener al menos un token alfanumérico. |
 | `marca` | string | no | — | Filtro **exacto** (ignora tildes y mayúsculas). Debe ser un valor real del catálogo. |
 | `categoria` | string | no | — | Filtro **exacto**, mismas reglas que `marca`. |
+| `subcategoria` | string | no | — | Filtro **exacto** contra cualquiera de las `subcategorias` del producto, mismas reglas que `marca`. |
 | `precio_max` | número | no | ∞ | Tope de **costo** en USD. Debe ser > 0. |
 | `solo_con_stock` | `"true"` | no | `false` | Solo el literal `true` activa el filtro; cualquier otro valor lo deja apagado. |
 | `limite` | entero | no | `10` | Cuántos productos devolver. Entero ≥ 0. |
@@ -212,6 +213,7 @@ Si un parámetro se repite en la query string, se usa **la primera** aparición.
   "facetas": {
     "marca": [{ "valor": "HP", "n": 12 }],
     "categoria": [{ "valor": "Computadores", "n": 12 }],
+    "subcategoria": [{ "valor": "Portátiles", "n": 12 }],
     "precio": { "min": 703.42, "max": 1288.9 }
   }
 }
@@ -235,8 +237,8 @@ rango de **los productos devueltos**, no del universo completo.
 
 ### Respuesta `409 demasiado_amplio`
 
-Cuando la búsqueda calza más de **25** productos y no se envió `marca` ni
-`categoria`:
+Cuando la búsqueda calza más de **25** productos y no se envió `marca`,
+`categoria` ni `subcategoria`:
 
 ```json
 {
@@ -245,14 +247,16 @@ Cuando la búsqueda calza más de **25** productos y no se envió `marca` ni
   "total": 749,
   "facetas": {
     "marca": [{ "valor": "Lenovo", "n": 312 }, { "valor": "HP", "n": 240 }],
-    "categoria": [{ "valor": "Computadores", "n": 700 }]
+    "categoria": [{ "valor": "Computadores", "n": 700 }],
+    "subcategoria": [{ "valor": "Portátiles", "n": 500 }]
   }
 }
 ```
 
 Esto **no es un error técnico**: es la API pidiendo que se desambigüe. La
 respuesta correcta es preguntarle al usuario usando los valores de `facetas`, y
-volver a llamar pasando uno de ellos **literalmente** en `marca` o `categoria`.
+volver a llamar pasando uno de ellos **literalmente** en `marca`, `categoria` o
+`subcategoria` — cualquiera de los tres evita el 409.
 Reintentar con otras palabras en `q` es un antipatrón: la ambigüedad no está en
 la redacción sino en el tamaño del resultado.
 
@@ -455,16 +459,20 @@ siempre vienen; si Intcomex no entrega precio, la respuesta es `404`, no un
 
 ## `GET /facetas` — vocabulario del catálogo
 
-Devuelve todas las marcas y categorías reales con su conteo, sobre el catálogo
-completo.
+Devuelve todas las marcas, categorías y subcategorías reales con su conteo,
+sobre el catálogo completo.
 
 ```json
 {
   "total_productos": 10342,
   "marca": [{ "valor": "Lenovo", "n": 812 }, { "valor": "HP", "n": 740 }],
-  "categoria": [{ "valor": "Computadores", "n": 2140 }]
+  "categoria": [{ "valor": "Computadores", "n": 2140 }],
+  "subcategoria": [{ "valor": "Portátiles", "n": 1690 }]
 }
 ```
+
+Un producto puede traer varias `subcategorias`, así que cuenta una vez en cada
+una — la suma de `subcategoria` puede superar `total_productos`.
 
 Ordenado por conteo descendente y, a igual conteo, alfabéticamente.
 
@@ -822,8 +830,8 @@ Resumen operativo de lo anterior:
 5. **Nunca repitas la misma búsqueda con otras palabras esperando otro
    resultado.** El ranking es determinista: la misma consulta devuelve lo mismo.
    Reintentar solo hace esperar al usuario.
-6. **Copia los valores de `marca` y `categoria` literalmente** de lo que devolvió
-   la API. No los traduzcas ni los normalices.
+6. **Copia los valores de `marca`, `categoria` y `subcategoria` literalmente**
+   de lo que devolvió la API. No los traduzcas ni los normalices.
 7. **Todos los montos son USD.** Si el usuario habla en otra moneda, pregunta el
    equivalente antes de mandar `precio_max`. No adivines el tipo de cambio.
 8. **`404` y `400` son definitivos en general; `502` y `503` son transitorios**

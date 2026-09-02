@@ -414,6 +414,32 @@ describe('emitir-ordenes-compra', () => {
     });
   });
 
+  // El PDF de la orden vive en el rele (GET /api/orden/<po_id>); el correo
+  // interno lleva el link. La URL no es un costo: el documento al que apunta
+  // exige el po_id completo (UUID embebido) y se sirve fuera del workflow.
+  describe('link al PDF de la orden', () => {
+    it('con ORDEN_PDF_BASE, html y texto llevan el link (y la base se recorta)', async () => {
+      const spy = resendOk();
+      // Con espacios y slash final: el link no puede salir con "//".
+      await issue({ ...env(), ORDEN_PDF_BASE: ' https://rr-mailing.vercel.app/api/orden/ ' });
+      for (const cuerpo of bodies(spy)) {
+        const { html, text } = JSON.parse(cuerpo);
+        expect(html).toContain('https://rr-mailing.vercel.app/api/orden/oc-q-1-1-');
+        expect(text).toContain('https://rr-mailing.vercel.app/api/orden/oc-q-1-1-');
+        expect(html).not.toContain('/api/orden//');
+      }
+    });
+
+    it('sin ORDEN_PDF_BASE no inventa ningun link', async () => {
+      const spy = resendOk();
+      await issue(env());
+      for (const cuerpo of bodies(spy)) {
+        expect(cuerpo).not.toContain('/api/orden');
+        expect(cuerpo).not.toContain('PDF');
+      }
+    });
+  });
+
   // Hallazgo 10: un MARGEN vacio coacciona a 0 y dejaria el costo igual al
   // precio de venta.
   it('rechaza un margen de cero', async () => {
@@ -497,6 +523,26 @@ describe('emitir-ordenes-compra: persistencia', () => {
     expect(proveedores).toEqual(['ingram', 'intcomex']);
     expect(cuerpos[0][0].estado).toBe('sent');
     expect(cuerpos[0][0].rut).toBe('21099234-0');
+  });
+
+  // Las lineas persistidas son el detalle CON costos (superconjunto de las
+  // lineas de la cotizacion): de ahi dibuja el PDF de la orden de compra el
+  // rele. Esto no viola la invariante "ningun costo sale de la function":
+  // esa invariante es sobre la respuesta/vars del workflow (lo que un
+  // get_variable puede leer); Supabase solo se lee con la service_role.
+  it('las lineas guardadas llevan los costos reconstruidos del correo', async () => {
+    const cuerpos: any[] = [];
+    routeFetch({ supabase: (url, init) => { if (url.includes('/pedidos')) cuerpos.push(JSON.parse(String(init?.body))); return {}; } });
+    await handler(request(BODY_DOS_PROVEEDORES), ENV_SB());
+    const ingram = cuerpos[0].find((p: any) => p.proveedor === 'ingram');
+    const intcomex = cuerpos[0].find((p: any) => p.proveedor === 'intcomex');
+    expect(ingram.lineas[0].costo_unitario_usd).toBe(10);   // 11.3 / 1.13
+    expect(ingram.lineas[0].costo_total_usd).toBe(20);      // x2
+    expect(intcomex.lineas[0].costo_unitario_usd).toBe(50); // 56.5 / 1.13
+    expect(intcomex.lineas[0].costo_total_usd).toBe(150);   // x3
+    // y sigue trayendo los campos de siempre de la linea de cotizacion
+    expect(ingram.lineas[0].subtotal_neto_clp).toBe(21470);
+    expect(ingram.neto_grupo_clp).toBe(21470);
   });
 
   it('hace upsert del cliente confirmado por telefono', async () => {

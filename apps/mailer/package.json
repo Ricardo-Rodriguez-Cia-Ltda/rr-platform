@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@rr/http": "*",
     "@rr/mailer": "*",
-    "@rr/http": "*"
+    "pdf-lib": "^1.17.1"
   }
 }

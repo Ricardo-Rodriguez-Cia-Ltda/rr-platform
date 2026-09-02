@@ -8,8 +8,9 @@ function producto(
   nombre: string,
   marca: string,
   categoria = 'Computadores',
+  subcategorias: string[] = [],
 ): NormalizedProduct {
-  return { sku, mpn, nombre, marca, categoria, subcategorias: [], tipo: null };
+  return { sku, mpn, nombre, marca, categoria, subcategorias, tipo: null };
 }
 
 const CATALOGO: NormalizedProduct[] = [
@@ -135,6 +136,93 @@ describe('computeFacets', () => {
   });
 });
 
+// "32GB" pegado (un solo token tras tokenizar) no calzaba con "32 GB" separado
+// en el nombre del catalogo (dos tokens): el cliente escribe specs pegadas, el
+// catalogo las separa. Medido en vivo el 2026-09-01: "no hay notebooks con
+// 32GB" era falso, habia 157.
+describe('matching consciente de specs', () => {
+  const CATALOGO_SPECS: NormalizedProduct[] = [
+    producto('NB032HP01', 'MPN-NB032', 'HP - Notebook - 32 GB - DDR5', 'HP'),
+    producto('NB016HP02', 'MPN-NB016', 'HP - Notebook - 16 GB - DDR5', 'HP'),
+    producto('SD001KIN01', 'MPN-SD001', 'Kingston SSD1TB NVMe M.2', 'Kingston', 'Almacenamiento'),
+    producto('CP001INT01', 'MPN-CP001', 'Intel Core i5 - Procesador', 'Intel'),
+    // Falso positivo confirmado en vivo (ronda de arreglo 1, 2026-09-01): "16"
+    // viene de "16 pulgadas" y "gb" viene de "8 GB", campos distintos. El
+    // bono de "16gb" NO debe otorgarse aqui: membresia plana en un Set no
+    // exige que las dos partes vengan del mismo lugar del nombre.
+    producto('NB016PUL01', 'MPN-NB016PUL', 'Notebook 16 pulgadas - 8 GB RAM - SSD', 'Generico'),
+  ];
+
+  it('q="notebook 32GB" encuentra el notebook de 32 GB separado en el nombre, y lo puntua mas arriba', () => {
+    const resultados = search(CATALOGO_SPECS, { q: 'notebook 32GB' });
+    const skus = resultados.map((r) => r.product.sku);
+    expect(skus).toContain('NB032HP01');
+    // El de 32GB matchea "notebook" + spec "32"+"gb"; el de 16GB solo "notebook".
+    const de32 = resultados.find((r) => r.product.sku === 'NB032HP01')!;
+    const de16 = resultados.find((r) => r.product.sku === 'NB016HP02')!;
+    expect(de32.score).toBeGreaterThan(de16.score);
+  });
+
+  it('q="1TB" encuentra "SSD1TB" pegado, partiendo en frontera digito-letra', () => {
+    const skus = search(CATALOGO_SPECS, { q: '1TB' }).map((r) => r.product.sku);
+    expect(skus).toContain('SD001KIN01');
+  });
+
+  // Ronda de arreglo 2 (2026-09-01): al restringir el bono de spec a
+  // adyacencia (ronda 1), las subpartes dejaron de agregarse a
+  // descriptionTokens y un termino de UNA sola palabra como "ssd" perdio el
+  // match directo contra el token pegado "ssd1tb". Membresia de un termino
+  // unico no cruza campos (a diferencia del bono de dos partes), asi que es
+  // seguro volver a unir nombre + subpartes para el match directo.
+  it('q="ssd" (una sola palabra) matchea directo contra el token pegado "ssd1tb"', () => {
+    const resultado = search(CATALOGO_SPECS, { q: 'ssd' }).find((r) => r.product.sku === 'SD001KIN01');
+    expect(resultado).toBeDefined();
+    expect(resultado!.score).toBe(3);
+  });
+
+  it('q="ssd1tb" pegado tal cual tambien matchea (el token original sigue en el Set)', () => {
+    const resultado = search(CATALOGO_SPECS, { q: 'ssd1tb' }).find((r) => r.product.sku === 'SD001KIN01');
+    expect(resultado).toBeDefined();
+    expect(resultado!.score).toBe(3);
+  });
+
+  it('el bonus de spec se otorga una sola vez (no dobla PESO_DESCRIPCION)', () => {
+    // "32gb" matchea via el camino spec (32 + gb), nunca directo (no existe
+    // el token "32gb" en el nombre). Si sumara dos veces el score subiria a 6.
+    const resultado = search(CATALOGO_SPECS, { q: '32GB' }).find((r) => r.product.sku === 'NB032HP01');
+    expect(resultado?.score).toBe(3);
+  });
+
+  it('el bono de spec exige adyacencia real: "16gb" no matchea "16 pulgadas ... 8 GB" (campos distintos)', () => {
+    const resultados = search(CATALOGO_SPECS, { q: 'notebook 16GB' });
+    const falsoPositivo = resultados.find((r) => r.product.sku === 'NB016PUL01');
+    expect(falsoPositivo).toBeDefined();
+    // Solo "notebook" matchea (descripcion, +3). Si el bono de spec se diera
+    // por membresia plana, subiria a 6.
+    expect(falsoPositivo!.score).toBe(3);
+  });
+
+  it('un termino que no es spec (no calza el patron numero+letras) no cambia su comportamiento', () => {
+    // "notebook" no matchea el patron /^(\d+(?:\.\d+)?)([a-z]+)$/, asi que su
+    // scoring sigue siendo el de siempre: exige coincidencia directa de token.
+    const skus = search(CATALOGO_SPECS, { q: 'notebook' }).map((r) => r.product.sku);
+    expect(skus).toEqual(expect.arrayContaining(['NB032HP01', 'NB016HP02']));
+    expect(skus).not.toContain('CP001INT01');
+  });
+
+  it('el MPN escrito pegado sigue calzando compactedMpn (camino de match protegido, no tocado)', () => {
+    const resultados = search(CATALOGO, { q: '920008813' });
+    expect(resultados[0].product.sku).toBe('ID020LOG11');
+    expect(resultados[0].score).toBe(100);
+  });
+
+  it('normalizedQuery === normalizedMpn sigue dando el bonus completo de MPN', () => {
+    const resultados = search(CATALOGO, { q: 'P2725HE' });
+    expect(resultados[0].product.sku).toBe('MT027DEL20');
+    expect(resultados[0].score).toBeGreaterThanOrEqual(100);
+  });
+});
+
 // Cuando se filtra por marca o categoria, esos terminos ya no deben puntuar:
 // si lo hacen, ahogan al termino que de verdad discrimina. Medido en vivo:
 // q="notebook HP" + marca=HP devolvia mochilas, mouses y monitores HP, porque
@@ -167,5 +255,65 @@ describe('buscar — el termino del filtro no puntua', () => {
     const resultados = search(CATALOGO_HP, { q: 'HP mouse' });
     expect(resultados[0].product.sku).toBe('MO1');
     expect(resultados).toHaveLength(3);
+  });
+});
+
+// El catalogo trae subcategorias (Portatiles, Todo-en-Uno, Computadores de
+// Mesa, Servidores, Tableta) y la busqueda no filtraba por ellas: un cliente
+// que pidio notebook recibio un All-in-One (conversacion real, 2026-09-01).
+describe('filtro por subcategoria', () => {
+  const CATALOGO_COMPUTADORES: NormalizedProduct[] = [
+    producto('NB1', 'MPN-NB1', 'HP ProBook 640 - Notebook - 14"', 'HP', 'Computadores', ['Portátiles']),
+    producto('AIO1', 'MPN-AIO1', 'HP - All-in-One 24 - PC todo en uno', 'HP', 'Computadores', ['Todo-en-Uno']),
+    producto('DT1', 'MPN-DT1', 'HP - EliteDesk 800 - Torre', 'HP', 'Computadores', ['Computadores de Mesa']),
+  ];
+
+  it('filtra por subcategoria exacta', () => {
+    const skus = search(CATALOGO_COMPUTADORES, { q: 'HP', subcategoria: 'Portátiles' }).map((r) => r.product.sku);
+    expect(skus).toEqual(['NB1']);
+  });
+
+  it('compara normalizado (sin tildes, sin mayusculas) contra CUALQUIERA de las subcategorias del producto', () => {
+    const multi = producto('SV1', 'MPN-SV1', 'HP - ProLiant - Servidor Torre', 'HP', 'Computadores', [
+      'Servidores',
+      'Computadores de Mesa',
+    ]);
+    const skus = search([...CATALOGO_COMPUTADORES, multi], { q: 'HP', subcategoria: 'servidores' }).map(
+      (r) => r.product.sku,
+    );
+    expect(skus).toEqual(['SV1']);
+  });
+
+  it('los tokens de la subcategoria de filtro no puntuan en el texto', () => {
+    // "todo en uno" no debe sumar puntaje aparte del match de subcategoria.
+    const resultados = search(CATALOGO_COMPUTADORES, { q: 'todo en uno hp', subcategoria: 'Todo-en-Uno' });
+    expect(resultados.map((r) => r.product.sku)).toEqual(['AIO1']);
+  });
+
+  it('sin filtro de subcategoria, se comporta como antes (todas las subcategorias)', () => {
+    const skus = search(CATALOGO_COMPUTADORES, { q: 'HP' }).map((r) => r.product.sku);
+    expect(skus).toHaveLength(3);
+  });
+});
+
+describe('computeFacets — subcategoria', () => {
+  it('cuenta subcategorias, con el mismo formato que marca y categoria', () => {
+    const productos: NormalizedProduct[] = [
+      producto('NB1', 'MPN-NB1', 'HP Notebook', 'HP', 'Computadores', ['Portátiles']),
+      producto('NB2', 'MPN-NB2', 'Dell Notebook', 'Dell', 'Computadores', ['Portátiles']),
+      producto('AIO1', 'MPN-AIO1', 'HP All-in-One', 'HP', 'Computadores', ['Todo-en-Uno']),
+    ];
+    const facetas = computeFacets(productos);
+    expect(facetas.subcategoria).toContainEqual({ valor: 'Portátiles', n: 2 });
+    expect(facetas.subcategoria).toContainEqual({ valor: 'Todo-en-Uno', n: 1 });
+  });
+
+  it('un producto con varias subcategorias cuenta en cada una', () => {
+    const productos: NormalizedProduct[] = [
+      producto('SV1', 'MPN-SV1', 'HP ProLiant', 'HP', 'Computadores', ['Servidores', 'Computadores de Mesa']),
+    ];
+    const facetas = computeFacets(productos);
+    expect(facetas.subcategoria).toContainEqual({ valor: 'Servidores', n: 1 });
+    expect(facetas.subcategoria).toContainEqual({ valor: 'Computadores de Mesa', n: 1 });
   });
 });

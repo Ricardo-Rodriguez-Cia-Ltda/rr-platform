@@ -55,6 +55,8 @@ falta.
 | `emitir-ordenes-compra` | `MAILER_API_KEY` | La misma clave cargada como `MAILER_API_KEY` en el proyecto `rr-mailing` de Vercel — tiene que coincidir en los dos lados, si no todo envío falla con `401 no_autorizado` desde el relé |
 | `generar-cotizacion-v2`, `emitir-ordenes-compra` | `SUPABASE_URL` | Settings → API del proyecto Supabase, vía `.env.local` |
 | `generar-cotizacion-v2`, `emitir-ordenes-compra` | `SUPABASE_SERVICE_KEY` | Settings → API del proyecto Supabase, vía `.env.local` |
+| `generar-cotizacion-v2` | `KAPSO_API_KEY` | `KAPSO_API_KEY` de `.env.local` (la misma que usa el script de deploy). **Nota:** es la clave de administración de la cuenta completa (la misma con la que este repo despliega functions y workflows), viviendo como secreto de runtime dentro de un Worker — más alcance del que ese envío de un mensaje necesita. Si Kapso llega a ofrecer una clave con scope solo-mensajería, rotar `generar-cotizacion-v2` a esa es una mejora pendiente, no urgente hoy |
+| `generar-cotizacion-v2` | `COTIZACION_PDF_BASE` | Constante `VALUES.COTIZACION_PDF_BASE` en `scripts/deploy-functions.ts` (`https://rr-mailing.vercel.app/api/cotizacion`) |
 
 ### Correo: relé propio, ya no Resend
 
@@ -253,9 +255,32 @@ ORDER BY updated_at DESC;
 
 ## Persistencia de negocio (Supabase)
 
+### Runbook de esquema: los dos SQL, en orden, y por qué el segundo es obligatorio
+
 Además de `purchase_orders` en D1 (arriba), dos functions escriben en
-Supabase (Postgres) las tablas creadas por `docs/sql/2026-08-31-persistencia.sql`
-(`clientes`, `cotizaciones`, `pedidos`):
+Supabase (Postgres). El esquema se arma pegando, **en este orden**, en el
+SQL Editor del proyecto:
+
+1. `docs/sql/2026-08-31-persistencia.sql` — crea `clientes`, `cotizaciones`
+   y `pedidos` (spec 2026-08-31).
+2. `docs/sql/2026-09-01-numero-cotizacion.sql` — agrega la columna
+   `numero` (autonumerada, `generated always as identity`, arranca en
+   1.600.001) a `cotizaciones` (spec 2026-09-01, PDF de cotización).
+
+**El segundo ALTER es requisito duro de la versión actual de
+`generar-cotizacion-v2`, no un nice-to-have.** El INSERT a `cotizaciones`
+pide `?select=numero` en el `Prefer: return=representation` (para nombrar el
+PDF con el número real). Si esa columna no existe todavía, PostgREST
+responde `400` a la query completa — **y el INSERT se revierte entero**, no
+solo el `select`. Es decir: desplegar esta versión de la function contra un
+proyecto que solo tiene el primer SQL corrido **elimina la persistencia de
+cotizaciones en silencio** (`persistencia: "fallo"` en cada invocación, sin
+ninguna fila nueva en `cotizaciones`) aunque el resto de la conversación siga
+funcionando con normalidad — el fallo es best-effort y no se nota en el chat.
+Correr el segundo ALTER antes de (re)desplegar esta function es, por eso,
+un paso obligatorio del runbook, no opcional.
+
+Las tablas que crea el primer SQL:
 
 - `generar-cotizacion-v2` inserta una fila en `cotizaciones` por cada
   cotización generada (montos, líneas, vigencia) y lee `clientes` por
@@ -267,6 +292,27 @@ Supabase (Postgres) las tablas creadas por `docs/sql/2026-08-31-persistencia.sql
   `clientes` (por `telefono`, y solo si el RUT no quedó como `"No
   informado"`) una vez que las órdenes de compra del grupo terminan de
   procesarse.
+
+### El PDF de la cotización por WhatsApp
+
+Tras guardar la cotización (numero incluido), `generar-cotizacion-v2` manda
+el PDF formal como documento adjunto a la misma conversación, vía la API de
+la plataforma Kapso — ver el diseño completo en
+`docs/superpowers/specs/2026-09-01-pdf-cotizacion-design.md`. El campo
+`pdf` de la respuesta documenta qué pasó:
+
+| `pdf` | Cuándo |
+|---|---|
+| `"enviado"` | Kapso **aceptó el POST** (`r.ok`) — esto **no** significa que Meta ya entregó el documento al cliente, solo que la plataforma lo tomó para procesar |
+| `"sin_destinatario"` | La cotización quedó guardada, pero el contexto de la invocación no trae `telefono` o `phone_number_id` (invocaciones sintéticas, canal de prueba) — no hay a quién mandarle nada |
+| `"fallo"` | O la persistencia no quedó confirmada (sin evidencia positiva de que la fila existe), o el POST a Kapso falló o devolvió no-ok |
+| *(ausente)* | Faltan `KAPSO_API_KEY` o `COTIZACION_PDF_BASE`: ni se intenta |
+
+**Orden aceptado:** el PDF llega al chat justo **antes** del resumen en
+texto que arma el agente — el mensaje del documento sale de esta function,
+el resumen lo compone el LLM después. El envío a Kapso agrega hasta 5 s de
+latencia a la respuesta cuando la plataforma está lenta (mismo timeout que
+usa el `fetch` del POST).
 
 **Es best-effort: nunca bloquea una venta.** Sin `SUPABASE_URL` ni
 `SUPABASE_SERVICE_KEY` cargados, las dos functions simplemente no llaman a

@@ -43,6 +43,7 @@ async function handler(request, env) {
 
   if (input.marca) params.set("marca", String(input.marca).trim());
   if (input.categoria) params.set("categoria", String(input.categoria).trim());
+  if (input.subcategoria) params.set("subcategoria", String(input.subcategoria).trim());
   params.set("solo_con_stock", input.incluir_sin_stock === true ? "false" : "true");
 
   // `precio_max` llega en pesos, que es como habla el cliente. La API filtra por

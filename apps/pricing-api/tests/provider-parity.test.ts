@@ -103,7 +103,7 @@ describe('paridad de contrato entre proveedores', () => {
     await facetasByRoute(makeReq({ proveedor: name }), res);
 
     expect(res.statusCode).toBe(200);
-    expect(Object.keys(res.body).sort()).toEqual(['categoria', 'marca', 'total_productos']);
+    expect(Object.keys(res.body).sort()).toEqual(['categoria', 'marca', 'subcategoria', 'total_productos']);
   });
 
   // Cada proveedor trae su propia respuesta cruda. El catalogo, el buscador y

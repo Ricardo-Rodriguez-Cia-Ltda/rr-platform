@@ -24,7 +24,7 @@ function error(payload, status) {
 // --- persistencia (Supabase) ---------------------------------------------
 // Memoria del negocio, no un eslabon del flujo: nunca lanza, 4s de timeout,
 // y sin secretos configurados no hace nada. Ver el spec 2026-08-31.
-async function supabase(env, method, path, body) {
+async function supabase(env, method, path, body, prefer) {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return null;
   try {
     const base = String(env.SUPABASE_URL).replace(/\/+$/, "");
@@ -34,7 +34,7 @@ async function supabase(env, method, path, body) {
         apikey: env.SUPABASE_SERVICE_KEY,
         Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
         "Content-Type": "application/json",
-        Prefer: method === "POST" ? "resolution=merge-duplicates,return=minimal" : "count=none"
+        Prefer: prefer || (method === "POST" ? "resolution=merge-duplicates,return=minimal" : "count=none")
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(4000)
@@ -208,6 +208,7 @@ async function handler(request, env) {
   const telefono = telefonoDesdeContexto(body.execution_context);
   let clienteGuardado = null;
   let persistencia;
+  let postCotizacion;
   if (env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY) {
     const [cotizacionGuardada, filas] = await Promise.all([
       // Prefer: merge-duplicates es inerte hoy — quote_id es un UUID fresco
@@ -216,7 +217,9 @@ async function handler(request, env) {
       // en vez de crear uno nuevo), esa colision se resolveria en silencio
       // pisando la fila vieja: la columna `version` existe justamente para
       // ese caso, y ese dia el POST tiene que empezar a usarla en la query.
-      supabase(env, "POST", "/cotizaciones", {
+      // return=representation: se necesita el `numero` que Supabase le asigna
+      // a la fila para nombrar el PDF que se manda por WhatsApp mas abajo.
+      supabase(env, "POST", "/cotizaciones?select=numero", {
         quote_id: quote.quote_id,
         version: String(quote.version),
         telefono,
@@ -225,13 +228,66 @@ async function handler(request, env) {
         total_clp: quote.total_clp,
         valida_hasta: quote.valid_until,
         lineas: quote.lineas
-      }),
+      }, "resolution=merge-duplicates,return=representation"),
       telefono
         ? supabase(env, "GET", `/clientes?telefono=eq.${telefono}&select=rut,razon_social,giro,direccion,comuna,ciudad,email&limit=1`)
         : Promise.resolve(null)
     ]);
     if (Array.isArray(filas) && filas.length > 0) clienteGuardado = filas[0];
+    postCotizacion = cotizacionGuardada;
     persistencia = cotizacionGuardada !== null ? "ok" : "fallo";
+  }
+
+  // El PDF formal, best-effort. Solo si la cotizacion QUEDO guardada: el link
+  // apunta a esa fila, y un PDF hacia una fila inexistente es un 404 seguro.
+  let pdf;
+  if (env.KAPSO_API_KEY && env.COTIZACION_PDF_BASE) {
+    const phoneNumberId = body.execution_context?.system?.whatsapp_config?.phone_number_id;
+    // Se exige evidencia POSITIVA de persistencia (un array, la forma real de
+    // exito de return=representation), no solo ausencia de fallo: `null`
+    // (el POST fallo) y `undefined` (nunca se intento, sin secretos de
+    // Supabase) quedan ambos afuera, porque mandar el link sin probar que la
+    // fila existe es garantizar un 404 al cliente. Sin evidencia de
+    // persistencia, "fallo" -- no importa si telefono/phoneNumberId estan.
+    if (!Array.isArray(postCotizacion)) {
+      pdf = "fallo";
+    } else if (!telefono || !phoneNumberId) {
+      // La cotizacion SI quedo guardada, pero no hay a quien mandarle el PDF
+      // -- invocaciones sinteticas o el canal de prueba, que no traen
+      // `phone_number` o `phone_number_id` en el contexto. Distinto de
+      // "fallo": no es un error, es que no hay destinatario.
+      pdf = "sin_destinatario";
+    } else {
+      // Sin numero (rama defensiva: el ALTER de docs/sql/2026-09-01-numero-cotizacion.sql
+      // rellena retroactivamente todas las filas existentes, asi que esto no
+      // deberia pasar en produccion -- solo si el POST no lo devolvio por
+      // alguna razon) el archivo cae a "cotizacion-SN.pdf" -- alineado con el
+      // Content-Disposition del endpoint y el "N° S/N" del documento (ver
+      // apps/mailer/src/cotizacion-view.ts).
+      const numero = postCotizacion[0]?.numero != null ? String(postCotizacion[0].numero) : null;
+      const filename = numero != null ? `cotizacion-${numero}.pdf` : "cotizacion-SN.pdf";
+      const base = String(env.COTIZACION_PDF_BASE).replace(/\/+$/, "");
+      try {
+        const r = await fetch(`https://api.kapso.ai/meta/whatsapp/v24.0/${phoneNumberId}/messages`, {
+          method: "POST",
+          headers: { "X-API-Key": env.KAPSO_API_KEY, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            to: telefono,
+            type: "document",
+            document: {
+              link: `${base}/${quote.quote_id}`,
+              filename,
+              caption: "Tu cotización formal en PDF 📄"
+            }
+          }),
+          signal: AbortSignal.timeout(5000)
+        });
+        pdf = r.ok ? "enviado" : "fallo";
+      } catch (_) {
+        pdf = "fallo";
+      }
+    }
   }
 
   const varsRespuesta = {
@@ -247,6 +303,7 @@ async function handler(request, env) {
     estado: "ok",
     quote,
     vars: varsRespuesta,
-    ...(persistencia !== undefined ? { persistencia } : {})
+    ...(persistencia !== undefined ? { persistencia } : {}),
+    ...(pdf !== undefined ? { pdf } : {})
   });
 }

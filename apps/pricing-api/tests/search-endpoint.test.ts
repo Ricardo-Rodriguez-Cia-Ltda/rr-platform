@@ -38,6 +38,7 @@ function makeProduct(
   name: string,
   brand: string,
   category: string,
+  subcategories: string[] = [],
 ): NormalizedProduct {
   return {
     sku,
@@ -45,7 +46,7 @@ function makeProduct(
     nombre: name,
     marca: brand,
     categoria: category,
-    subcategorias: [],
+    subcategorias: subcategories,
     tipo: null,
   };
 }
@@ -350,6 +351,63 @@ describe('GET /search', () => {
 
     expect(res.statusCode).toBe(409);
     expect(res.body.total).toBe(26);
+  });
+});
+
+// El catalogo trae subcategorias (Portatiles, Todo-en-Uno, Computadores de
+// Mesa, Servidores, Tableta) y hasta ahora la busqueda no filtraba por ellas:
+// un cliente que pidio notebook recibio un All-in-One (conversacion real,
+// 2026-09-01).
+describe('GET /search — subcategoria', () => {
+  const CATALOGO_SUBCAT = [
+    makeProduct('NB1', 'HP ProBook 640 Notebook 14"', 'HP', 'Computadores', ['Portátiles']),
+    makeProduct('AIO1', 'HP All-in-One 24 PC todo en uno', 'HP', 'Computadores', ['Todo-en-Uno']),
+  ];
+
+  beforeEach(() => {
+    vi.stubEnv('API_SECRET_KEY', 'test-secret');
+    vi.stubEnv('CATALOG_CACHE_DIR', mkdtempSync(join(tmpdir(), 'search-cache-')));
+    resetPriceCachesForTests();
+    getCatalogMock.mockReset().mockReturnValue(CATALOGO_SUBCAT);
+    getPricesMock.mockReset().mockResolvedValue(
+      new Map([
+        ['NB1', { price: 1000, currency: 'us', inStock: 5 }],
+        ['AIO1', { price: 1200, currency: 'us', inStock: 5 }],
+      ]),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('respeta el parametro subcategoria', async () => {
+    const res = makeRes();
+    await handler(makeReq({ q: 'hp', subcategoria: 'Portátiles' }, AUTH), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.productos.map((p: any) => p.sku)).toEqual(['NB1']);
+  });
+
+  it('subcategoria por si sola acota el guard de demasiado_amplio', async () => {
+    const large = Array.from({ length: 30 }, (_, i) =>
+      makeProduct(`S${i}`, `Notebook generico ${i}`, 'HP', 'Computadores', ['Portátiles']),
+    );
+    getCatalogMock.mockReturnValue(large);
+
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook', subcategoria: 'Portátiles' }, AUTH), res);
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('sin marca, categoria ni subcategoria, demasiado_amplio sigue disparando igual', async () => {
+    const large = Array.from({ length: 30 }, (_, i) =>
+      makeProduct(`S${i}`, `Notebook generico ${i}`, 'HP', 'Computadores', ['Portátiles']),
+    );
+    getCatalogMock.mockReturnValue(large);
+
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook' }, AUTH), res);
+    expect(res.statusCode).toBe(409);
   });
 });
 
