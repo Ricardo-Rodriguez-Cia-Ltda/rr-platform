@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 export default async function Ficha({ params }: { params: Promise<{ telefono: string }> }) {
   const { telefono } = await params;
   const ficha = await cargarFichaCliente(telefono);
-  if (ficha === null) return <div className="aviso-error">No se pudo cargar desde la base. Reintenta.</div>;
+  if (ficha === null) return <div className="aviso-error">No se pudo cargar desde la base. <a href={`/clientes/${telefono}`}>Reintentar</a></div>;
   if (ficha === 'no_existe') return <div className="aviso-error">No hay cliente guardado con ese teléfono.</div>;
   const d = ficha.datos;
   return (

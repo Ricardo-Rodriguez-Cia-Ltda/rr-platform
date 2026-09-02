@@ -16,7 +16,10 @@ export function BotonesTransicion({ quoteId, version, estado }: { quoteId: strin
     }).catch(() => null);
     setOcupado(false);
     if (res?.ok) router.refresh();
-    else setError('No se pudo guardar el cambio. Intenta de nuevo.');
+    else {
+      setError('No se pudo guardar el cambio. Intenta de nuevo.');
+      router.refresh();
+    }
   }
 
   return (
