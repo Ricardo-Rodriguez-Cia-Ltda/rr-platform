@@ -14,14 +14,20 @@ export default async function Pedidos({ searchParams }: { searchParams: Promise<
     <>
       <h1>Pedidos</h1>
       <div className="contadores">
-        <div className="contador"><b>{vista.contadores.porEntregar}</b><span>pagados por entregar</span></div>
+        <div className="contador destacado"><b>{vista.contadores.porEntregar}</b><span>pagados por entregar</span></div>
         <div className="contador"><b>{vista.contadores.nuevos}</b><span>nuevos</span></div>
-        <div className="contador"><b>{vista.contadores.ocFallidas}</b><span>OC con correo fallido</span></div>
+        <div className={vista.contadores.ocFallidas > 0 ? 'contador problema' : 'contador'}>
+          <b>{vista.contadores.ocFallidas}</b><span>OC con correo fallido</span>
+        </div>
       </div>
-      <div className="meta" style={{ marginBottom: 10 }}>
-        Filtrar: <a href="/">todos</a> · <a href="/?estado=nuevo">nuevos</a> · <a href="/?estado=pagado">pagados</a> · <a href="/?estado=entregado">entregados</a> · <a href="/?estado=anulado">anulados</a>
+      <div className="chips">
+        <a href="/" className={!estado ? 'activo' : ''}>Todos</a>
+        <a href="/?estado=nuevo" className={estado === 'nuevo' ? 'activo' : ''}>Nuevos</a>
+        <a href="/?estado=pagado" className={estado === 'pagado' ? 'activo' : ''}>Pagados</a>
+        <a href="/?estado=entregado" className={estado === 'entregado' ? 'activo' : ''}>Entregados</a>
+        <a href="/?estado=anulado" className={estado === 'anulado' ? 'activo' : ''}>Anulados</a>
       </div>
-      {pedidos.length === 0 ? <p className="meta">Sin pedidos.</p> : pedidos.map((p) => (
+      {pedidos.length === 0 ? <p className="vacio">Nada por aquí — cuando el bot cierre una venta, aparece sola.</p> : pedidos.map((p) => (
         <TarjetaPedido key={`${p.quoteId}:${p.version}`} pedido={p} />
       ))}
     </>

@@ -9,7 +9,7 @@ export default async function Cotizaciones() {
   return (
     <>
       <h1>Cotizaciones</h1>
-      {vista.filas.length === 0 ? <p className="meta">Sin cotizaciones.</p> : vista.filas.map((f) => (
+      {vista.filas.length === 0 ? <p className="vacio">Aún no hay cotizaciones.</p> : vista.filas.map((f) => (
         <div className="tarjeta" key={`${f.quoteId}:${f.version}`}>
           <header>
             <span><b>N° {f.numero ?? 'S/N'}</b> · {f.clienteLabel} · {f.totalFmt}</span>
