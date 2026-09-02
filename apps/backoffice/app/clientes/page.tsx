@@ -8,7 +8,7 @@ export default async function Clientes() {
   return (
     <>
       <h1>Clientes</h1>
-      {clientes.length === 0 ? <p className="meta">Sin clientes guardados.</p> : clientes.map((c) => (
+      {clientes.length === 0 ? <p className="vacio">Aún no hay clientes guardados.</p> : clientes.map((c) => (
         <div className="tarjeta" key={c.telefono}>
           <header>
             <span><b><a href={`/clientes/${c.telefono}`}>{c.razonSocial}</a></b></span>
