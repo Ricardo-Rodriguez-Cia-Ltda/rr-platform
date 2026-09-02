@@ -17,9 +17,11 @@ clientes y salud. Spec: `docs/superpowers/specs/2026-09-01-backoffice-design.md`
 1. Pegar `docs/sql/2026-09-01-estado-negocio.sql` en el SQL Editor de Supabase.
 2. Crear el proyecto Vercel con Root Directory `apps/backoffice` y cargar las
    4 variables.
-3. Deploy desde la RAÍZ del repo (el build necesita los workspaces):
+3. Linkear una sola vez DESDE `apps/backoffice`: `cd apps/backoffice && npx vercel link`
+   (crea `apps/backoffice/.vercel/project.json` con los ids). El deploy va
+   siempre desde la RAÍZ del repo (el build necesita los workspaces):
    `VERCEL_ORG_ID=<org> VERCEL_PROJECT_ID=<prj> npx vercel --prod --yes`
-   (ids en `apps/backoffice/.vercel/project.json` tras el primer `vercel link`).
+   con los ids de ese project.json. Es el mismo patrón que rr-mailing.
 
 ## Desarrollo local
 
