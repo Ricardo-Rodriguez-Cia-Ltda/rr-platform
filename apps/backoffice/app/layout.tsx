@@ -1,4 +1,5 @@
 import './globals.css';
+import { KAPSO_URL } from '../src/lib/constantes.js';
 export const metadata = { title: 'RR Backoffice' };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -11,7 +12,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <a href="/cotizaciones">Cotizaciones</a>
           <a href="/clientes">Clientes</a>
           <a href="/salud">Salud</a>
-          <a href="https://app.kapso.ai" target="_blank" rel="noreferrer">Conversaciones ↗</a>
+          <a href={KAPSO_URL} target="_blank" rel="noreferrer">Conversaciones ↗</a>
           <a href="/api/logout" className="salir">Salir</a>
         </nav>
         <main>{children}</main>
