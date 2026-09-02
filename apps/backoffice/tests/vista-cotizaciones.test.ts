@@ -24,6 +24,7 @@ describe('cargarVistaCotizaciones', () => {
     stub([COT], [{ quote_id: 'q-1', quote_version: '1' }], [{ telefono: '569', razon_social: 'Acme' }]);
     const vista = await cargarVistaCotizaciones(AHORA);
     const fila = vista!.filas[0];
+    expect(fila.version).toBe('1');
     expect(fila.vigente).toBe(true);
     expect(fila.tienePedido).toBe(true);
     expect(fila.clienteLabel).toBe('Acme');

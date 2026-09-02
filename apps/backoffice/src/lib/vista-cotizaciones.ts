@@ -3,7 +3,7 @@ import { formatCLP } from './formato.js';
 import { RELAY_BASE } from './constantes.js';
 
 export interface FilaCotizacion {
-  numero: number | null; quoteId: string; fecha: string; clienteLabel: string;
+  numero: number | null; quoteId: string; version: string; fecha: string; clienteLabel: string;
   totalFmt: string; vigente: boolean; tienePedido: boolean; pdfUrl: string;
 }
 export interface VistaCotizaciones { filas: FilaCotizacion[] }
@@ -36,6 +36,7 @@ export async function cargarVistaCotizaciones(ahoraMs: number): Promise<VistaCot
     filas: tipadas.map((c) => ({
       numero: c.numero,
       quoteId: c.quote_id,
+      version: c.version,
       fecha: c.created_at,
       clienteLabel: (c.telefono ? razonPorTelefono.get(c.telefono) : null) ?? c.telefono ?? 'Sin teléfono',
       totalFmt: formatCLP(c.total_clp),
