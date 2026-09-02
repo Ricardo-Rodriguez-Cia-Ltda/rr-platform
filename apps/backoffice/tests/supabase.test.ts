@@ -35,15 +35,16 @@ describe('supabaseGet', () => {
 });
 
 describe('supabasePatch', () => {
-  it('PATCH con Prefer minimal; true en 2xx, false en error', async () => {
+  it('PATCH con Prefer return=representation; devuelve filas en 2xx, null en error', async () => {
     conEnv();
-    const spy = vi.fn(async () => new Response(null, { status: 204 }));
+    const spy = vi.fn(async () => new Response(JSON.stringify([{ estado_negocio: 'pagado' }]), { status: 200 }));
     vi.stubGlobal('fetch', spy);
-    expect(await supabasePatch('/pedidos?quote_id=eq.q', { estado_negocio: 'pagado' })).toBe(true);
+    const filas = await supabasePatch('/pedidos?quote_id=eq.q', { estado_negocio: 'pagado' });
+    expect(filas).toEqual([{ estado_negocio: 'pagado' }]);
     const [, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
     expect(init.method).toBe('PATCH');
-    expect((init.headers as Record<string, string>).Prefer).toBe('return=minimal');
+    expect((init.headers as Record<string, string>).Prefer).toBe('return=representation');
     vi.stubGlobal('fetch', vi.fn(async () => new Response('x', { status: 400 })));
-    expect(await supabasePatch('/pedidos?quote_id=eq.q', {})).toBe(false);
+    expect(await supabasePatch('/pedidos?quote_id=eq.q', {})).toBeNull();
   });
 });

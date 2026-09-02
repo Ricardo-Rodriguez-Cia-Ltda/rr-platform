@@ -26,21 +26,22 @@ export async function supabaseGet(path: string): Promise<unknown[] | null> {
   }
 }
 
-export async function supabasePatch(path: string, body: unknown): Promise<boolean> {
+export async function supabasePatch(path: string, body: unknown): Promise<unknown[] | null> {
   const cfg = base();
-  if (!cfg) return false;
+  if (!cfg) return null;
   try {
     const r = await fetch(`${cfg.url}/rest/v1${path}`, {
       method: 'PATCH',
       headers: {
         apikey: cfg.key, Authorization: `Bearer ${cfg.key}`,
-        'Content-Type': 'application/json', Prefer: 'return=minimal',
+        'Content-Type': 'application/json', Prefer: 'return=representation',
       },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    return r.ok;
+    if (!r.ok) return null;
+    return (await r.json()) as unknown[];
   } catch {
-    return false;
+    return null;
   }
 }

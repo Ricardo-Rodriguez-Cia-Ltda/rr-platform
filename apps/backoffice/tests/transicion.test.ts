@@ -17,7 +17,8 @@ function stubSupabase(estadoActual: string | null, patches: Array<{ url: string;
   vi.stubGlobal('fetch', vi.fn(async (url: any, init?: RequestInit) => {
     if (init?.method === 'PATCH') {
       patches.push({ url: String(url), body: JSON.parse(String(init.body)) });
-      return new Response(null, { status: 204 });
+      // Devuelve filas afectadas con return=representation (200 con cuerpo)
+      return new Response(JSON.stringify([{ estado_negocio: 'dummy' }]), { status: 200 });
     }
     const filas = estadoActual === null ? [] : [{ estado_negocio: estadoActual }];
     return new Response(JSON.stringify(filas), { status: 200 });
@@ -26,7 +27,7 @@ function stubSupabase(estadoActual: string | null, patches: Array<{ url: string;
 }
 
 describe('POST /api/pedidos/transicion', () => {
-  it('nuevo -> pagado: PATCH al grupo completo con pagado_at', async () => {
+  it('nuevo -> pagado: PATCH al grupo completo con pagado_at y condicion de estado', async () => {
     conEnv();
     const patches = stubSupabase('nuevo');
     const res = await POST(req({ quote_id: 'q-1', quote_version: '1', hacia: 'pagado' }));
@@ -34,6 +35,7 @@ describe('POST /api/pedidos/transicion', () => {
     expect(patches).toHaveLength(1);
     expect(patches[0].url).toContain('quote_id=eq.q-1');
     expect(patches[0].url).toContain('quote_version=eq.1');
+    expect(patches[0].url).toContain('estado_negocio=eq.nuevo');
     expect(patches[0].body.estado_negocio).toBe('pagado');
     expect(typeof patches[0].body.pagado_at).toBe('string');
   });
@@ -55,6 +57,19 @@ describe('POST /api/pedidos/transicion', () => {
     conEnv();
     stubSupabase('nuevo');
     const res = await POST(req({ quote_id: 'q-1', quote_version: '1', hacia: 'entregado' }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).desde).toBe('nuevo');
+  });
+  it('PATCH condicional devuelve [] (carrera): otro request cambio el estado -> 409', async () => {
+    conEnv();
+    vi.stubGlobal('fetch', vi.fn(async (url: any, init?: RequestInit) => {
+      if (init?.method === 'PATCH') {
+        // Simula que el PATCH condicional no encontró filas con estado_negocio=eq.nuevo
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      return new Response(JSON.stringify([{ estado_negocio: 'nuevo' }]), { status: 200 });
+    }));
+    const res = await POST(req({ quote_id: 'q-1', quote_version: '1', hacia: 'pagado' }));
     expect(res.status).toBe(409);
     expect((await res.json()).desde).toBe('nuevo');
   });

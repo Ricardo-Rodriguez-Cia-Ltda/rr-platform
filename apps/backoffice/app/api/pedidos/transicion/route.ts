@@ -25,7 +25,11 @@ export async function POST(req: Request): Promise<Response> {
   const cambio: Record<string, unknown> = { estado_negocio: hacia };
   if (hacia === 'pagado') cambio.pagado_at = new Date().toISOString();
   if (hacia === 'entregado') cambio.entregado_at = new Date().toISOString();
-  const ok = await supabasePatch(`/pedidos?${filtro}`, cambio);
-  if (!ok) return json({ error: 'upstream' }, 503);
+
+  // Escritura condicional: solo PATCH si el estado sigue siendo el que leímos
+  const filtroCondicional = `${filtro}&estado_negocio=eq.${encodeURIComponent(actual)}`;
+  const filasAfectadas = await supabasePatch(`/pedidos?${filtroCondicional}`, cambio);
+  if (filasAfectadas === null) return json({ error: 'upstream' }, 503);
+  if (filasAfectadas.length === 0) return json({ error: 'transicion_invalida', desde: actual }, 409);
   return json({ ok: true, estado: hacia });
 }
