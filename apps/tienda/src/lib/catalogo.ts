@@ -130,6 +130,40 @@ export async function buscarCatalogo(params: {
   };
 }
 
+export interface GrupoDestacado {
+  categoria: string;
+  productos: ProductoTienda[];
+}
+
+/**
+ * Productos para la portada, tomados de las categorias mas pobladas del
+ * catalogo (`/facetas` ya las devuelve ordenadas por cantidad).
+ *
+ * Tres reglas que vienen del diseno, no del azar:
+ * - Cada busqueda va ACOTADA por categoria. Sin filtro, la API responde 409
+ *   `demasiado_amplio` y no habria nada que mostrar.
+ * - Solo productos con stock: destacar en la portada algo que no se puede
+ *   despachar es peor que no destacar nada.
+ * - Una categoria que falla se omite y las demas siguen. La portada tiene que
+ *   salir igual: el buscador es lo esencial, esto es vitrina.
+ */
+export async function cargarDestacados(categorias: string[], porCategoria = 2): Promise<GrupoDestacado[]> {
+  if (categorias.length === 0) return [];
+
+  const grupos = await Promise.all(
+    categorias.map(async (categoria): Promise<GrupoDestacado> => {
+      // `q` es obligatorio en la API; el propio nombre de la categoria sirve
+      // de termino y ademas ordena por relevancia dentro de ella.
+      const r = await buscarCatalogo({ q: categoria, categoria, limite: porCategoria * 4 })
+        .catch(() => null);
+      const productos = (r?.productos ?? []).filter((p) => p.disponible).slice(0, porCategoria);
+      return { categoria, productos };
+    }),
+  );
+
+  return grupos.filter((g) => g.productos.length > 0);
+}
+
 export async function cargarPortada(): Promise<{ categorias: string[] } | null> {
   // La ruta es /facetas (app.ts registra `facetas`, no `facets`) y el cuerpo
   // trae `categoria` en singular como {valor, n}[].

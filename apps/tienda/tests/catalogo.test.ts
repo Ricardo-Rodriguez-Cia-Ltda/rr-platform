@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buscarCatalogo, cargarPortada } from '../src/lib/catalogo.js';
+import { buscarCatalogo, cargarDestacados, cargarPortada } from '../src/lib/catalogo.js';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
@@ -155,5 +155,69 @@ describe('cargarPortada', () => {
     conEnv();
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 503 })));
     expect(await cargarPortada()).toBeNull();
+  });
+});
+
+describe('cargarDestacados', () => {
+  // La portada pide productos de las categorias mas pobladas. Cada busqueda va
+  // ACOTADA por categoria: sin ese filtro la API responde 409 demasiado_amplio.
+  function stubDestacados(porCategoria: Record<string, unknown[]>, urls: string[] = []) {
+    conEnv();
+    vi.stubGlobal('fetch', vi.fn(async (url: any) => {
+      const u = String(url);
+      urls.push(u);
+      if (u.includes('/facetas')) {
+        return new Response(JSON.stringify({ total_productos: 100, ...FACETAS }), { status: 200 });
+      }
+      const categoria = decodeURIComponent(new URL(u).searchParams.get('categoria') ?? '');
+      return new Response(JSON.stringify({ ...RESPUESTA, productos: porCategoria[categoria] ?? [] }), { status: 200 });
+    }));
+    return urls;
+  }
+
+  const conStock = (sku: string, categoria: string, precio = 100) =>
+    ({ sku, mpn: `M-${sku}`, nombre: `Producto ${sku}`, marca: 'HP', categoria, precio, moneda: 'USD', stock: 4 });
+
+  it('trae productos de las categorias mas grandes, acotando cada busqueda', async () => {
+    const urls = stubDestacados({
+      Computadores: [conStock('C1', 'Computadores'), conStock('C2', 'Computadores')],
+      Accesorios: [conStock('A1', 'Accesorios')],
+    });
+    const grupos = await cargarDestacados(['Computadores', 'Accesorios'], 2);
+    expect(grupos.map((g) => g.categoria)).toEqual(['Computadores', 'Accesorios']);
+    expect(grupos[0].productos.map((p) => p.sku)).toEqual(['C1', 'C2']);
+    expect(grupos[1].productos).toHaveLength(1);
+    // Cada busqueda lleva su filtro de categoria (si no, la API responde 409).
+    const busquedas = urls.filter((u) => u.includes('/search'));
+    expect(busquedas).toHaveLength(2);
+    for (const u of busquedas) expect(u).toContain('categoria=');
+  });
+
+  it('omite los productos sin stock y las categorias que quedan vacias', async () => {
+    stubDestacados({
+      Computadores: [{ ...conStock('C1', 'Computadores'), stock: 0 }],
+      Accesorios: [conStock('A1', 'Accesorios')],
+    });
+    const grupos = await cargarDestacados(['Computadores', 'Accesorios'], 2);
+    expect(grupos.map((g) => g.categoria)).toEqual(['Accesorios']);
+  });
+
+  it('una categoria que falla no tumba al resto (ni a la portada)', async () => {
+    conEnv();
+    vi.stubGlobal('fetch', vi.fn(async (url: any) => {
+      const categoria = decodeURIComponent(new URL(String(url)).searchParams.get('categoria') ?? '');
+      if (categoria === 'Computadores') throw new Error('oficina caida');
+      return new Response(JSON.stringify({ ...RESPUESTA, productos: [conStock('A1', 'Accesorios')] }), { status: 200 });
+    }));
+    const grupos = await cargarDestacados(['Computadores', 'Accesorios'], 2);
+    expect(grupos.map((g) => g.categoria)).toEqual(['Accesorios']);
+  });
+
+  it('sin categorias devuelve vacio sin llamar a la API', async () => {
+    conEnv();
+    const spy = vi.fn();
+    vi.stubGlobal('fetch', spy);
+    expect(await cargarDestacados([], 2)).toEqual([]);
+    expect(spy).not.toHaveBeenCalled();
   });
 });
