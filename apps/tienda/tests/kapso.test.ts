@@ -64,6 +64,30 @@ describe('invocarFunction', () => {
     // 1 listado inicial + 1 invoke 404 + 1 listado re-resuelve + 1 invoke retry = 4 fetches
     expect(spy).toHaveBeenCalledTimes(4);
   });
+  it('cada fallo se loguea con el nombre de la function y el tipo, SIN la key ni el payload', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // 1) listado caido
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNRESET'); }));
+    expect(await invocarFunction('generar-cotizacion-v2', { secreto: 'no-debe-loguearse' })).toBeNull();
+    // 2) listado no-2xx
+    _limpiarCacheKapso();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 401 })));
+    expect(await invocarFunction('generar-cotizacion-v2', {})).toBeNull();
+    // 3) invoke caido
+    _limpiarCacheKapso();
+    vi.stubGlobal('fetch', vi.fn(async (url: any) =>
+      String(url).endsWith('/functions')
+        ? new Response(JSON.stringify(FUNCTIONS), { status: 200 })
+        : Promise.reject(new Error('timeout'))));
+    expect(await invocarFunction('generar-cotizacion-v2', { secreto: 'no-debe-loguearse' })).toBeNull();
+
+    expect(log.mock.calls.length).toBeGreaterThanOrEqual(3);
+    const texto = JSON.stringify(log.mock.calls);
+    expect(texto).toContain('generar-cotizacion-v2');
+    expect(texto).not.toContain('kapso-key');
+    expect(texto).not.toContain('no-debe-loguearse');
+    log.mockRestore();
+  });
   it('404 siempre => devuelve status 404 sin bucle infinito', async () => {
     let callCount = 0;
     const spy = vi.fn(async (url: any) => {

@@ -5,6 +5,14 @@ import { permitir } from '../../../src/lib/rate-limit.js';
 const json = (payload: unknown, status = 200) =>
   new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } });
 
+// Mensaje del 503 POSTERIOR a la emision: el pedido pudo haber quedado
+// registrado y un reintento emitiria una segunda orden de compra.
+const MENSAJE_INCIERTO =
+  'Tu pedido pudo haber quedado registrado. No lo reintentes: te contactaremos por WhatsApp para confirmarlo.';
+
+interface LineaQuote { abastecimiento?: string }
+interface Quote { quote_id?: string; total_clp?: number; lineas?: LineaQuote[] }
+
 export async function POST(req: Request): Promise<Response> {
   const ip = (req.headers.get('x-forwarded-for') ?? 'sin-ip').split(',')[0].trim();
 
@@ -29,7 +37,7 @@ export async function POST(req: Request): Promise<Response> {
   if (cotizacion.status >= 500) {
     return json({ error: 'No pudimos procesar tu pedido. Intenta de nuevo.' }, 503);
   }
-  const quote = (cotizacion.data as { quote?: { quote_id?: string; total_clp?: number } }).quote;
+  const quote = (cotizacion.data as { quote?: Quote }).quote;
   if (cotizacion.status !== 200 || !quote?.quote_id) {
     const mensaje = String((cotizacion.data as { mensaje?: string }).mensaje ?? 'Un producto ya no está disponible.');
     return json({ error: mensaje }, 422);
@@ -39,6 +47,12 @@ export async function POST(req: Request): Promise<Response> {
   // de emitir nada. La cotizacion recien creada queda huerfana en Supabase —
   // inocua: las cotizaciones son inmutables y sin pedido asociado.
   const totalClp = Number(quote.total_clp ?? 0);
+  // Un total no numerico o en 0 no se compara: si el cliente mandara
+  // totalConfirmadoClp 0, la igualdad pasaria y emitiriamos un pedido que no
+  // vale nada.
+  if (!Number.isFinite(totalClp) || totalClp <= 0) {
+    return json({ error: 'No pudimos cotizar tu pedido. Escríbenos por WhatsApp y lo vemos.' }, 422);
+  }
   if (totalClp !== pedido.totalConfirmadoClp) {
     return json({ recotizado: true, totalClp, totalAnteriorClp: pedido.totalConfirmadoClp }, 409);
   }
@@ -50,14 +64,28 @@ export async function POST(req: Request): Promise<Response> {
     armarPayloadEmision(quote, pedido.comprador, pedido.facturacion, pedido.comprador.telefono),
   );
   if (emision === null || emision.status >= 500) {
-    // La cotizacion existe pero la emision no corrio: el pedido NO quedo
-    // registrado. Honesto: pedir reintento (la idempotencia de emitir
-    // absorbe cualquier duplicado).
-    return json({ error: 'No pudimos registrar el pedido. Intenta de nuevo en un momento.' }, 503);
+    // OJO: la idempotencia D1 de emitir-ordenes-compra NO cubre este flujo.
+    // Su order_key se deriva de la quote, y cada POST a /api/confirmar crea
+    // una quote NUEVA: reintentar aca no deduplica nada, emite una SEGUNDA
+    // orden de compra al mayorista. Y como no sabemos si emitir alcanzo a
+    // correr antes de caerse, lo unico honesto es frenar al cliente y
+    // resolverlo a mano.
+    return json({ error: MENSAJE_INCIERTO, noReintentar: true }, 503);
   }
   const ok = (emision.data as { ok?: boolean }).ok === true;
-  if (!ok) return json({ error: 'No pudimos registrar el pedido. Intenta de nuevo.' }, 503);
+  if (!ok) return json({ error: MENSAJE_INCIERTO, noReintentar: true }, 503);
 
   const purchaseOk = (emision.data as { vars?: { purchase_orders_ok?: boolean } }).vars?.purchase_orders_ok === true;
-  return json({ ok: true, quoteId: quote.quote_id, totalClp, ...(purchaseOk ? {} : { avisoOc: true }) });
+  // Honestidad del abastecimiento: si alguna linea no sale de stock inmediato,
+  // el plazo de entrega no es el de siempre y el cliente tiene que saberlo
+  // antes de que se lo digamos por WhatsApp.
+  const lineas = quote.lineas ?? [];
+  const porEncargo = lineas.some((l) => l?.abastecimiento !== 'stock_inmediato');
+  return json({
+    ok: true,
+    quoteId: quote.quote_id,
+    totalClp,
+    ...(purchaseOk ? {} : { avisoOc: true }),
+    ...(porEncargo ? { avisoAbastecimiento: true } : {}),
+  });
 }

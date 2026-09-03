@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { armarPayloadCotizacion, armarPayloadEmision, validarPedido } from '../src/lib/pedido.js';
 
-const ITEM = { sku: 'A', mpn: 'M-1', marca: 'HP', nombre: 'Prod', cantidad: 2, precioTiendaClp: 1000 };
+const ITEM = { sku: 'A', mpn: 'M-1', marca: 'HP', nombre: 'Prod', cantidad: 2, precioNetoClp: 840, precioTiendaClp: 1000 };
 const BASE = {
   items: [ITEM],
   comprador: { nombre: 'Vicente', telefono: '+56 9 4175 7584', email: 'v@a.cl' },
@@ -65,6 +65,19 @@ describe('payloads', () => {
     const conF = armarPayloadEmision(quote, { nombre: 'V', telefono: 'x', email: 'e' },
       { rut: '1-9', razonSocial: 'Acme', giro: 'G', direccion: 'D', comuna: 'C', ciudad: 'S', emailFactura: 'f@a.cl' }, '569') as any;
     expect(conF.execution_context.vars.billing_razon_social).toBe('Acme');
+    expect(conF.execution_context.vars.billing_email).toBe('f@a.cl');
+  });
+  it('billing_email SIEMPRE viaja (sin facturacion, el del comprador): sin el, nadie sabe a quien escribirle', () => {
+    // Los otros 6 billing_* siguen atados a la facturacion completa: mandarlos
+    // a medias gatilla el upsert de clientes con datos incompletos.
+    const quote = { quote_id: 'q-1', lineas: [], total_clp: 2000 };
+    const sin = armarPayloadEmision(quote, { nombre: 'V', telefono: 'x', email: 'comprador@a.cl' }, null, '569') as any;
+    expect(sin.execution_context.vars.billing_email).toBe('comprador@a.cl');
+    expect(sin.execution_context.vars.billing_rut).toBeUndefined();
+    expect(sin.execution_context.vars.billing_razon_social).toBeUndefined();
+    // Con facturacion, manda el email de factura (no el del comprador).
+    const conF = armarPayloadEmision(quote, { nombre: 'V', telefono: 'x', email: 'comprador@a.cl' },
+      { rut: '1-9', razonSocial: 'Acme', giro: 'G', direccion: 'D', comuna: 'C', ciudad: 'S', emailFactura: 'f@a.cl' }, '569') as any;
     expect(conF.execution_context.vars.billing_email).toBe('f@a.cl');
   });
 });

@@ -2,7 +2,11 @@
 // envoltorios finos con try/catch (localStorage puede no existir o lanzar).
 export interface ItemCarro {
   sku: string; mpn: string | null; marca: string | null; nombre: string;
-  cantidad: number; precioTiendaClp: number;
+  cantidad: number;
+  /** Neto unitario en CLP: es la unidad con la que el bot arma el total. */
+  precioNetoClp: number;
+  /** Neto unitario + IVA, solo para MOSTRAR el precio de una unidad. */
+  precioTiendaClp: number;
 }
 
 export const MAX_LINEAS = 10;
@@ -38,8 +42,16 @@ export function cambiarCantidad(items: ItemCarro[], sku: string, cantidad: numbe
   return items.map((i) => (i.sku === sku ? { ...i, cantidad: clamped } : i));
 }
 
-export function totalIndicativo(items: ItemCarro[]): number {
-  return items.reduce((s, i) => s + i.cantidad * i.precioTiendaClp, 0);
+/**
+ * Total CON IVA armado EXACTAMENTE como generar-cotizacion-v2.js:
+ * cada linea aporta su neto (neto unitario x cantidad), se suman todos, y el
+ * IVA se aplica UNA sola vez sobre ese neto total. Sumar precios unitarios ya
+ * con IVA da un numero distinto por unos pesos, y esa diferencia es lo que
+ * hace que el POST /api/confirmar responda 409 recotizado en cada pedido.
+ */
+export function totalIndicativo(items: ItemCarro[], iva: number): number {
+  const neto = items.reduce((s, i) => s + i.cantidad * i.precioNetoClp, 0);
+  return neto + Math.round(neto * iva);
 }
 
 export function contarUnidades(items: ItemCarro[]): number {

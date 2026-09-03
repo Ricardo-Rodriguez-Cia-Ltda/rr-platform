@@ -8,7 +8,9 @@ export function BotonAgregar({ producto }: { producto: ProductoTienda }) {
   function alCarro() {
     const resultado = agregar(leerCarro(), {
       sku: producto.sku, mpn: producto.mpn, marca: producto.marca,
-      nombre: producto.nombre, cantidad: 1, precioTiendaClp: producto.precioClp,
+      nombre: producto.nombre, cantidad: 1,
+      // El neto es lo que suma el total (como el bot); el otro es para mostrar.
+      precioNetoClp: producto.precioNetoClp, precioTiendaClp: producto.precioClp,
     });
     if ('error' in resultado) { setEstado(resultado.error); return; }
     guardarCarro(resultado);

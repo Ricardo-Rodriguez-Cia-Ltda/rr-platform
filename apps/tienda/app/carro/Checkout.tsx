@@ -23,11 +23,15 @@ function leerDatos(): DatosGuardados {
   }
 }
 
-export function Checkout() {
+export function Checkout({ iva }: { iva: number }) {
   const [items, setItems] = useState<ItemCarro[]>([]);
   const [datos, setDatos] = useState<DatosGuardados>({ comprador: { nombre: '', telefono: '', email: '' }, facturacion: { ...FACT_VACIA } });
   const [estado, setEstado] = useState<'listo' | 'enviando'>('listo');
   const [error, setError] = useState('');
+  // Un fallo POSTERIOR a la emision deja el pedido en un estado incierto y un
+  // segundo POST crearia una quote nueva (la idempotencia D1 no lo cubre):
+  // el boton queda muerto para que un doble click no emita una segunda OC.
+  const [bloqueado, setBloqueado] = useState(false);
   const [recotizado, setRecotizado] = useState<{ totalClp: number; totalAnteriorClp: number } | null>(null);
 
   useEffect(() => { setItems(leerCarro()); setDatos(leerDatos()); }, []);
@@ -62,16 +66,26 @@ export function Checkout() {
     if (!res) { setError('Sin conexión. Intenta de nuevo.'); return; }
     const data = await res.json().catch(() => ({}));
     if (res.status === 409 && data.recotizado) { setRecotizado({ totalClp: data.totalClp, totalAnteriorClp: data.totalAnteriorClp }); return; }
-    if (!res.ok) { setError(String(data.error ?? 'No pudimos procesar tu pedido.')); return; }
+    if (!res.ok) {
+      setError(String(data.error ?? 'No pudimos procesar tu pedido.'));
+      if (data.noReintentar === true) setBloqueado(true);
+      return;
+    }
     guardarCarro([]);
-    try { sessionStorage.setItem(`drc-pedido-${data.quoteId}`, JSON.stringify({ totalClp: data.totalClp, avisoOc: data.avisoOc === true })); } catch { /* opcional */ }
+    try {
+      sessionStorage.setItem(`drc-pedido-${data.quoteId}`, JSON.stringify({
+        totalClp: data.totalClp,
+        avisoOc: data.avisoOc === true,
+        avisoAbastecimiento: data.avisoAbastecimiento === true,
+      }));
+    } catch { /* opcional */ }
     window.location.href = `/pedido/${data.quoteId}`;
   }
 
   if (items.length === 0) {
     return <p className="vacio">Tu carro está vacío. <a href="/">Busca algo rico en tecnología</a>.</p>;
   }
-  const total = totalIndicativo(items);
+  const total = totalIndicativo(items, iva);
   const c = datos.comprador;
   const f = datos.facturacion;
   const setC = (campo: string, valor: string) => setDatos({ ...datos, comprador: { ...c, [campo]: valor } });
@@ -85,8 +99,11 @@ export function Checkout() {
           {items.map((i) => (
             <tr key={i.sku}>
               <td><b>{i.nombre}</b><div className="mpn">{i.marca ?? ''}{i.mpn ? ` · ${i.mpn}` : ''}</div></td>
-              <td><input type="number" min={0} max={20} value={i.cantidad} disabled={estado === 'enviando'} onChange={(e) => actualizar(i.sku, Number(e.target.value))} aria-label={`Cantidad de ${i.nombre}`} /></td>
-              <td className="num">{formatCLP(i.cantidad * i.precioTiendaClp)}</td>
+              <td><input type="number" min={0} max={20} value={i.cantidad} disabled={estado === 'enviando' || bloqueado} onChange={(e) => actualizar(i.sku, Number(e.target.value))} aria-label={`Cantidad de ${i.nombre}`} /></td>
+              {/* Precio UNITARIO con IVA. El total no es la suma de estos:
+                  se arma con los netos y una sola aplicacion de IVA, igual
+                  que la cotizacion del bot. */}
+              <td className="num">{formatCLP(i.precioTiendaClp)} c/u</td>
             </tr>
           ))}
           <tr><td /><td className="num"><b>Total</b></td><td className="num"><b>{formatCLP(total)}</b><div className="leyenda-iva">IVA incluido · se confirma al pedir</div></td></tr>
@@ -118,7 +135,7 @@ export function Checkout() {
           </div>
         ) : null}
         {error ? <div className="aviso error">{error}</div> : null}
-        <button className="boton-compra" type="submit" disabled={estado === 'enviando'}>
+        <button className="boton-compra" type="submit" disabled={estado === 'enviando' || bloqueado}>
           {estado === 'enviando' ? 'Procesando…' : recotizado ? `Confirmar por ${formatCLP(recotizado.totalClp)}` : 'Confirmar pedido'}
         </button>
         <p className="leyenda-iva">Sin pago online todavía: te contactamos por WhatsApp para coordinar pago (contado) y entrega.</p>

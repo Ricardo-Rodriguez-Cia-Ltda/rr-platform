@@ -7,7 +7,11 @@ beforeEach(() => { _limpiarCacheKapso(); _limpiarRateLimit(); vi.stubEnv('KAPSO_
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 const FUNCTIONS = { data: [{ id: 'id-g', name: 'generar-cotizacion-v2' }, { id: 'id-e', name: 'emitir-ordenes-compra' }] };
-const QUOTE = { quote_id: 'q-1', lineas: [{ sku_proveedor: 'A' }], neto_clp: 1000, iva_clp: 190, total_clp: 1190, valid_until: '2027-01-01T00:00:00Z' };
+const QUOTE = {
+  quote_id: 'q-1',
+  lineas: [{ sku_proveedor: 'A', abastecimiento: 'stock_inmediato' }],
+  neto_clp: 1000, iva_clp: 190, total_clp: 1190, valid_until: '2027-01-01T00:00:00Z',
+};
 
 function req(body: unknown, ip = '1.2.3.4'): Request {
   return new Request('http://localhost/api/confirmar', {
@@ -17,14 +21,17 @@ function req(body: unknown, ip = '1.2.3.4'): Request {
   });
 }
 const BODY = {
-  items: [{ sku: 'A', mpn: 'M', marca: 'HP', nombre: 'P', cantidad: 1, precioTiendaClp: 1190 }],
+  items: [{ sku: 'A', mpn: 'M', marca: 'HP', nombre: 'P', cantidad: 1, precioNetoClp: 1000, precioTiendaClp: 1190 }],
   comprador: { nombre: 'Vicente', telefono: '56941757584', email: 'v@a.cl' },
   sitio_web: '',
   totalConfirmadoClp: 1190,
 };
 
 // Enruta: listado de functions, generar (cotiza), emitir.
-function stubKapso(opciones: { totalVivo?: number; emitirOk?: boolean; generarStatus?: number } = {}) {
+function stubKapso(opciones: {
+  totalVivo?: number; emitirOk?: boolean; generarStatus?: number;
+  emitirStatus?: number; abastecimiento?: string;
+} = {}) {
   const llamadas: string[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: any, init?: RequestInit) => {
     const u = String(url);
@@ -32,10 +39,15 @@ function stubKapso(opciones: { totalVivo?: number; emitirOk?: boolean; generarSt
     if (u.includes('/id-g/invoke')) {
       llamadas.push('generar');
       if (opciones.generarStatus) return new Response(JSON.stringify({ estado: 'error', mensaje: 'sin precio' }), { status: opciones.generarStatus });
-      const quote = { ...QUOTE, total_clp: opciones.totalVivo ?? QUOTE.total_clp };
+      const quote = {
+        ...QUOTE,
+        total_clp: opciones.totalVivo ?? QUOTE.total_clp,
+        lineas: [{ sku_proveedor: 'A', abastecimiento: opciones.abastecimiento ?? 'stock_inmediato' }],
+      };
       return new Response(JSON.stringify({ estado: 'ok', quote }), { status: 200 });
     }
     llamadas.push('emitir');
+    if (opciones.emitirStatus) return new Response(JSON.stringify({ error: 'boom' }), { status: opciones.emitirStatus });
     return new Response(JSON.stringify({ ok: true, vars: { purchase_orders_ok: opciones.emitirOk !== false } }), { status: 200 });
   }));
   return llamadas;
@@ -96,6 +108,44 @@ describe('POST /api/confirmar', () => {
     const res = await POST(req(BODY));
     expect(res.status).toBe(503);
     expect(llamadas).toEqual(['generar']);
+  });
+  it('total no cotizable (0 o no numerico) => 422, y NO se compara contra el confirmado', async () => {
+    // Un total_clp en 0 comparado con un totalConfirmadoClp en 0 pasaria el
+    // chequeo y emitiria un pedido que no vale nada.
+    const llamadas = stubKapso({ totalVivo: 0 });
+    const res = await POST(req({ ...BODY, totalConfirmadoClp: 0 }));
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toContain('No pudimos cotizar tu pedido');
+    expect(llamadas).toEqual(['generar']);
+  });
+  it('una linea por encargo => avisoAbastecimiento en el 200', async () => {
+    stubKapso({ abastecimiento: 'por_comprar_importar' });
+    const data = await (await POST(req(BODY))).json();
+    expect(data.ok).toBe(true);
+    expect(data.avisoAbastecimiento).toBe(true);
+  });
+  it('todo con stock inmediato => sin avisoAbastecimiento', async () => {
+    stubKapso();
+    const data = await (await POST(req(BODY))).json();
+    expect(data.avisoAbastecimiento).toBeUndefined();
+  });
+  it('503 DESPUES de emitir: no invita a reintentar y marca noReintentar', async () => {
+    // La idempotencia D1 no cubre este flujo: cada POST crea una quote nueva,
+    // asi que un reintento genera un order_key nuevo y una SEGUNDA OC.
+    const llamadas = stubKapso({ emitirStatus: 500 });
+    const res = await POST(req(BODY));
+    expect(res.status).toBe(503);
+    const data = await res.json();
+    expect(data.noReintentar).toBe(true);
+    expect(String(data.error)).not.toMatch(/intenta de nuevo/i);
+    expect(String(data.error)).toContain('No lo reintentes');
+    expect(llamadas).toEqual(['generar', 'emitir']);
+  });
+  it('503 en la etapa de COTIZACION si puede invitar al reintento (no se emitio nada)', async () => {
+    stubKapso({ generarStatus: 500 });
+    const data = await (await POST(req(BODY))).json();
+    expect(data.noReintentar).toBeUndefined();
+    expect(String(data.error)).toMatch(/intenta de nuevo/i);
   });
 });
 

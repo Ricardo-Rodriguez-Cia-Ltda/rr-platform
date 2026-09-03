@@ -43,6 +43,7 @@ export function validarPedido(body: unknown):
       marca: crudo.marca == null ? null : String(crudo.marca),
       nombre: String(crudo.nombre ?? ''),
       cantidad,
+      precioNetoClp: Number(crudo.precioNetoClp ?? 0),
       precioTiendaClp: Number(crudo.precioTiendaClp ?? 0),
     });
   }
@@ -76,6 +77,11 @@ export function armarPayloadEmision(
         quote_result: quote,
         quote_confirmed: true,
         quote_customer_name: comprador.nombre,
+        // El email SIEMPRE viaja: sin el, un pedido sin facturacion llegaba al
+        // backoffice sin ninguna direccion a la que mandar la cotizacion.
+        // Los otros 6 billing_* siguen atados a la facturacion COMPLETA: a
+        // medias gatillarian el upsert de clientes con datos incompletos.
+        billing_email: facturacion?.emailFactura ?? comprador.email,
         ...(facturacion
           ? {
               billing_rut: facturacion.rut,
@@ -84,7 +90,6 @@ export function armarPayloadEmision(
               billing_direccion: facturacion.direccion,
               billing_comuna: facturacion.comuna,
               billing_ciudad: facturacion.ciudad,
-              billing_email: facturacion.emailFactura,
             }
           : {}),
       },

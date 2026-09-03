@@ -14,7 +14,11 @@ Spec: `docs/superpowers/specs/2026-09-03-tienda-dr-computacion-design.md`.
 | `MARGEN` | `0.13` — DEBE calzar con el del bot |
 | `TIPO_CAMBIO_CLP_USD` | `950` — DEBE calzar con el del bot |
 | `IVA_RATE` | `0.19` |
-| `NEXT_PUBLIC_RAYO_WA` | teléfono del bot para wa.me (solo dígitos); opcional |
+| `NEXT_PUBLIC_RAYO_WA` | teléfono del bot para wa.me (solo dígitos) — **requerida**: sin ella el botón de WhatsApp no se muestra y el cliente queda sin ninguna vía de contacto (la tienda no cobra online) |
+
+Todas son requeridas. `vercel.json` fija `maxDuration: 30` en las rutas
+(`/api/confirmar` invoca dos functions de Kapso en vivo, y la búsqueda espera
+hasta 21s a la pricing-api: con el default de la plataforma se cortarían).
 
 ## Deploy
 

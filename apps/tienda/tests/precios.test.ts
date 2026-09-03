@@ -1,16 +1,24 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cfgPrecios, costoMaxUsd, formatCLP, precioTiendaClp, ventaNetaClp } from '../src/lib/precios.js';
+import { cfgPrecios, conIvaClp, costoMaxUsd, formatCLP, precioTiendaClp, ventaNetaClp } from '../src/lib/precios.js';
 
 afterEach(() => vi.unstubAllEnvs());
 const CFG = { margen: 0.13, tipoCambio: 950, iva: 0.19 };
 
 describe('precios', () => {
-  it('venta neta = formula EXACTA del bot: round(costo * 1.13 * 950)', () => {
-    expect(ventaNetaClp(1.18, CFG)).toBe(1267); // el caso real del smoke test del bot
+  it('venta neta = formula EXACTA del bot: el USD se redondea a 2 decimales ANTES de pasar a CLP', () => {
+    // generar-cotizacion-v2.js:104-105 y 150-152: venta(costo) redondea a
+    // centavos de dolar y recien ahi multiplica por el tipo de cambio.
+    // 1.18 * 1.13 = 1.3334 -> 1.33 USD -> round(1.33 * 950) = 1264.
+    // Sin el redondeo intermedio darian 1267: la tienda cobraria 3 pesos mas
+    // que el bot y CADA pedido rebotaria con un 409 de recotizacion.
+    expect(ventaNetaClp(1.18, CFG)).toBe(1264);
     expect(ventaNetaClp(100, CFG)).toBe(107350);
   });
-  it('precio tienda = venta neta con IVA, redondeado', () => {
-    expect(precioTiendaClp(100, CFG)).toBe(Math.round(107350 * 1.19)); // 127747
+  it('el IVA se suma como en el bot: neto + round(neto * iva), no round(neto * 1.19)', () => {
+    expect(conIvaClp(107350, CFG)).toBe(107350 + Math.round(107350 * 0.19)); // 127747
+    expect(precioTiendaClp(100, CFG)).toBe(127747);
+    // Caso donde las dos formulas divergen: neto*iva termina en .5 exacto.
+    expect(conIvaClp(50, CFG)).toBe(50 + 10); // round(9.5) = 10
   });
   it('costoMaxUsd invierte el precio tienda (ida y vuelta no sube el tope)', () => {
     const costo = costoMaxUsd(127747, CFG);
