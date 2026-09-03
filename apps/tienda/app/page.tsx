@@ -21,6 +21,9 @@ export default async function Home() {
           ))}
         </div>
       ) : null}
+      {!portada ? (
+        <div className="aviso">Estamos teniendo problemas para cargar el catálogo. Puedes intentar tu búsqueda igual o reintentar en unos minutos.</div>
+      ) : null}
     </>
   );
 }
