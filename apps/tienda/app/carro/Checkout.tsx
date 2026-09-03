@@ -28,7 +28,7 @@ export function Checkout() {
   const [datos, setDatos] = useState<DatosGuardados>({ comprador: { nombre: '', telefono: '', email: '' }, facturacion: { ...FACT_VACIA } });
   const [estado, setEstado] = useState<'listo' | 'enviando'>('listo');
   const [error, setError] = useState('');
-  const [recotizado, setRecotizado] = useState<{ totalClp: number } | null>(null);
+  const [recotizado, setRecotizado] = useState<{ totalClp: number; totalAnteriorClp: number } | null>(null);
 
   useEffect(() => { setItems(leerCarro()); setDatos(leerDatos()); }, []);
 
@@ -61,7 +61,7 @@ export function Checkout() {
     setEstado('listo');
     if (!res) { setError('Sin conexión. Intenta de nuevo.'); return; }
     const data = await res.json().catch(() => ({}));
-    if (res.status === 409 && data.recotizado) { setRecotizado({ totalClp: data.totalClp }); return; }
+    if (res.status === 409 && data.recotizado) { setRecotizado({ totalClp: data.totalClp, totalAnteriorClp: data.totalAnteriorClp }); return; }
     if (!res.ok) { setError(String(data.error ?? 'No pudimos procesar tu pedido.')); return; }
     guardarCarro([]);
     try { sessionStorage.setItem(`drc-pedido-${data.quoteId}`, JSON.stringify({ totalClp: data.totalClp, avisoOc: data.avisoOc === true })); } catch { /* opcional */ }
@@ -85,7 +85,7 @@ export function Checkout() {
           {items.map((i) => (
             <tr key={i.sku}>
               <td><b>{i.nombre}</b><div className="mpn">{i.marca ?? ''}{i.mpn ? ` · ${i.mpn}` : ''}</div></td>
-              <td><input type="number" min={0} max={20} value={i.cantidad} onChange={(e) => actualizar(i.sku, Number(e.target.value))} aria-label={`Cantidad de ${i.nombre}`} /></td>
+              <td><input type="number" min={0} max={20} value={i.cantidad} disabled={estado === 'enviando'} onChange={(e) => actualizar(i.sku, Number(e.target.value))} aria-label={`Cantidad de ${i.nombre}`} /></td>
               <td className="num">{formatCLP(i.cantidad * i.precioTiendaClp)}</td>
             </tr>
           ))}
@@ -113,7 +113,7 @@ export function Checkout() {
         </div>
         {recotizado ? (
           <div className="aviso">
-            Los precios se actualizaron: el total ahora es <b>{formatCLP(recotizado.totalClp)}</b> (antes {formatCLP(total)}).
+            Los precios se actualizaron: el total ahora es <b>{formatCLP(recotizado.totalClp)}</b> (antes {formatCLP(recotizado.totalAnteriorClp)}).
             Aprieta de nuevo para confirmar con el precio vigente.
           </div>
         ) : null}
