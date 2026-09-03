@@ -85,6 +85,18 @@ describe('POST /api/confirmar', () => {
     expect((await POST(req(BODY, '9.9.9.9'))).status).toBe(429);
     expect((await POST(req(BODY, '8.8.8.8'))).status).toBe(200); // otra IP sigue pasando
   });
+  it('un body invalido no gasta cupo: tras 5 intentos invalidos, el sexto (valido) responde 200', async () => {
+    stubKapso();
+    const bodyInvalido = { ...BODY, comprador: { nombre: 'V', telefono: '1', email: 'x' } };
+    for (let i = 0; i < 5; i++) expect((await POST(req(bodyInvalido, '7.7.7.7'))).status).toBe(400);
+    expect((await POST(req(BODY, '7.7.7.7'))).status).toBe(200);
+  });
+  it('generar-cotizacion-v2 responde 500 => 503 y no invoca emitir', async () => {
+    const llamadas = stubKapso({ generarStatus: 500 });
+    const res = await POST(req(BODY));
+    expect(res.status).toBe(503);
+    expect(llamadas).toEqual(['generar']);
+  });
 });
 
 describe('permitir (rate limit)', () => {

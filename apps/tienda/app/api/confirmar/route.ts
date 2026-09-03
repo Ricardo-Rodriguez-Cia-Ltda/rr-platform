@@ -7,13 +7,16 @@ const json = (payload: unknown, status = 200) =>
 
 export async function POST(req: Request): Promise<Response> {
   const ip = (req.headers.get('x-forwarded-for') ?? 'sin-ip').split(',')[0].trim();
-  if (!permitir(ip, Date.now())) {
-    return json({ error: 'Demasiados intentos. Espera unos minutos.' }, 429);
-  }
 
   const body = await req.json().catch(() => null);
   const pedido = validarPedido(body);
   if ('error' in pedido) return json({ error: pedido.error }, 400);
+
+  // El cupo se gasta solo cuando el pedido ya paso validacion y va a
+  // disparar trabajo real contra Kapso: un 400 de validacion no cuesta cupo.
+  if (!permitir(ip, Date.now())) {
+    return json({ error: 'Demasiados intentos. Espera unos minutos.' }, 429);
+  }
 
   // 1) Recotizar en vivo: el precio del carro es indicativo; la verdad la
   // pone generar-cotizacion-v2 (mismo motor que el bot). NUNCA se acepta una
@@ -23,6 +26,9 @@ export async function POST(req: Request): Promise<Response> {
     armarPayloadCotizacion(pedido.items, pedido.comprador.telefono),
   );
   if (cotizacion === null) return json({ error: 'No pudimos procesar tu pedido. Intenta de nuevo.' }, 503);
+  if (cotizacion.status >= 500) {
+    return json({ error: 'No pudimos procesar tu pedido. Intenta de nuevo.' }, 503);
+  }
   const quote = (cotizacion.data as { quote?: { quote_id?: string; total_clp?: number } }).quote;
   if (cotizacion.status !== 200 || !quote?.quote_id) {
     const mensaje = String((cotizacion.data as { mensaje?: string }).mensaje ?? 'Un producto ya no está disponible.');
