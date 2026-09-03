@@ -14,23 +14,38 @@ export function Resumen({ quoteId }: { quoteId: string }) {
     } catch { /* sin detalle igual mostramos la confirmacion */ }
   }, [quoteId]);
 
-  if (!UUID_RE.test(quoteId)) return <p className="vacio">Pedido no encontrado.</p>;
+  if (!UUID_RE.test(quoteId)) {
+    return <div className="vacio">No encontramos ese pedido. <a href="/">Volver a la tienda</a></div>;
+  }
   return (
-    <div className="hero">
-      <h1>¡Pedido recibido!</h1>
-      <p>
-        Gracias por comprar en Dr. Computación.
-        {detalle ? <> Tu total es <b>{formatCLP(detalle.totalClp)}</b> (IVA incluido).</> : null}
-        {' '}Te contactaremos por WhatsApp para coordinar el pago (contado) y la entrega.
+    <div className="recibo">
+      <span className="sello">Pedido recibido</span>
+      <h1>Ya lo tenemos anotado.</h1>
+      {detalle ? (
+        <>
+          <div className="monto">{formatCLP(detalle.totalClp)}</div>
+          <div className="leyenda-iva">IVA incluido</div>
+        </>
+      ) : null}
+      <p style={{ marginTop: 16 }}>
+        Te escribimos por WhatsApp para coordinar el pago (contado) y la entrega.
+        Tu cotización formal queda a tu nombre desde ya.
       </p>
       {/* Honestidad del abastecimiento: alguna linea no salio de stock
           inmediato, asi que el plazo no es el de siempre. */}
       {detalle?.avisoAbastecimiento ? (
-        <div className="aviso">Algún producto de tu pedido viene por encargo; te confirmamos el plazo al contactarte.</div>
+        <div className="aviso" style={{ textAlign: 'left' }}>
+          Algún producto de tu pedido viene por encargo. Te confirmamos el plazo cuando
+          te escribamos.
+        </div>
       ) : null}
-      <p><a className="boton-secundario" href={`${RELAY}/api/cotizacion/${quoteId}`} target="_blank" rel="noreferrer">Descargar cotización formal (PDF)</a></p>
-      <p className="leyenda-iva">Guarda esta página o el PDF como comprobante de tu pedido.</p>
-      <p><a href="/">Volver a la tienda</a></p>
+      <div className="acciones">
+        <a className="boton-secundario" href={`${RELAY}/api/cotizacion/${quoteId}`} target="_blank" rel="noreferrer">
+          Descargar cotización en PDF
+        </a>
+        <a className="boton-secundario" href="/">Seguir buscando</a>
+      </div>
+      <p className="leyenda-iva" style={{ marginTop: 18 }}>Guarda el PDF: es el comprobante de tu pedido.</p>
     </div>
   );
 }

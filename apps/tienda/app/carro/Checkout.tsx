@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { cambiarCantidad, guardarCarro, leerCarro, totalIndicativo, type ItemCarro } from '../../src/lib/carro.js';
+import { leerFicha } from '../../src/lib/ficha.js';
 import { formatCLP } from '../../src/lib/precios.js';
 
 interface DatosGuardados {
@@ -83,63 +84,118 @@ export function Checkout({ iva }: { iva: number }) {
   }
 
   if (items.length === 0) {
-    return <p className="vacio">Tu carro está vacío. <a href="/">Busca algo rico en tecnología</a>.</p>;
+    return (
+      <div className="vacio">
+        Tu carro está vacío. <a href="/">Busca lo que necesitas</a> y agrégalo desde su ficha.
+      </div>
+    );
   }
   const total = totalIndicativo(items, iva);
   const c = datos.comprador;
   const f = datos.facturacion;
   const setC = (campo: string, valor: string) => setDatos({ ...datos, comprador: { ...c, [campo]: valor } });
   const setF = (campo: string, valor: string) => setDatos({ ...datos, facturacion: { ...f, [campo]: valor } });
+  const trabajando = estado === 'enviando' || bloqueado;
 
   return (
     <>
-      <h1>Tu carro</h1>
-      <table className="tabla-carro">
-        <tbody>
-          {items.map((i) => (
-            <tr key={i.sku}>
-              <td><b>{i.nombre}</b><div className="mpn">{i.marca ?? ''}{i.mpn ? ` · ${i.mpn}` : ''}</div></td>
-              <td><input type="number" min={0} max={20} value={i.cantidad} disabled={estado === 'enviando' || bloqueado} onChange={(e) => actualizar(i.sku, Number(e.target.value))} aria-label={`Cantidad de ${i.nombre}`} /></td>
-              {/* Precio UNITARIO con IVA. El total no es la suma de estos:
-                  se arma con los netos y una sola aplicacion de IVA, igual
-                  que la cotizacion del bot. */}
-              <td className="num">{formatCLP(i.precioTiendaClp)} c/u</td>
-            </tr>
-          ))}
-          <tr><td /><td className="num"><b>Total</b></td><td className="num"><b>{formatCLP(total)}</b><div className="leyenda-iva">IVA incluido · se confirma al pedir</div></td></tr>
-        </tbody>
-      </table>
+      <span className="rotulo">Pedido en preparación</span>
+      <h1 style={{ fontSize: 26, margin: '6px 0 20px' }}>Tu carro</h1>
 
-      <h2>Tus datos</h2>
-      <form className="formulario" onSubmit={(e) => { e.preventDefault(); confirmar(recotizado ? recotizado.totalClp : total); }}>
-        <label>Nombre<input value={c.nombre} onChange={(e) => setC('nombre', e.target.value)} required minLength={2} /></label>
-        <label>WhatsApp<input value={c.telefono} onChange={(e) => setC('telefono', e.target.value)} placeholder="+56 9 ..." required /></label>
-        <label>Email<input type="email" value={c.email} onChange={(e) => setC('email', e.target.value)} required /></label>
-        <details open={Object.values(f).some((v) => v !== '')}>
-          <summary>Datos de facturación (opcional — los 7, o déjalo vacío)</summary>
-          <label>RUT<input value={f.rut} onChange={(e) => setF('rut', e.target.value)} /></label>
-          <label>Razón social<input value={f.razonSocial} onChange={(e) => setF('razonSocial', e.target.value)} /></label>
-          <label>Giro<input value={f.giro} onChange={(e) => setF('giro', e.target.value)} /></label>
-          <label>Dirección<input value={f.direccion} onChange={(e) => setF('direccion', e.target.value)} /></label>
-          <label>Comuna<input value={f.comuna} onChange={(e) => setF('comuna', e.target.value)} /></label>
-          <label>Ciudad<input value={f.ciudad} onChange={(e) => setF('ciudad', e.target.value)} /></label>
-          <label>Email factura<input value={f.emailFactura} onChange={(e) => setF('emailFactura', e.target.value)} /></label>
-        </details>
-        <div className="honeypot" aria-hidden="true">
-          <label>Sitio web<input id="sitio_web" tabIndex={-1} autoComplete="off" name="sitio_web" /></label>
-        </div>
-        {recotizado ? (
-          <div className="aviso">
-            Los precios se actualizaron: el total ahora es <b>{formatCLP(recotizado.totalClp)}</b> (antes {formatCLP(recotizado.totalAnteriorClp)}).
-            Aprieta de nuevo para confirmar con el precio vigente.
+      <div className="columnas">
+        <div>
+          <div className="panel">
+            {items.map((i) => (
+              <div className="linea-carro" key={i.sku}>
+                <div className="cuerpo">
+                  <div className="titulo">{leerFicha(i.nombre, i.marca).titulo || i.nombre}</div>
+                  <div className="mpn">
+                    {i.marca ?? ''}
+                    {i.mpn ? ` · ${i.mpn}` : ''}
+                  </div>
+                </div>
+                <div className="cantidad">
+                  {/* Precio UNITARIO con IVA. El total no es la suma de estos:
+                      se arma con los netos y una sola aplicacion de IVA, igual
+                      que la cotizacion del bot. */}
+                  <span className="unitario">{formatCLP(i.precioTiendaClp)} c/u</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={20}
+                    value={i.cantidad}
+                    disabled={trabajando}
+                    onChange={(e) => actualizar(i.sku, Number(e.target.value))}
+                    aria-label={`Cantidad de ${i.nombre}`}
+                  />
+                </div>
+              </div>
+            ))}
+            <div className="total">
+              <div>
+                <div className="rotulo">Total</div>
+                <div className="leyenda-iva">IVA incluido · se confirma al pedir</div>
+              </div>
+              <div className="monto">{formatCLP(total)}</div>
+            </div>
           </div>
-        ) : null}
-        {error ? <div className="aviso error">{error}</div> : null}
-        <button className="boton-compra" type="submit" disabled={estado === 'enviando' || bloqueado}>
-          {estado === 'enviando' ? 'Procesando…' : recotizado ? `Confirmar por ${formatCLP(recotizado.totalClp)}` : 'Confirmar pedido'}
-        </button>
-        <p className="leyenda-iva">Sin pago online todavía: te contactamos por WhatsApp para coordinar pago (contado) y entrega.</p>
-      </form>
+          <p className="nota" style={{ marginTop: 10 }}>
+            Para cambiar la cantidad a cero, escribe 0 y la línea sale del carro.
+          </p>
+        </div>
+
+        <form
+          className="panel formulario"
+          onSubmit={(e) => {
+            e.preventDefault();
+            confirmar(recotizado ? recotizado.totalClp : total);
+          }}
+        >
+          <span className="rotulo">Con quién coordinamos</span>
+          <label>Nombre<input value={c.nombre} onChange={(e) => setC('nombre', e.target.value)} required minLength={2} /></label>
+          <label>WhatsApp<input value={c.telefono} onChange={(e) => setC('telefono', e.target.value)} placeholder="+56 9 ..." required /></label>
+          <label>Email<input type="email" value={c.email} onChange={(e) => setC('email', e.target.value)} required /></label>
+
+          <details open={Object.values(f).some((v) => v !== '')}>
+            <summary>Datos de facturación — opcional</summary>
+            <p className="nota" style={{ marginBottom: 12 }}>
+              Si los dejas ahora, tu factura sale sin que tengamos que pedírtelos después.
+              Van los siete o ninguno.
+            </p>
+            <label>RUT<input value={f.rut} onChange={(e) => setF('rut', e.target.value)} /></label>
+            <label>Razón social<input value={f.razonSocial} onChange={(e) => setF('razonSocial', e.target.value)} /></label>
+            <label>Giro<input value={f.giro} onChange={(e) => setF('giro', e.target.value)} /></label>
+            <label>Dirección<input value={f.direccion} onChange={(e) => setF('direccion', e.target.value)} /></label>
+            <label>Comuna<input value={f.comuna} onChange={(e) => setF('comuna', e.target.value)} /></label>
+            <label>Ciudad<input value={f.ciudad} onChange={(e) => setF('ciudad', e.target.value)} /></label>
+            <label>Email para la factura<input value={f.emailFactura} onChange={(e) => setF('emailFactura', e.target.value)} /></label>
+          </details>
+
+          <div className="honeypot" aria-hidden="true">
+            <label>Sitio web<input id="sitio_web" tabIndex={-1} autoComplete="off" name="sitio_web" /></label>
+          </div>
+
+          {recotizado ? (
+            <div className="aviso">
+              El precio cambió mientras armabas el pedido: ahora son <b>{formatCLP(recotizado.totalClp)}</b>{' '}
+              (eran {formatCLP(recotizado.totalAnteriorClp)}). Confirma de nuevo para tomar el precio vigente.
+            </div>
+          ) : null}
+          {error ? <div className="aviso error">{error}</div> : null}
+
+          <button className="boton-compra grande" type="submit" disabled={trabajando}>
+            {estado === 'enviando'
+              ? 'Consultando precios…'
+              : recotizado
+                ? `Confirmar por ${formatCLP(recotizado.totalClp)}`
+                : 'Confirmar pedido'}
+          </button>
+          <p className="nota">
+            Todavía no cobramos en línea: al confirmar te escribimos por WhatsApp para coordinar
+            el pago (contado) y la entrega.
+          </p>
+        </form>
+      </div>
     </>
   );
 }

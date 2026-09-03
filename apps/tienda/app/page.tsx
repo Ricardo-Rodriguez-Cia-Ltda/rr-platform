@@ -30,26 +30,62 @@ export default async function Home() {
 
   return (
     <>
-      <section className="hero">
-        <h1>El doctor de los computadores</h1>
-        <p>Busca entre miles de productos de tecnología: comparamos el precio de tres mayoristas y te damos el mejor, con respaldo formal.</p>
+      <section className="consola">
+        <span className="rotulo">Diagnóstico de precio · en vivo</span>
+        <h1>Dinos qué necesitas y lo buscamos en tres mayoristas.</h1>
+        <p>
+          No tenemos catálogo propio: cada precio que ves acá se consulta en el momento a
+          Intcomex, Ingram y Tecnoglobal, y te mostramos el mejor de los tres.
+        </p>
         <form className="buscador" action="/buscar" method="get">
-          <input type="search" name="q" placeholder="¿Qué necesitas? Ej: notebook 16GB" required minLength={2} />
+          <input
+            type="search"
+            name="q"
+            placeholder="notebook 16 GB, impresora láser, switch 24 puertos…"
+            aria-label="Buscar productos"
+            required
+            minLength={2}
+          />
           <button type="submit">Buscar</button>
         </form>
+        <div className="medidas">
+          <div>
+            <b>3</b>
+            <span>mayoristas comparados</span>
+          </div>
+          <div>
+            <b>+30</b>
+            <span>años vendiendo tecnología</span>
+          </div>
+          <div>
+            <b>IVA</b>
+            <span>incluido en todo precio</span>
+          </div>
+        </div>
       </section>
+
       {portada && portada.categorias.length > 0 ? (
-        <div className="chips">
-          {portada.categorias.slice(0, 12).map((c) => (
-            <a key={c} href={`/buscar?q=${encodeURIComponent(c)}&categoria=${encodeURIComponent(c)}`}>{c}</a>
-          ))}
+        <section className="seccion">
+          <span className="rotulo">Explorar por categoría</span>
+          <div className="chips" style={{ marginTop: 10 }}>
+            {portada.categorias.slice(0, 12).map((c) => (
+              <a key={c} href={`/buscar?q=${encodeURIComponent(c)}&categoria=${encodeURIComponent(c)}`}>
+                {c}
+              </a>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {!portada ? (
+        <div className="aviso">
+          No pudimos cargar el catálogo en este momento. Tu búsqueda puede funcionar igual;
+          si no, vuelve a intentar en unos minutos.
         </div>
       ) : null}
-      {!portada ? (
-        <div className="aviso">Estamos teniendo problemas para cargar el catálogo. Puedes intentar tu búsqueda igual o reintentar en unos minutos.</div>
-      ) : null}
+
       {destacados.map((grupo) => (
-        <section className="destacados" key={grupo.categoria}>
+        <section className="seccion" key={grupo.categoria}>
           <header>
             <h2>{grupo.categoria}</h2>
             <a href={`/buscar?q=${encodeURIComponent(grupo.categoria)}&categoria=${encodeURIComponent(grupo.categoria)}`}>
