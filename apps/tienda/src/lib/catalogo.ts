@@ -57,16 +57,25 @@ export async function buscarCatalogo(params: {
     parcial: data.parcial === true,
     categorias: facetas.categorias ?? [],
     marcas: facetas.marcas ?? [],
-    productos: (data.productos as Array<Record<string, unknown>>).map((p) => ({
-      sku: String(p.sku ?? ''),
-      mpn: p.mpn == null ? null : String(p.mpn),
-      marca: p.marca == null ? null : String(p.marca),
-      nombre: String(p.nombre ?? ''),
-      categoria: p.categoria == null ? null : String(p.categoria),
-      precioClp: precioTiendaClp(Number(p.precio), precios),
-      precioFmt: formatCLP(precioTiendaClp(Number(p.precio), precios)),
-      disponible: Number(p.stock ?? 0) > 0,
-    })),
+    productos: (data.productos as Array<Record<string, unknown>>)
+      .filter((p) => {
+        const costo = Number(p.precio);
+        return Number.isFinite(costo);
+      })
+      .map((p) => {
+        const costo = Number(p.precio);
+        const precioClp = precioTiendaClp(costo, precios);
+        return {
+          sku: String(p.sku ?? ''),
+          mpn: p.mpn == null ? null : String(p.mpn),
+          marca: p.marca == null ? null : String(p.marca),
+          nombre: String(p.nombre ?? ''),
+          categoria: p.categoria == null ? null : String(p.categoria),
+          precioClp,
+          precioFmt: formatCLP(precioClp),
+          disponible: Number(p.stock ?? 0) > 0,
+        };
+      }),
   };
 }
 

@@ -55,6 +55,22 @@ describe('buscarCatalogo', () => {
     vi.unstubAllEnvs();
     expect(await buscarCatalogo({ q: 'x' })).toBeNull();
   });
+  it('descarta productos sin precio numerico; resultado sin NaN', async () => {
+    conEnv();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      total: 40, evaluados: 12,
+      productos: [
+        { sku: 'INT-1', mpn: 'X-100', nombre: 'Notebook Pro', marca: 'HP', categoria: 'Computadores', precio: 100, moneda: 'USD', stock: 5 },
+        { sku: 'INT-2', mpn: null, nombre: 'Mouse Broken', marca: 'Logitech', categoria: 'Accesorios', precio: undefined, moneda: 'USD', stock: 0 },
+      ],
+      facetas: { categorias: ['Computadores', 'Accesorios'], marcas: ['HP', 'Logitech'], precio: { min: 2, max: 100 } },
+    }), { status: 200 })));
+    const r = await buscarCatalogo({ q: 'test' });
+    expect(r?.productos).toHaveLength(1);
+    expect(r?.productos[0].sku).toBe('INT-1');
+    const json = JSON.stringify(r);
+    expect(json).not.toContain('NaN');
+  });
 });
 
 describe('cargarPortada', () => {
