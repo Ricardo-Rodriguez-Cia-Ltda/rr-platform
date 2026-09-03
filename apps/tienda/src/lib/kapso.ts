@@ -11,9 +11,11 @@ export function _limpiarCacheKapso(): void {
   cacheIds.clear();
 }
 
-async function idPorNombre(nombre: string, key: string): Promise<string | null> {
-  const cacheado = cacheIds.get(nombre);
-  if (cacheado) return cacheado;
+async function idPorNombre(nombre: string, key: string, forzar: boolean = false): Promise<string | null> {
+  if (!forzar) {
+    const cacheado = cacheIds.get(nombre);
+    if (cacheado) return cacheado;
+  }
   try {
     const r = await fetch(`${BASE}/functions`, {
       headers: { 'X-API-Key': key },
@@ -34,7 +36,7 @@ export async function invocarFunction(
 ): Promise<{ status: number; data: Record<string, unknown> } | null> {
   const key = process.env.KAPSO_API_KEY;
   if (!key) return null;
-  const id = await idPorNombre(nombre, key);
+  let id = await idPorNombre(nombre, key);
   if (!id) return null;
   try {
     const r = await fetch(`${BASE}/functions/${id}/invoke`, {
@@ -44,6 +46,23 @@ export async function invocarFunction(
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     const data = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+
+    // Si es 404, el id puede ser obsoleto: borra cache, re-resuelve y reintenta una sola vez
+    if (r.status === 404) {
+      cacheIds.delete(nombre);
+      const nuevoId = await idPorNombre(nombre, key, true);
+      if (nuevoId) {
+        const r2 = await fetch(`${BASE}/functions/${nuevoId}/invoke`, {
+          method: 'POST',
+          headers: { 'X-API-Key': key, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+        });
+        const data2 = (await r2.json().catch(() => ({}))) as Record<string, unknown>;
+        return { status: r2.status, data: data2 };
+      }
+    }
+
     return { status: r.status, data };
   } catch {
     return null;

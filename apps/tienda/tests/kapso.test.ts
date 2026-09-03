@@ -42,4 +42,41 @@ describe('invocarFunction', () => {
     vi.unstubAllEnvs();
     expect(await invocarFunction('generar-cotizacion-v2', {})).toBeNull();
   });
+  it('404 en invoke => borra cache, re-resuelve id, reintenta una sola vez y devuelve 200', async () => {
+    let callCount = 0;
+    const spy = vi.fn(async (url: any) => {
+      callCount++;
+      if (String(url).endsWith('/functions')) {
+        // Primer listado devuelve id viejo, segundo devuelve id nuevo
+        return new Response(JSON.stringify(callCount === 1
+          ? { data: [{ id: 'id-generar-viejo', name: 'generar-cotizacion-v2' }] }
+          : { data: [{ id: 'id-generar-nuevo', name: 'generar-cotizacion-v2' }] }
+        ), { status: 200 });
+      }
+      // Primer invoke (con id viejo) => 404
+      if (callCount === 2) return new Response(JSON.stringify({ error: 'not found' }), { status: 404 });
+      // Segundo invoke (con id nuevo) => 200
+      return new Response(JSON.stringify({ estado: 'ok' }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', spy);
+    const r = await invocarFunction('generar-cotizacion-v2', { test: 'data' });
+    expect(r?.status).toBe(200);
+    // 1 listado inicial + 1 invoke 404 + 1 listado re-resuelve + 1 invoke retry = 4 fetches
+    expect(spy).toHaveBeenCalledTimes(4);
+  });
+  it('404 siempre => devuelve status 404 sin bucle infinito', async () => {
+    let callCount = 0;
+    const spy = vi.fn(async (url: any) => {
+      callCount++;
+      if (String(url).endsWith('/functions')) {
+        return new Response(JSON.stringify(FUNCTIONS), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: 'not found' }), { status: 404 });
+    });
+    vi.stubGlobal('fetch', spy);
+    const r = await invocarFunction('generar-cotizacion-v2', {});
+    expect(r?.status).toBe(404);
+    // 1 listado + 1 invoke 404 + 1 listado re-resuelve + 1 invoke retry 404 = 4 fetches, NO más
+    expect(spy).toHaveBeenCalledTimes(4);
+  });
 });
