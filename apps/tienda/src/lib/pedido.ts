@@ -30,6 +30,7 @@ export function validarPedido(body: unknown):
   if (crudos.length > MAX_LINEAS) return { error: `Máximo ${MAX_LINEAS} productos distintos.` };
   const items: ItemCarro[] = [];
   for (const crudo of crudos as Array<Record<string, unknown>>) {
+    if (!crudo || typeof crudo !== 'object') return { error: 'Una línea del carro no es válida.' };
     const cantidad = Number(crudo.cantidad);
     const sku = String(crudo.sku ?? '').trim();
     if (!sku) return { error: 'Una línea del carro no es válida.' };

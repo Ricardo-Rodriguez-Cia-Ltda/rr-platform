@@ -41,6 +41,13 @@ describe('validarPedido', () => {
     expect(validarPedido({ ...BASE, items: [{ ...ITEM, cantidad: 21 }] })).toHaveProperty('error');
     expect(validarPedido({ ...BASE, items: [{ ...ITEM, sku: '' }] })).toHaveProperty('error');
   });
+  it.each([
+    ['null', null],
+    ['string', 'texto'],
+    ['undefined', undefined],
+  ])('rechaza linea que no es objeto: %s', (_tipo, valor) => {
+    expect(validarPedido({ ...BASE, items: [valor] })).toHaveProperty('error');
+  });
 });
 
 describe('payloads', () => {
