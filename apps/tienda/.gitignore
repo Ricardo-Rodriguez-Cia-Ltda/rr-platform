@@ -1,6 +1,4 @@
 .next/
 .vercel
 *.tsbuildinfo
-
-.vercel
 .env*
