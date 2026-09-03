@@ -26,4 +26,13 @@ describe('carro', () => {
     expect(totalIndicativo(items)).toBe(2500);
     expect(contarUnidades(items)).toBe(3);
   });
+  it('agregar valida cantidad en linea nueva', () => {
+    expect(agregar([], item('A', 25))).toHaveProperty('error');
+    expect(agregar([], item('A', 0))).toHaveProperty('error');
+    expect(agregar([], item('A', NaN))).toHaveProperty('error');
+  });
+  it('cambiarCantidad con NaN devuelve items intactos', () => {
+    const items = [item('A', 5)];
+    expect(cambiarCantidad(items, 'A', NaN)).toEqual(items);
+  });
 });
