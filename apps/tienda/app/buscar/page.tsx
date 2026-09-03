@@ -2,6 +2,7 @@ import { buscarCatalogo } from '../../src/lib/catalogo.js';
 import { TarjetaProducto } from '../componentes/TarjetaProducto.js';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 30; // la busqueda cotiza en vivo contra la oficina
 
 export default async function Buscar({ searchParams }: {
   searchParams: Promise<{ q?: string; categoria?: string; marca?: string }>;

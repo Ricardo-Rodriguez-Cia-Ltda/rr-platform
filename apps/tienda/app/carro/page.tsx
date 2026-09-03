@@ -3,6 +3,7 @@ import { cfgPrecios } from '../../src/lib/precios.js';
 import { Checkout } from './Checkout.js';
 
 export const metadata: Metadata = { title: 'Tu carro — Dr. Computación', robots: { index: false } };
+export const maxDuration = 30;
 // El IVA se lee en el servidor en cada request: IVA_RATE es una env var
 // server-side y el total del carro tiene que calcularse con la MISMA tasa que
 // usa generar-cotizacion-v2.

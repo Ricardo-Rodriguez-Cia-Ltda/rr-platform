@@ -2,6 +2,12 @@ import { invocarFunction } from '../../../src/lib/kapso.js';
 import { armarPayloadCotizacion, armarPayloadEmision, validarPedido } from '../../../src/lib/pedido.js';
 import { permitir } from '../../../src/lib/rate-limit.js';
 
+// Esta ruta invoca DOS functions de Kapso (cotizar en vivo y emitir), cada una
+// con 30s de timeout propio: el techo de la plataforma tiene que dar para eso.
+// Va como segment config de Next y no en vercel.json — en App Router las
+// functions las emite el framework, y un glob que no calza rompe el build.
+export const maxDuration = 30;
+
 const json = (payload: unknown, status = 200) =>
   new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } });
 

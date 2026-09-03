@@ -50,7 +50,9 @@ export function cambiarCantidad(items: ItemCarro[], sku: string, cantidad: numbe
  * hace que el POST /api/confirmar responda 409 recotizado en cada pedido.
  */
 export function totalIndicativo(items: ItemCarro[], iva: number): number {
-  const neto = items.reduce((s, i) => s + i.cantidad * i.precioNetoClp, 0);
+  // `Number(...) || 0`: un carro guardado en localStorage antes de que
+  // ItemCarro tuviera `precioNetoClp` daria NaN y la pagina mostraria "$NaN".
+  const neto = items.reduce((s, i) => s + i.cantidad * (Number(i.precioNetoClp) || 0), 0);
   return neto + Math.round(neto * iva);
 }
 

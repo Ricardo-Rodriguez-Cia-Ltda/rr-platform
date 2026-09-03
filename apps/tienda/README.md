@@ -16,9 +16,11 @@ Spec: `docs/superpowers/specs/2026-09-03-tienda-dr-computacion-design.md`.
 | `IVA_RATE` | `0.19` |
 | `NEXT_PUBLIC_RAYO_WA` | teléfono del bot para wa.me (solo dígitos) — **requerida**: sin ella el botón de WhatsApp no se muestra y el cliente queda sin ninguna vía de contacto (la tienda no cobra online) |
 
-Todas son requeridas. `vercel.json` fija `maxDuration: 30` en las rutas
-(`/api/confirmar` invoca dos functions de Kapso en vivo, y la búsqueda espera
-hasta 21s a la pricing-api: con el default de la plataforma se cortarían).
+Todas son requeridas. El techo de ejecución se fija con `export const
+maxDuration = 30` en cada entrypoint (`/api/confirmar` invoca dos functions de
+Kapso en vivo y la búsqueda espera hasta 21s a la pricing-api). Va como segment
+config de Next, no en `vercel.json`: en App Router las functions las emite el
+framework, y un glob que no calza ninguna hace fallar el build.
 
 ## Deploy
 

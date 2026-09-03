@@ -1,6 +1,7 @@
 import { cargarPortada } from '../src/lib/catalogo.js';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 30; // las facetas salen del catalogo de la oficina
 
 export default async function Home() {
   const portada = await cargarPortada();
