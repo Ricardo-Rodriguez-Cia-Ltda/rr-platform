@@ -69,3 +69,10 @@ a { color: var(--verde); }
 
 a:focus-visible, button:focus-visible { outline: 2px solid var(--ambar-vivo); outline-offset: 2px; }
 @media (max-width: 600px) { .hero h1 { font-size: 27px; } main { padding: 14px 12px 40px; } }
+
+/* ---- destacados de la portada ---- */
+.destacados { margin: 30px 0; }
+.destacados header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--borde); }
+.destacados h2 { font-size: 19px; }
+.destacados header a { font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.destacados header a:hover { text-decoration: underline; }
