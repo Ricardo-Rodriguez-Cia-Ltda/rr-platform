@@ -12,5 +12,5 @@
     "types": ["node"]
   },
   "include": ["apps/**/*.ts", "packages/**/*.ts", "tests/**/*.ts", "infra/**/*.ts"],
-  "exclude": ["**/dist", "node_modules", "apps/backoffice"]
+  "exclude": ["**/dist", "node_modules", "apps/backoffice", "apps/tienda"]
 }
