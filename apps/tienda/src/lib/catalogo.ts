@@ -66,12 +66,18 @@ async function apiGet(path: string): Promise<{ status: number; data: Record<stri
 
 export async function buscarCatalogo(params: {
   q: string; categoria?: string; marca?: string; precioMaxClp?: number; limite?: number;
+  soloConStock?: boolean;
 }): Promise<ResultadoBusqueda | null> {
   const precios = cfgPrecios();
   if (!precios) return null;
   const query = new URLSearchParams({ q: params.q, limite: String(params.limite ?? 24) });
   if (params.categoria) query.set('categoria', params.categoria);
   if (params.marca) query.set('marca', params.marca);
+  // El filtro lo aplica la API, que busca mas abajo en el ranking cuando hay
+  // filtros: en el catalogo real apenas ~27% de los productos tiene stock, asi
+  // que pedir los primeros por relevancia y filtrar aca devuelve casi siempre
+  // cero disponibles.
+  if (params.soloConStock) query.set('solo_con_stock', 'true');
   if (params.precioMaxClp) query.set('precio_max', costoMaxUsd(params.precioMaxClp, precios).toFixed(4));
 
   const res = await apiGet(`/search?${query.toString()}`);
@@ -154,7 +160,7 @@ export async function cargarDestacados(categorias: string[], porCategoria = 2): 
     categorias.map(async (categoria): Promise<GrupoDestacado> => {
       // `q` es obligatorio en la API; el propio nombre de la categoria sirve
       // de termino y ademas ordena por relevancia dentro de ella.
-      const r = await buscarCatalogo({ q: categoria, categoria, limite: porCategoria * 4 })
+      const r = await buscarCatalogo({ q: categoria, categoria, soloConStock: true, limite: porCategoria * 2 })
         .catch(() => null);
       const productos = (r?.productos ?? []).filter((p) => p.disponible).slice(0, porCategoria);
       return { categoria, productos };

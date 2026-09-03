@@ -221,3 +221,36 @@ describe('cargarDestacados', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+describe('solo_con_stock', () => {
+  // En el catalogo real apenas ~27% de los productos tiene stock, y la
+  // busqueda ordena por relevancia: pedir 8 y filtrar despues devolvia CERO
+  // disponibles y dejaba la portada sin destacados. El filtro tiene que
+  // aplicarlo la API (apps/pricing-api/src/handlers/search.ts:109).
+  it('buscarCatalogo manda solo_con_stock=true cuando se le pide', async () => {
+    conEnv();
+    const spy = vi.fn(async () => new Response(JSON.stringify(RESPUESTA), { status: 200 }));
+    vi.stubGlobal('fetch', spy);
+    await buscarCatalogo({ q: 'monitor', soloConStock: true });
+    expect(String((spy.mock.calls[0] as unknown as [string])[0])).toContain('solo_con_stock=true');
+  });
+
+  it('sin pedirlo, el parametro no viaja', async () => {
+    conEnv();
+    const spy = vi.fn(async () => new Response(JSON.stringify(RESPUESTA), { status: 200 }));
+    vi.stubGlobal('fetch', spy);
+    await buscarCatalogo({ q: 'monitor' });
+    expect(String((spy.mock.calls[0] as unknown as [string])[0])).not.toContain('solo_con_stock');
+  });
+
+  it('cargarDestacados siempre lo pide (o la portada sale vacia)', async () => {
+    conEnv();
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: any) => {
+      urls.push(String(url));
+      return new Response(JSON.stringify(RESPUESTA), { status: 200 });
+    }));
+    await cargarDestacados(['Monitores'], 2);
+    expect(urls[0]).toContain('solo_con_stock=true');
+  });
+});

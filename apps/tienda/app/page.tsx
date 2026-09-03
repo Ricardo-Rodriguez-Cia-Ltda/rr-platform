@@ -7,15 +7,21 @@ export const maxDuration = 30; // las facetas salen del catalogo de la oficina
 // Los destacados son vitrina, no el corazon de la pagina: si la oficina se
 // demora mas que esto, la portada sale sin ellos en vez de hacer esperar al
 // visitante frente a una pantalla en blanco. El buscador es lo esencial.
-const PRESUPUESTO_DESTACADOS_MS = 8000;
-const CATEGORIAS_DESTACADAS = 3;
+// Medido contra la API real: entre 0,3s y 7s por categoria, en paralelo.
+const PRESUPUESTO_DESTACADOS_MS = 12000;
+// Se consultan mas categorias de las que se muestran: varias de las mas
+// pobladas del catalogo no tienen NADA con stock inmediato (Computadores, por
+// ejemplo), y esas se omiten. Pidiendo de a 6 quedan tres secciones llenas.
+const CATEGORIAS_CONSULTADAS = 6;
+const SECCIONES_VISIBLES = 3;
 
 async function destacadosConPresupuesto(categorias: string[]): Promise<GrupoDestacado[]> {
-  const aTiempo = cargarDestacados(categorias.slice(0, CATEGORIAS_DESTACADAS)).catch(() => []);
+  const aTiempo = cargarDestacados(categorias.slice(0, CATEGORIAS_CONSULTADAS)).catch(() => []);
   const seAcaboElTiempo = new Promise<GrupoDestacado[]>((resolve) => {
     setTimeout(() => resolve([]), PRESUPUESTO_DESTACADOS_MS);
   });
-  return Promise.race([aTiempo, seAcaboElTiempo]);
+  const grupos = await Promise.race([aTiempo, seAcaboElTiempo]);
+  return grupos.slice(0, SECCIONES_VISIBLES);
 }
 
 export default async function Home() {
