@@ -24,7 +24,7 @@ export default async function Buscar({ searchParams }: {
   const encabezado = (
     <header className="seccion" style={{ marginTop: 0 }}>
       <span className="rotulo">Búsqueda · precio consultado ahora</span>
-      <h1 style={{ fontSize: 26, marginTop: 6 }}>{q}</h1>
+      <h1 style={{ fontSize: 30, marginTop: 8 }}>{q}</h1>
     </header>
   );
 
@@ -95,11 +95,17 @@ export default async function Buscar({ searchParams }: {
       ) : null}
       {r.productos.length === 0 ? (
         <div className="vacio">
-          Ninguno de los productos que calzan tiene precio vigente ahora.
-          Prueba con otras palabras o <a href="/">vuelve a la portada</a>.
+          <h2>Sin precio vigente para esa búsqueda.</h2>
+          <p style={{ maxWidth: '40ch', margin: '0 auto' }}>
+            Encontramos productos que calzan, pero ninguno tiene precio confirmado ahora mismo.
+            Prueba con otras palabras, o escríbele al Rayo por WhatsApp y lo cotizamos a mano.
+          </p>
+          <p style={{ marginTop: 20 }}>
+            <a className="enlace-texto" href="/">Volver a la portada</a>
+          </p>
         </div>
       ) : (
-        <div className="grilla">
+        <div className="grilla destacada">
           {r.productos.map((p) => (
             <TarjetaProducto key={p.sku} producto={p} />
           ))}

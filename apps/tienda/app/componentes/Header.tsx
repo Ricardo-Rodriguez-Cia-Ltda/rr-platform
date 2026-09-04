@@ -17,12 +17,17 @@ export function Header() {
 
   return (
     <header className="cabecera">
-      <a href="/" className="marca">
-        <span className="sigla">Dr</span> Computación
-      </a>
-      <a href="/carro" className="link-carro">
-        Carro{unidades > 0 ? <span className="conteo">{unidades}</span> : null}
-      </a>
+      <div className="interior">
+        <a href="/" className="marca">
+          <span className="sigla">Dr</span> Computación
+        </a>
+        <a href="/carro" className="link-carro">
+          Carro
+          {unidades > 0 ? (
+            <span className="conteo" aria-label={`${unidades} unidades en el carro`}>{unidades}</span>
+          ) : null}
+        </a>
+      </div>
     </header>
   );
 }

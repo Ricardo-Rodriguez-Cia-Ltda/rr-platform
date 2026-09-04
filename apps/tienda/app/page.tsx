@@ -30,44 +30,47 @@ export default async function Home() {
 
   return (
     <>
-      <section className="consola">
-        <span className="rotulo">Diagnóstico de precio · en vivo</span>
-        <h1>Dinos qué necesitas y lo buscamos en tres mayoristas.</h1>
-        <p>
-          No tenemos catálogo propio: cada precio que ves acá se consulta en el momento a
-          Intcomex, Ingram y Tecnoglobal, y te mostramos el mejor de los tres.
-        </p>
-        <form className="buscador" action="/buscar" method="get">
-          <input
-            type="search"
-            name="q"
-            placeholder="notebook 16 GB, impresora láser, switch 24 puertos…"
-            aria-label="Buscar productos"
-            required
-            minLength={2}
-          />
-          <button type="submit">Buscar</button>
-        </form>
-        <div className="medidas">
-          <div>
-            <b>3</b>
-            <span>mayoristas comparados</span>
-          </div>
-          <div>
-            <b>+30</b>
-            <span>años vendiendo tecnología</span>
-          </div>
-          <div>
-            <b>IVA</b>
-            <span>incluido en todo precio</span>
-          </div>
+      <section className="portada">
+        <div>
+          <span className="rotulo">Precio consultado en el momento</span>
+          <h1>Te lo buscamos en tres mayoristas.</h1>
+          <p className="bajada">
+            No tenemos bodega ni lista de precios vieja. Cuando buscas algo acá, preguntamos
+            en el momento a Intcomex, Ingram y Tecnoglobal, y te mostramos el mejor de los tres
+            con su stock real.
+          </p>
+          <form className="buscador" action="/buscar" method="get" role="search">
+            <input
+              type="search"
+              name="q"
+              placeholder="notebook 16 GB, tóner HP, switch 24 puertos…"
+              aria-label="Qué producto necesitas"
+              required
+              minLength={2}
+            />
+            <button type="submit">Buscar</button>
+          </form>
         </div>
+        <dl className="como">
+          <div>
+            <dt>3</dt>
+            <dd>mayoristas consultados en cada búsqueda</dd>
+          </div>
+          <div>
+            <dt>30+</dt>
+            <dd>años de Ricardo Rodríguez y Cía. en Chile</dd>
+          </div>
+          <div>
+            <dt>IVA</dt>
+            <dd>incluido en todos los precios que ves</dd>
+          </div>
+        </dl>
       </section>
 
       {portada && portada.categorias.length > 0 ? (
-        <section className="seccion">
-          <span className="rotulo">Explorar por categoría</span>
-          <div className="chips" style={{ marginTop: 10 }}>
+        <section className="seccion" aria-labelledby="cat">
+          <span className="rotulo" id="cat">Explora por categoría</span>
+          <div className="chips" style={{ marginTop: 12 }}>
             {portada.categorias.slice(0, 12).map((c) => (
               <a key={c} href={`/buscar?q=${encodeURIComponent(c)}&categoria=${encodeURIComponent(c)}`}>
                 {c}
@@ -89,10 +92,10 @@ export default async function Home() {
           <header>
             <h2>{grupo.categoria}</h2>
             <a href={`/buscar?q=${encodeURIComponent(grupo.categoria)}&categoria=${encodeURIComponent(grupo.categoria)}`}>
-              Ver todo →
+              Ver todo en {grupo.categoria.toLowerCase()} →
             </a>
           </header>
-          <div className="grilla">
+          <div className="grilla destacada">
             {grupo.productos.map((p) => (
               <TarjetaProducto key={p.sku} producto={p} />
             ))}
