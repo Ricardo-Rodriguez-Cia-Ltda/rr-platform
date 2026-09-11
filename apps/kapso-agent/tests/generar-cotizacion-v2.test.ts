@@ -303,6 +303,23 @@ describe('generar-cotizacion-v2: persistencia', () => {
     expect(data.persistencia).toBe('ok');
   });
 
+  it('persiste proveedores_incompletos en la fila de cotizaciones', async () => {
+    const cuerpos: any[] = [];
+    routeFetch({
+      supabase: (url, init) => {
+        if (url.includes('/cotizaciones')) cuerpos.push(JSON.parse(String(init?.body)));
+        return url.includes('/clientes') ? [] : {};
+      },
+    });
+    await handler(request({ execution_context: { vars: CART_VARS, ...CTX } }), ENV_SB);
+    expect(cuerpos).toHaveLength(1);
+    // La clave tiene que existir aunque no falte ningun proveedor: una columna
+    // que a veces no se escribe deja filas viejas indistinguibles de "no se
+    // supo", y el aviso del correo de la orden depende de esa diferencia.
+    expect(cuerpos[0]).toHaveProperty('proveedores_incompletos');
+    expect(Array.isArray(cuerpos[0].proveedores_incompletos)).toBe(true);
+  });
+
   it('sin fila en Supabase, cliente_guardado es null', async () => {
     routeFetch({ supabase: (url) => (url.includes('/clientes') ? [] : {}) });
     const res = await handler(request({ execution_context: { vars: CART_VARS, ...CTX } }), ENV_SB);

@@ -227,7 +227,8 @@ async function handler(request, env) {
         iva_clp: quote.iva_clp,
         total_clp: quote.total_clp,
         valida_hasta: quote.valid_until,
-        lineas: quote.lineas
+        lineas: quote.lineas,
+        proveedores_incompletos: quote.proveedores_incompletos
       }, "resolution=merge-duplicates,return=representation"),
       telefono
         ? supabase(env, "GET", `/clientes?telefono=eq.${telefono}&select=rut,razon_social,giro,direccion,comuna,ciudad,email&limit=1`)

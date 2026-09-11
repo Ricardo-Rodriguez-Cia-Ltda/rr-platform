@@ -1,4 +1,4 @@
-# `apps/mailer` — el relé de correo propio
+# `apps/mailer` — el relé
 
 Un endpoint HTTP, `POST /api/send`, que manda correo por el SMTP de Gmail.
 Reemplaza a Resend: Resend cobraba por un plan que no se quería, y hoy es
@@ -15,8 +15,9 @@ autenticado, decide si puede mandarlo, y lo manda. Toda la lógica de negocio
 (agrupar por mayorista, la reserva idempotente, qué hacer si falla) vive en
 quien lo llama, no acá.
 
-Esta app tiene un segundo endpoint, `GET /api/cotizacion/<quote_id>`, que sí
-conoce las cotizaciones: lee la fila en Supabase y devuelve el PDF. Ver la
+Además de `POST /api/send`, esta app expone `GET /api/cotizacion/<quote_id>`
+— que sí conoce las cotizaciones, lee la fila en Supabase y devuelve el PDF
+— y las rutas de cobro con Mercado Pago bajo `/api/pago/`. Cada una tiene su
 sección dedicada más abajo.
 
 ## Arquitectura
@@ -35,6 +36,72 @@ packages/mailer  ──SMTP──►  smtp.gmail.com  ──►  casilla interna
 verdad habla SMTP; esta app solo valida la petición HTTP y decide si la
 deja pasar. El diseño completo está en
 `docs/superpowers/specs/2026-08-27-mailer-fase-1-design.md`.
+
+## Cobro con Mercado Pago
+
+Desde el 2026-09-10 el relé también cobra: el workflow del Rayo le pide el
+link de pago y Mercado Pago le avisa cuando el pago se acredita. El diseño
+está en `docs/superpowers/specs/2026-09-10-pagos-mercado-pago-design.md`.
+
+| Ruta | Qué hace |
+|---|---|
+| `POST /api/pago/crear` | Autenticada con `x-api-key` **y** con `quote_confirmed` en el cuerpo. Crea la preferencia, guarda la fila `pagos` y manda el link por WhatsApp |
+| `POST /api/pago/webhook` | Pública, autenticada por la firma HMAC de Mercado Pago. Emite las órdenes de compra cuando el pago queda aprobado |
+| `GET /api/pago/retorno` | La página a la que Mercado Pago devuelve al cliente |
+
+Variables nuevas en el proyecto `rr-mailing`:
+
+| Variable | Qué es |
+|---|---|
+| `MP_ACCESS_TOKEN` | Access token de la aplicación de Mercado Pago. Cargar como **Sensitive** |
+| `MP_WEBHOOK_SECRET` | Clave secreta de la notificación, del panel de Mercado Pago. **Sensitive** |
+| `PAGO_BASE_URL` | `https://rr-mailing.vercel.app` |
+| `KAPSO_API_KEY` | La misma clave de la Platform API que usan los scripts de `apps/kapso-agent` |
+
+En el panel de Mercado Pago hay que apuntar la notificación de tipo `payment`
+a `<PAGO_BASE_URL>/api/pago/webhook`.
+
+**`quote_confirmed` es obligatorio en `/api/pago/crear`, y no es un detalle de
+validación.** La arista `agente_cierre -> fn_crear_pago` del grafo es
+incondicional: el agente decide que el cliente dijo que sí y llama
+`complete_task`, y el nodo dispara igual. Hasta que el cobro entró en medio, el
+único chequeo determinista de ese consentimiento vivía en
+`apps/kapso-agent/functions/emitir-ordenes-compra.js`, que rechaza con 400
+cualquier invocación sin esa variable. Al cambiar el destino del nodo, ese
+chequeo salió del camino. Ahora lo hace este endpoint, con el **mismo** criterio
+permisivo que la function: vale el booleano `true` o la cadena `"true"` sin
+distinguir mayúsculas, porque lo escribe un LLM con `save_variable` y puede
+llegar de las dos formas. Cualquier otra cosa responde `400 sin_confirmacion`
+sin crear preferencia, sin persistir fila y sin mandarle nada al cliente. Si los
+dos criterios se separan, uno de los dos deja de proteger.
+
+**El webhook también alerta cuando no llega a procesar nada.** Un 401 por firma
+inválida o un 500 por configuración incompleta antes escribían solo al log. Si
+`MP_WEBHOOK_SECRET` se carga mal, *todos* los pagos fallan con 401, Mercado Pago
+reintenta unas veces y se rinde, y el cliente se queda esperando la
+confirmación que se le prometió: es el modo de fallo más probable del primer día
+y el más silencioso. Ahora avisa por correo, con dos cuidados. La alerta nunca
+lleva la firma, el secreto, el cuerpo del webhook ni el id del pago — solo
+etapa, tipo de fallo y qué revisar. Y como el endpoint es público, esas dos
+alertas pasan por una ventana en memoria del proceso de **10 minutos**: alguien
+que sepa la URL puede disparar 401 en bucle, y una alerta por request
+convertiría la única alarma del sistema en el blanco. La ventana es
+best-effort (cada instancia serverless tiene la suya) y solo aplica a estos dos
+caminos: las alertas que hablan de plata recibida nunca se suprimen.
+
+El aviso interno ("recibimos plata y no pudimos emitir la orden") sale al
+primer valor de `MAILER_ALLOWED_RECIPIENTS` — la misma lista blanca del
+endpoint de correo, documentada en "Variables de entorno" y en "La lista
+blanca de destinatarios es deliberada" más abajo. Hoy funciona porque esa
+lista tiene una sola dirección; si alguien le agrega una segunda por
+cualquier otro motivo, este aviso empieza a salir hacia lo que quede
+primero en la lista, no necesariamente hacia quien debe verlo.
+
+**Por qué el cobro vive acá y no en una app propia:** el relé ya autentica
+llamadas de Kapso, ya lee Supabase y ya manda correo en proceso — las tres
+cosas que el cobro necesita. Un quinto proyecto de Vercel para dos endpoints
+habría que linkearlo, configurarlo y desplegarlo aparte, y el aviso interno
+tendría que salir por HTTP contra este mismo relé.
 
 ## Variables de entorno
 
@@ -108,10 +175,45 @@ igual que `apps/pricing-api` — porque importa código de `packages/mailer` y
 ### `vercel.json`: por qué tiene `installCommand`, `buildCommand` y `outputDirectory`
 
 Cita parcial — solo las tres claves que explica esta sección. El archivo
-real (`apps/mailer/vercel.json`) tiene además un bloque `functions` que le
-pone `maxDuration: 30` a `api/**/*.ts`; es lo único que acota un envío SMTP
-colgado (sin eso, una conexión a `smtp.gmail.com` que nunca responde dejaría
-la función corriendo hasta el límite por defecto de Vercel).
+real (`apps/mailer/vercel.json`) tiene además un bloque `functions` con dos
+entradas: `api/pago/*.ts` con `maxDuration: 300` y `api/**/*.ts` con
+`maxDuration: 30`. La segunda es lo único que acota un envío SMTP colgado (sin
+eso, una conexión a `smtp.gmail.com` que nunca responde dejaría la función
+corriendo hasta el límite por defecto de Vercel). La primera existe por otra
+razón, y **el orden importa**: Vercel resuelve el primer patrón que calza, así
+que la entrada específica tiene que ir antes del glob general.
+
+**Por qué las rutas de pago necesitan 300 y no 30.** En `/api/pago/webhook`,
+entre que la fila se reclama como `aprobado` y que se marca `emitido` o
+`aprobado_sin_emitir` hay cuatro llamadas de red y la emisión entera — que
+genera un PDF y manda un correo por mayorista, en serie, en un Worker aparte.
+Si el proceso se muere ahí, la fila queda en `aprobado` para siempre: Mercado
+Pago reintenta, la reentrega no vuelve a pasar la transición condicional, y lo
+más probable es que las órdenes de compra sí hayan salido. Con un techo de 30s
+eso no era hipotético; el presupuesto de timeouts del handler suma mucho más:
+
+| Paso | Timeout |
+|---|---|
+| `consultarPago` (`mercadopago.ts`) | 10s |
+| `leerPago` (`datos.ts`) | 8s |
+| `reclamarAprobado` | 8s |
+| `leerCotizacion` | 8s |
+| `invocarFunction`: listado + invoke (`kapso.ts`) | 60s |
+| …más el re-listado e invoke del reintento por 404 obsoleto | 60s |
+| `marcarEstado` | 8s |
+| `marcarPedidosPagados` | 8s |
+| `enviarTexto` | 5s |
+| **Peor caso** | **175s** |
+
+300 cubre ese peor caso con margen y es el máximo documentado de Vercel fuera
+de fluid compute. No se elige más bajo porque un techo por debajo del
+presupuesto es exactamente el bug que esto arregla, ni más alto porque después
+de esos 175s ya no queda nada que esperar. `tests/pago-webhook.test.ts` lo
+verifica contra el archivo real.
+
+**Ojo al desplegar:** `maxDuration: 300` exige plan Pro. En Hobby el techo es
+60 y el despliegue lo rechaza. El webhook también sigue respondiendo cuando el
+handler termina, no a los 300s: el techo es un límite, no una espera.
 
 ```json
 {
@@ -140,7 +242,8 @@ tocar cualquiera sin entender las otras dos rompe el despliegue:
    vacío. `salida-vacia` es un directorio generado en cada build (nunca
    parte del árbol de `apps/mailer`) con un único `index.html` de una línea,
    solo para satisfacer ese requisito — esta app no sirve nada estático,
-   solo las dos funciones en `api/` (`send.ts` y `cotizacion/[id].ts`).
+   solo las funciones en `api/` (`send.ts`, `cotizacion/[id].ts` y las de
+   `pago/`).
 
 **Esto es deliberado. No lo "arregles" quitando `buildCommand` o apuntando
 `outputDirectory` a otra cosa** — sin los tres juntos, o vuelve el install
@@ -201,6 +304,12 @@ Hoy la lista tiene una sola dirección: la casilla interna. Cuando llegue la
 fase 2 (cotizaciones y facturas a clientes) habrá que mandar a direcciones
 arbitrarias, y ese es el momento de **reemplazar** la lista blanca por otro
 control — no de vaciarla ni de aflojarla antes.
+
+**Ojo si se le agrega una segunda dirección por cualquier otro motivo:**
+`crearAlertar` (`apps/mailer/src/pago/alerta.ts`, ver "Cobro con Mercado
+Pago" más arriba) manda el aviso interno de pagos sin orden emitida al
+*primer* valor de esta misma lista. Agregar una dirección sin revisar ese
+acoplamiento puede desplazar ese aviso a quien no debe recibirlo.
 
 ## Tests
 

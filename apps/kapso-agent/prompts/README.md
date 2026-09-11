@@ -15,11 +15,11 @@ repite.
 | [`agente-descubrimiento/`](agente-descubrimiento/) | `agente_descubrimiento` | Entiende la necesidad, busca y arma el carro | v-06 |
 | [`agente-presentacion/`](agente-presentacion/) | `agente_presentacion` | Presenta la cotización y captura la decisión | v-03 |
 | [`agente-facturacion/`](agente-facturacion/) | `agente_facturacion` | RUT y datos tributarios, en bloque | v-04 |
-| [`agente-cierre/`](agente-cierre/) | `agente_cierre` | Confirmación final antes de emitir las órdenes | v-02 |
+| [`agente-cierre/`](agente-cierre/) | `agente_cierre` | Confirmación final antes de cobrar con Mercado Pago | v-03 |
 
 ## Qué cambia respecto de v1
 
 - No hay nodo de recuperación de rechazo: `rejected` vuelve a descubrimiento.
-- No hay método de pago: siempre contado.
+- Desde 2026-09-10, el pago es con tarjeta vía Mercado Pago (antes: siempre contado).
 - El carro debe llevar `mpn` y `marca`, no solo `sku`. Sin MPN no hay comparación entre mayoristas.
 - Ningún agente puede nombrar al mayorista frente al cliente.

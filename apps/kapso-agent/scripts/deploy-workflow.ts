@@ -71,6 +71,28 @@ function fn(id: string, functionId: string, name: string, saveTo: string, x: num
   };
 }
 
+// El cobro entra por un nodo `webhook` y no por una function nueva: el cupo de
+// Cloudflare Workers de Kapso esta en 5 de 5 y ninguna sobra. Un `webhook` no
+// consume cupo.
+function webhook(id: string, url: string, body: Record<string, unknown>, saveTo: string, x: number, y: number) {
+  return {
+    id,
+    type: 'flow-node',
+    position: { x, y },
+    data: {
+      node_type: 'webhook',
+      display_name: 'Webhook: crear pago',
+      config: {
+        url,
+        method: 'POST',
+        headers: { 'X-API-Key': '${ENV:MAILER_API_KEY}', 'Content-Type': 'application/json' },
+        body_template: body,
+        save_response_to: saveTo,
+      },
+    },
+  };
+}
+
 function decide(id: string, functionId: string, name: string, labels: Array<[string, string]>, x: number, y: number) {
   return {
     id,
@@ -152,29 +174,44 @@ async function main() {
       enabled_default_tools: ['get_execution_metadata', 'get_whatsapp_context', 'get_variable', 'save_variable', 'enter_waiting', 'complete_task', 'handoff_to_human'],
     }),
 
-    fn('fn_emitir_ordenes', id('emitir-ordenes-compra'), 'emitir-ordenes-compra', 'purchase_orders_response', 1500, 120),
-
-    {
-      id: 'send_confirmacion',
-      type: 'flow-node',
-      position: { x: 1720, y: 120 },
-      data: {
-        node_type: 'send_text',
-        display_name: 'Confirmación',
-        config: {
-          // La arista fn_emitir_ordenes → send_confirmacion es incondicional:
-          // este texto sale igual si la emision devolvio 400, 500, o `ok: true`
-          // con todas las ordenes en `failed`. Por eso NO afirma que el pedido
-          // quedo cursado — afirma lo unico que es cierto en todos los casos.
-          // Ramificar de verdad por `purchase_orders_ok` necesita otro nodo
-          // `decide`; ver README-v2.md, seccion de pendientes.
-          message: 'Listo, dejamos tu pedido con el equipo comercial 🙌 Te contactan para confirmarlo y coordinar el pago y la entrega. ¡Gracias!',
-          delay_seconds: 0,
-        },
+    // El cobro reemplaza a la emision en el grafo: emitir-ordenes-compra sigue
+    // desplegada, pero ahora la invoca el servicio de pagos cuando Mercado Pago
+    // confirma. Y el texto de confirmacion lo manda ese mismo servicio, que es
+    // el unico que sabe si hubo link, si no lo hubo, o si la cotizacion ya no
+    // servia -- un send_text fijo aca mentiria en dos de los tres casos.
+    webhook(
+      'fn_crear_pago',
+      'https://rr-mailing.vercel.app/api/pago/crear',
+      {
+        quote_id: '{{vars.quote_id}}',
+        quote_version: '{{vars.quote_version}}',
+        // El guard de consentimiento. La arista `agente_cierre ->
+        // fn_crear_pago` es incondicional; hasta este cambio de grafo el
+        // destino era `fn_emitir_ordenes`, y emitir-ordenes-compra.js
+        // rechazaba con 400 cualquier invocacion sin `quote_confirmed`. Ese
+        // era el unico chequeo determinista de que el cliente dijo que si, y
+        // al mover el destino quedo fuera del camino. Va aca, y el handler de
+        // `/api/pago/crear` lo exige con el mismo criterio permisivo. Si se
+        // cae de este cuerpo, un `complete_task` sin un si inequivoco le
+        // manda un cobro real a alguien que no acepto comprar.
+        quote_confirmed: '{{vars.quote_confirmed}}',
+        phone_number: '{{context.phone_number}}',
+        phone_number_id: '{{system.whatsapp_config.phone_number_id}}',
+        customer_name: '{{vars.quote_customer_name}}',
+        billing_rut: '{{vars.billing_rut}}',
+        billing_razon_social: '{{vars.billing_razon_social}}',
+        billing_giro: '{{vars.billing_giro}}',
+        billing_direccion: '{{vars.billing_direccion}}',
+        billing_comuna: '{{vars.billing_comuna}}',
+        billing_ciudad: '{{vars.billing_ciudad}}',
+        billing_email: '{{vars.billing_email}}',
       },
-    },
+      'pago_response',
+      1500,
+      120,
+    ),
 
-    { id: 'handoff_fin', type: 'flow-node', position: { x: 1940, y: 120 }, data: { node_type: 'handoff', display_name: 'Handoff', config: { reason: 'Pedido cursado, órdenes de compra emitidas' } } },
+    { id: 'handoff_fin', type: 'flow-node', position: { x: 1940, y: 120 }, data: { node_type: 'handoff', display_name: 'Handoff', config: { reason: 'Link de pago enviado; el pedido se emite al acreditarse' } } },
   ];
 
   const edges = [
@@ -190,9 +227,8 @@ async function main() {
     { source: 'route_rut', target: 'agente_facturacion', label: 'invalid' },
     { source: 'fn_check_validity', target: 'agente_cierre', label: 'valid' },
     { source: 'fn_check_validity', target: 'fn_cotizar', label: 'expired' },
-    { source: 'agente_cierre', target: 'fn_emitir_ordenes', label: 'next' },
-    { source: 'fn_emitir_ordenes', target: 'send_confirmacion', label: 'next' },
-    { source: 'send_confirmacion', target: 'handoff_fin', label: 'next' },
+    { source: 'agente_cierre', target: 'fn_crear_pago', label: 'next' },
+    { source: 'fn_crear_pago', target: 'handoff_fin', label: 'next' },
   ];
 
   const { data: existing } = await kapso<{ data: Workflow[] }>('/workflows');
