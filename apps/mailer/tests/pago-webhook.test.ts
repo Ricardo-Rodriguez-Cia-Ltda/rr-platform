@@ -53,9 +53,29 @@ function makeReq(over: Partial<{ header: string; dataId: string; body: unknown; 
   } as unknown as VercelRequest;
 }
 
+// El filtro real: Supabase solo devuelve las filas cuyo quote_id calza con
+// `quote_id=eq.<valor>` en la URL. Sin esto, el simulacro dejaba pasar
+// cualquier fila configurada sin mirar por cual quote_id se estaba
+// preguntando -- infiel a la realidad, y ciego a cualquier caso donde el
+// handler consulte la cotizacion equivocada.
+function quoteIdDeUrl(href: string): string | null {
+  const m = href.match(/quote_id=eq\.([^&]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+function filtrarPorQuoteId(href: string, filas: unknown[]): unknown[] {
+  const q = quoteIdDeUrl(href);
+  if (q === null) return filas;
+  return filas.filter((f) => String((f as { quote_id?: unknown })?.quote_id) === q);
+}
+
 /** Guion completo: supabase + mercadopago + kapso. */
 function routeFetch(h: {
   pago?: unknown[]; cotizacion?: unknown[];
+  // Bypasea el filtro por quote_id de la URL: simula que Supabase devolviera
+  // una fila que no corresponde (algo que la base no deberia producir), para
+  // poder probar la salvaguarda defensiva del handler.
+  pagoForzado?: unknown[];
   mpPago?: unknown; mpStatus?: number;
   reclamo?: unknown[];
   emitir?: { status: number; body: unknown };
@@ -74,8 +94,11 @@ function routeFetch(h: {
         }
         return new Response('[]', { status: 200 });
       }
-      if (href.includes('/cotizaciones')) return new Response(JSON.stringify(h.cotizacion ?? [COTIZACION]), { status: 200 });
-      return new Response(JSON.stringify(h.pago ?? [PAGO]), { status: 200 });
+      if (href.includes('/cotizaciones')) {
+        return new Response(JSON.stringify(filtrarPorQuoteId(href, h.cotizacion ?? [COTIZACION])), { status: 200 });
+      }
+      const filasPago = h.pagoForzado ?? filtrarPorQuoteId(href, h.pago ?? [PAGO]);
+      return new Response(JSON.stringify(filasPago), { status: 200 });
     }
 
     if (href.includes('api.mercadopago.com')) {
@@ -242,5 +265,17 @@ describe('POST /api/pago/webhook', () => {
     const res = makeRes();
     await createWebhookHandler()(makeReq(), res, ENV);
     expect(res.statusCode).toBe(500);
+  });
+
+  // Estado que la base no deberia producir (Supabase ya filtra por
+  // quote_id): se prueba de todos modos porque la consecuencia de
+  // confiar ciegamente en la fila es emitir una orden de compra real
+  // contra la cotizacion de otro cliente.
+  it('fila de pagos con quote_id distinto al consultado: no emite (salvaguarda defensiva)', async () => {
+    const spy = routeFetch({ pagoForzado: [{ ...PAGO, quote_id: 'otra-cotizacion' }] });
+    const res = makeRes();
+    await createWebhookHandler()(makeReq(), res, ENV);
+    expect(res.statusCode).toBe(200);
+    expect(spy.mock.calls.some(([u]) => String(u).includes('/invoke'))).toBe(false);
   });
 });

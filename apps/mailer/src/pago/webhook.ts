@@ -97,11 +97,13 @@ export function createWebhookHandler(alertar: Alertar = alertarPorDefecto) {
       return;
     }
     if (String(fila.quote_id) !== quoteId) {
-      // Salvaguarda de integridad: la fila que devolvio leerPago no
-      // corresponde al quote_id que estamos procesando. En producción esto no
-      // deberia pasar (leerPago ya filtra por quote_id), pero un pago
-      // aprobado con este monto es dinero real: no se asume que la fila es
-      // la correcta sin verificarlo, se trata igual que "no es nuestro".
+      // Cinturon, no el mecanismo: el camino normal es que leerPago ya
+      // filtre por quote_id y esta rama nunca se ejercite -- una referencia
+      // que no calza simplemente no trae fila (cae en el `fila === null` de
+      // arriba). Esta comparacion cubre el caso en que, por lo que sea, ese
+      // filtro no se haya aplicado y vuelva una fila de otra cotizacion: un
+      // pago aprobado con el monto correcto sobre esa fila emitiria una
+      // orden de compra real contra el pedido de otro cliente.
       res.status(200).json({ ok: true, ignorado: true });
       return;
     }
