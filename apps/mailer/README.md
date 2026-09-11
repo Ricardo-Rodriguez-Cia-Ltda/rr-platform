@@ -75,6 +75,20 @@ llegar de las dos formas. Cualquier otra cosa responde `400 sin_confirmacion`
 sin crear preferencia, sin persistir fila y sin mandarle nada al cliente. Si los
 dos criterios se separan, uno de los dos deja de proteger.
 
+**El webhook también alerta cuando no llega a procesar nada.** Un 401 por firma
+inválida o un 500 por configuración incompleta antes escribían solo al log. Si
+`MP_WEBHOOK_SECRET` se carga mal, *todos* los pagos fallan con 401, Mercado Pago
+reintenta unas veces y se rinde, y el cliente se queda esperando la
+confirmación que se le prometió: es el modo de fallo más probable del primer día
+y el más silencioso. Ahora avisa por correo, con dos cuidados. La alerta nunca
+lleva la firma, el secreto, el cuerpo del webhook ni el id del pago — solo
+etapa, tipo de fallo y qué revisar. Y como el endpoint es público, esas dos
+alertas pasan por una ventana en memoria del proceso de **10 minutos**: alguien
+que sepa la URL puede disparar 401 en bucle, y una alerta por request
+convertiría la única alarma del sistema en el blanco. La ventana es
+best-effort (cada instancia serverless tiene la suya) y solo aplica a estos dos
+caminos: las alertas que hablan de plata recibida nunca se suprimen.
+
 El aviso interno ("recibimos plata y no pudimos emitir la orden") sale al
 primer valor de `MAILER_ALLOWED_RECIPIENTS` — la misma lista blanca del
 endpoint de correo, documentada en "Variables de entorno" y en "La lista

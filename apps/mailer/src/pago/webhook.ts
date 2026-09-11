@@ -25,6 +25,51 @@ const alertarPorDefecto: Alertar = async (asunto, detalle) => {
   console.error(`[pago] ALERTA ${asunto}`, { detalle });
 };
 
+/**
+ * Ventana antiinundacion para las alertas de los retornos tempranos.
+ *
+ * Este endpoint es publico: la firma es lo unico que lo separa de cualquiera
+ * que sepa la URL, asi que un 401 lo dispara quien quiera, a voluntad y en
+ * bucle. Alertar por request convertiria la casilla del interno -- que es la
+ * unica alarma del sistema -- en el blanco, y de paso enterraria las alertas
+ * de plata que si importan.
+ *
+ * Diez minutos, y a proposito nada mas sofisticado:
+ *
+ * - Es mas largo que la rafaga de reintentos inmediatos de Mercado Pago, asi
+ *   que un secreto mal cargado produce un correo, no ocho.
+ * - Es lo bastante corto para que un fallo que dura horas siga apareciendo en
+ *   la casilla en vez de avisar una sola vez y callarse para siempre. La
+ *   alerta que se pierde es peor que la que se repite.
+ * - Vive en memoria del proceso. En serverless cada instancia tiene la suya,
+ *   asi que la ventana es best-effort: acota la inundacion por instancia, no
+ *   globalmente. Alcanza -- el objetivo es no recibir miles de correos, no
+ *   garantizar exactamente uno. Compartir estado para esto exigiria una
+ *   escritura a Supabase en el camino de un request no autenticado, que es
+ *   justo lo que un atacante quiere.
+ *
+ * Las claves son literales fijos ('firma_invalida', 'falta_configuracion'),
+ * nunca datos del request: el Map queda acotado a dos entradas y no hay forma
+ * de hacerlo crecer desde afuera. Las alertas de pagos -- que llevan el
+ * quote_id y son la unica senal de que hay plata en el aire -- NO pasan por
+ * aca: esas nunca se suprimen.
+ */
+export const VENTANA_ALERTAS_MS = 10 * 60_000;
+
+const ultimaAlerta = new Map<string, number>();
+
+export function _limpiarVentanaAlertas(): void {
+  ultimaAlerta.clear();
+}
+
+function fueraDeVentana(clave: string): boolean {
+  const ahora = Date.now();
+  const previa = ultimaAlerta.get(clave);
+  if (previa !== undefined && ahora - previa < VENTANA_ALERTAS_MS) return false;
+  ultimaAlerta.set(clave, ahora);
+  return true;
+}
+
 /** Tipo y id de la notificacion, que Mercado Pago manda por query o por body. */
 function leerNotificacion(req: VercelRequest): { tipo: string; dataId: string } {
   const q = req.query as Record<string, unknown>;
@@ -45,7 +90,22 @@ export function createWebhookHandler(alertar: Alertar = alertarPorDefecto) {
       res.status(405).json({ ok: false });
       return;
     }
-    if (REQUERIDAS.some((n) => !env[n])) {
+    const faltan = REQUERIDAS.filter((n) => !env[n]);
+    if (faltan.length > 0) {
+      // La respuesta publica NO las enumera -- a diferencia de
+      // /api/pago/crear, que esta autenticado: decirle a cualquiera que sepa
+      // la URL que variables le faltan al despliegue es una sonda gratis.
+      // La alerta interna si las nombra, porque sin eso no sirve de nada.
+      // Nunca sus valores.
+      if (fueraDeVentana('falta_configuracion')) {
+        await alertar(
+          'El webhook de Mercado Pago esta mal configurado',
+          `Faltan variables de entorno en el proyecto de Vercel: ${faltan.join(', ')}. `
+          + `Mientras tanto ningun pago se esta procesando: Mercado Pago recibe 500, reintenta unas `
+          + `veces y se rinde, y al cliente se le prometio que apenas se acredite el pago se le `
+          + `confirma el pedido.`,
+        );
+      }
       res.status(500).json({ ok: false, error: 'falta_configuracion' });
       return;
     }
@@ -68,6 +128,25 @@ export function createWebhookHandler(alertar: Alertar = alertarPorDefecto) {
     });
     if (!valida) {
       console.error('[pago] webhook con firma invalida');
+      // El modo de fallo mas probable del primer dia y el mas silencioso: si
+      // `MP_WEBHOOK_SECRET` no es la clave de la seccion de webhooks del panel
+      // de Mercado Pago, TODOS los pagos fallan con 401 y la unica senal era
+      // un log que nadie mira.
+      //
+      // El texto es fijo a proposito: ni la firma, ni el secreto, ni el
+      // cuerpo, ni el id del pago. Lo primero porque son credenciales; lo
+      // ultimo porque viene de un request no autenticado y esta alerta se
+      // archiva en una casilla de correo. Que sea constante ademas hace que
+      // la ventana antiinundacion sea trivialmente correcta.
+      if (fueraDeVentana('firma_invalida')) {
+        await alertar(
+          'Webhook de Mercado Pago rechazado por firma invalida',
+          'Si esto se repite, la causa casi segura es que MP_WEBHOOK_SECRET en Vercel no es la clave '
+          + 'secreta de la seccion Webhooks del panel de Mercado Pago (no se deriva de la preferencia). '
+          + 'Mientras tanto ningun pago se esta acreditando y ningun cliente recibe confirmacion. '
+          + 'Tambien puede ser trafico ajeno contra un endpoint publico: revisar el log antes de tocar nada.',
+        );
+      }
       res.status(401).json({ ok: false, error: 'firma_invalida' });
       return;
     }

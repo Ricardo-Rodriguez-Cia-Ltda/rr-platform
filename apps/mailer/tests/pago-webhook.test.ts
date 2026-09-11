@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { construirManifiesto } from '../src/pago/firma.js';
 import { _limpiarCacheKapso } from '../src/pago/kapso.js';
-import { createWebhookHandler } from '../src/pago/webhook.js';
+import { VENTANA_ALERTAS_MS, _limpiarVentanaAlertas, createWebhookHandler } from '../src/pago/webhook.js';
 
 const SECRET = 'secreto';
 const QUOTE = 'f9b6c8ad-5b51-408d-8de2-acd10ff35ec4';
@@ -134,7 +134,7 @@ function routeFetch(h: {
   return spy;
 }
 
-beforeEach(() => _limpiarCacheKapso());
+beforeEach(() => { _limpiarCacheKapso(); _limpiarVentanaAlertas(); });
 afterEach(() => vi.unstubAllGlobals());
 
 describe('POST /api/pago/webhook', () => {
@@ -515,5 +515,102 @@ describe('techo de ejecucion de las rutas de pago', () => {
 
   it('el resto de api/ conserva su techo corto', () => {
     expect(config.functions['api/**/*.ts'].maxDuration).toBe(30);
+  });
+});
+
+// =====================================================================
+// I6: el 401 por firma y el 500 por configuracion solo escribian al log. Si
+// el secreto del webhook se carga mal, TODOS los pagos fallan con 401,
+// Mercado Pago reintenta unas veces y se rinde, y la unica senal es un log
+// que nadie mira -- mientras al cliente se le prometio que apenas se acredite
+// el pago se le confirma el pedido. Es el modo de fallo mas probable del
+// primer dia y el mas silencioso.
+// =====================================================================
+describe('los retornos tempranos avisan al interno', () => {
+  it('una firma invalida alerta', async () => {
+    const alertas: Array<[string, string]> = [];
+    vi.stubGlobal('fetch', vi.fn());
+    const res = makeRes();
+    await createWebhookHandler(async (a, d) => { alertas.push([a, d]); })(
+      makeReq({ header: firmarHeader(PAYMENT_ID, 'otro-secreto') }), res, ENV);
+    expect(res.statusCode).toBe(401);
+    expect(alertas).toHaveLength(1);
+    expect(alertas[0][0].toLowerCase()).toContain('firma');
+  });
+
+  // La alerta sale por correo y el correo se archiva. Nunca puede llevar la
+  // firma, el secreto ni el cuerpo del webhook.
+  it('la alerta de firma no lleva la firma, el secreto ni el cuerpo', async () => {
+    const alertas: string[] = [];
+    vi.stubGlobal('fetch', vi.fn());
+    const header = firmarHeader(PAYMENT_ID, 'otro-secreto');
+    await createWebhookHandler(async (a, d) => { alertas.push(a + ' ' + d); })(
+      makeReq({ header }), makeRes(), ENV);
+    const texto = alertas.join('\n');
+    expect(texto).not.toContain(header);
+    expect(texto).not.toContain(header.split('v1=')[1]);
+    expect(texto).not.toContain(SECRET);
+    expect(texto).not.toContain(PAYMENT_ID);
+    expect(texto).not.toContain(REQUEST_ID);
+  });
+
+  // El endpoint es publico: cualquiera que sepa la URL puede disparar 401 a
+  // voluntad, y una alerta por request convierte la casilla del interno en el
+  // blanco. La ventana en memoria del proceso acota la inundacion sin que
+  // haga falta estado compartido.
+  it('dos firmas invalidas seguidas producen una sola alerta', async () => {
+    const alertas: string[] = [];
+    vi.stubGlobal('fetch', vi.fn());
+    const alertar = async (a: string) => { alertas.push(a); };
+    const handler = createWebhookHandler(alertar);
+    await handler(makeReq({ header: firmarHeader(PAYMENT_ID, 'otro') }), makeRes(), ENV);
+    await handler(makeReq({ header: firmarHeader(PAYMENT_ID, 'otro-mas') }), makeRes(), ENV);
+    expect(alertas).toHaveLength(1);
+  });
+
+  it('pasada la ventana vuelve a alertar: la senal no desaparece en un fallo largo', async () => {
+    vi.useFakeTimers();
+    try {
+      const alertas: string[] = [];
+      vi.stubGlobal('fetch', vi.fn());
+      const handler = createWebhookHandler(async (a) => { alertas.push(a); });
+      await handler(makeReq({ header: firmarHeader(PAYMENT_ID, 'otro') }), makeRes(), ENV);
+      vi.advanceTimersByTime(VENTANA_ALERTAS_MS + 1000);
+      await handler(makeReq({ header: firmarHeader(PAYMENT_ID, 'otro') }), makeRes(), ENV);
+      expect(alertas).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('falta de configuracion alerta nombrando la variable, nunca su valor', async () => {
+    const alertas: Array<[string, string]> = [];
+    vi.stubGlobal('fetch', vi.fn());
+    const res = makeRes();
+    await createWebhookHandler(async (a, d) => { alertas.push([a, d]); })(
+      makeReq(), res, { ...ENV, MP_WEBHOOK_SECRET: undefined } as any);
+    expect(res.statusCode).toBe(500);
+    expect(alertas).toHaveLength(1);
+    expect(alertas[0][1]).toContain('MP_WEBHOOK_SECRET');
+    expect(alertas.join()).not.toContain(SECRET);
+  });
+
+  // La respuesta HTTP no nombra las variables que faltan, a diferencia de
+  // /api/pago/crear: ese endpoint esta autenticado y este es publico.
+  it('la respuesta publica del 500 no enumera las variables que faltan', async () => {
+    vi.stubGlobal('fetch', vi.fn());
+    const res = makeRes();
+    await createWebhookHandler(async () => {})(makeReq(), res, { ...ENV, MP_WEBHOOK_SECRET: undefined } as any);
+    expect(JSON.stringify(res.jsonBody)).not.toContain('MP_WEBHOOK_SECRET');
+  });
+
+  it('el 200 que ignora una notificacion que no es de pago no alerta', async () => {
+    const alertas: string[] = [];
+    vi.stubGlobal('fetch', vi.fn());
+    const res = makeRes();
+    await createWebhookHandler(async (a) => { alertas.push(a); })(
+      makeReq({ query: { type: 'plan', 'data.id': PAYMENT_ID } }), res, ENV);
+    expect(res.statusCode).toBe(200);
+    expect(alertas).toHaveLength(0);
   });
 });
