@@ -1341,7 +1341,7 @@ export function enviarBotonPago(p: {
 - [ ] **Step 5: Correr el test y verificar que pasa**
 
 Run: `npx vitest run apps/mailer/tests/pago-kapso.test.ts`
-Expected: PASS, 8 casos.
+Expected: PASS, 9 casos.
 
 - [ ] **Step 6: Commit**
 
