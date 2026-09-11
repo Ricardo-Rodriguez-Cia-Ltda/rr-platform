@@ -44,14 +44,23 @@ describe('reclamarAprobado', () => {
     expect(body.aprobado_at).toBeTruthy();
   });
 
-  it('cero filas significa que otra entrega del webhook ya la tomo', async () => {
+  // Misma convencion tri-estado que `leerCotizacion` en este mismo archivo.
+  // Confundir los dos casos hacia que un 5xx de Supabase en este PATCH se
+  // leyera como "otra entrega ya la tomo": el webhook respondia 200, Mercado
+  // Pago dejaba de reintentar y el pago quedaba cobrado sin emitir nada.
+  it('cero filas (false) significa que otra entrega del webhook ya la tomo', async () => {
     stub(() => new Response('[]', { status: 200 }));
     expect(await reclamarAprobado(ENV, QUOTE, '999')).toBe(false);
   });
 
-  it('un fallo de Supabase devuelve false: no se emite a ciegas', async () => {
+  it('un fallo de Supabase (undefined) no es "ya la tomo otro"', async () => {
     stub(() => new Response('{}', { status: 500 }));
-    expect(await reclamarAprobado(ENV, QUOTE, '999')).toBe(false);
+    expect(await reclamarAprobado(ENV, QUOTE, '999')).toBeUndefined();
+  });
+
+  it('una excepcion de red tambien devuelve undefined', async () => {
+    stub(() => { throw new Error('ECONNRESET'); });
+    expect(await reclamarAprobado(ENV, QUOTE, '999')).toBeUndefined();
   });
 });
 

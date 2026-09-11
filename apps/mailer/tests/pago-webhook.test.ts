@@ -460,6 +460,58 @@ describe('la fila que queda colgada entre la reclamacion y el desenlace', () => 
 });
 
 // =====================================================================
+// R3: `reclamarAprobado` devolvia falso tanto cuando otra entrega ya habia
+// tomado la fila como cuando la base fallaba. Con un 5xx de Supabase en ese
+// PATCH la fila seguia `pendiente`, caia en la rama de ya procesado, ninguna
+// alerta la cubria (no esta en `aprobado` y en un primer pago el id viene
+// vacio) y se respondia 200. Con 200 Mercado Pago deja de reintentar: pago
+// cobrado, cero ordenes, cero alertas, cero mensajes al cliente.
+// =====================================================================
+describe('la reclamacion que falla por la base', () => {
+  const fallaElReclamo = (u: string, b: any) => b.estado === 'aprobado' && u.includes('estado=eq.pendiente');
+
+  it('alerta al interno y responde pidiendo reintento, no 200', async () => {
+    const alertas: Array<[string, string]> = [];
+    const spy = routeFetch({ escrituraFalla: fallaElReclamo });
+    const res = makeRes();
+    await createWebhookHandler(async (a, d) => { alertas.push([a, d]); })(makeReq(), res, ENV);
+    expect(res.statusCode).toBeGreaterThanOrEqual(500);
+    expect(spy.mock.calls.some(([u]) => String(u).includes('/invoke'))).toBe(false);
+    expect(alertas).toHaveLength(1);
+    // Quien la reciba tiene que poder ubicar la cotizacion y el pago sin
+    // adivinar: sin eso la alerta no sirve para nada.
+    expect(alertas[0][0]).toContain(QUOTE);
+    expect(alertas[0][1]).toContain(PAYMENT_ID);
+  });
+
+  // La alerta se archiva en una casilla: lleva el quote_id, que es lo que
+  // hace falta para resolverlo, y nada del comprador.
+  it('la alerta no lleva datos del comprador', async () => {
+    const alertas: string[] = [];
+    routeFetch({ escrituraFalla: fallaElReclamo });
+    await createWebhookHandler(async (a, d) => { alertas.push(a + ' ' + d); })(makeReq(), makeRes(), ENV);
+    const texto = alertas.join(' ');
+    expect(texto).not.toContain(PAGO.telefono);
+    expect(texto).not.toContain('Acme SpA');
+    expect(texto).not.toContain('76.123.456-7');
+  });
+
+  // El otro lado de la distincion: cero filas no es un fallo. Otra entrega
+  // gano la carrera entre la lectura y el PATCH; esto es idempotencia
+  // funcionando y se responde 200 mudo.
+  it('otra entrega que ya la tomo sigue respondiendo 200 sin alertar', async () => {
+    const alertas: string[] = [];
+    const spy = routeFetch({ pago: [{ ...PAGO, estado: 'pendiente' }], reclamo: [] });
+    const res = makeRes();
+    await createWebhookHandler(async (a) => { alertas.push(a); })(makeReq(), res, ENV);
+    expect(res.statusCode).toBe(200);
+    expect(res.jsonBody).toMatchObject({ estado: 'ya_procesado' });
+    expect(spy.mock.calls.some(([u]) => String(u).includes('/invoke'))).toBe(false);
+    expect(alertas).toHaveLength(0);
+  });
+});
+
+// =====================================================================
 // I2: Checkout Pro no impide que una preferencia se pague dos veces, y el
 // mensaje de rechazo invita literalmente a reintentar con el mismo link. Un
 // segundo pago trae id distinto y monto correcto, asi que pasa el guard de

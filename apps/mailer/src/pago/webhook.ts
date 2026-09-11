@@ -322,7 +322,31 @@ export function createWebhookHandler(alertar: Alertar = alertarPorDefecto) {
 
     // La transicion que sostiene la idempotencia: si otra entrega del mismo
     // webhook ya la tomo, aca se devuelven cero filas y no se emite de nuevo.
-    if (!(await reclamarAprobado(env, quoteId, String(pagoMP.id)))) {
+    const reclamo = await reclamarAprobado(env, quoteId, String(pagoMP.id));
+
+    // Que la base falle en ESTE PATCH no es "ya procesado": es no saber nada.
+    // La fila sigue `pendiente`, no la cubre ninguna de las alertas de abajo
+    // (no esta en `aprobado`, y en un primer pago el id registrado viene
+    // vacio) y responder 200 hace que Mercado Pago deje de reintentar. Un solo
+    // 5xx transitorio de Supabase bastaba para dejar el pago cobrado, cero
+    // ordenes emitidas, cero alertas y cero mensajes al cliente.
+    //
+    // El reintento es seguro: la transicion sigue siendo condicional, asi que
+    // si en el intermedio otra entrega tomo la fila, el reintento cae en el
+    // camino de abajo y no emite dos veces.
+    if (reclamo === undefined) {
+      await alertar(
+        `No se pudo reclamar un pago aprobado (cotizacion ${quoteId})`,
+        `La base de datos fallo al escribir la transicion a 'aprobado'. Pago MP: ${pagoMP.id}. Monto: `
+        + `${fila.monto_clp}. No se emitio ninguna orden y la fila sigue en 'pendiente'. Se responde 500 `
+        + `para que Mercado Pago reintente la notificacion; si los reintentos tambien fallan, hay plata `
+        + `cobrada sin orden de compra y hay que emitirla a mano.`,
+      );
+      res.status(500).json({ ok: false, error: 'no_se_pudo_reclamar' });
+      return;
+    }
+
+    if (!reclamo) {
       // Una sola lectura del estado: `fila`, leida arriba. Dos cosas
       // distintas llegan hasta aca y las dos eran mudas.
       //

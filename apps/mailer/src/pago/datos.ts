@@ -114,15 +114,34 @@ export async function crearPago(env: PagoEnv, fila: PagoRow): Promise<boolean> {
  * condicionado a `estado=eq.pendiente`, asi que la segunda entrega de la misma
  * notificacion devuelve cero filas y no emite nada. Mismo patron condicional
  * que apps/backoffice/app/api/pedidos/transicion/route.ts.
+ *
+ * Tri-estado, la misma convencion que `leerCotizacion` mas arriba:
+ *
+ * - `true`  = esta entrega tomo la fila y le toca emitir.
+ * - `false` = habia cero filas que tomar: otra entrega gano la carrera. Es
+ *             idempotencia funcionando, no un error.
+ * - `undefined` = no se pudo preguntar (5xx de Supabase, timeout, red caida).
+ *             No se sabe nada del estado de la fila.
+ *
+ * Devolver `false` para el tercer caso, como se hacia antes, se leia en el
+ * webhook como "otra entrega ya la tomo": se respondia 200, Mercado Pago
+ * dejaba de reintentar, y un solo error transitorio de la base bastaba para
+ * dejar el pago cobrado, sin ordenes emitidas y sin una sola alerta. El
+ * llamador NO puede confundirlos.
  */
-export async function reclamarAprobado(env: PagoEnv, quoteId: string, mpPaymentId: string): Promise<boolean> {
+export async function reclamarAprobado(
+  env: PagoEnv,
+  quoteId: string,
+  mpPaymentId: string,
+): Promise<boolean | undefined> {
   const filas = await pedir(
     env,
     'PATCH',
     `/pagos?quote_id=eq.${encodeURIComponent(quoteId)}&estado=eq.pendiente`,
     { estado: 'aprobado', mp_payment_id: mpPaymentId, aprobado_at: ahora(), updated_at: ahora() },
   );
-  return filas !== null && filas.length > 0;
+  if (filas === null) return undefined;
+  return filas.length > 0;
 }
 
 /**
