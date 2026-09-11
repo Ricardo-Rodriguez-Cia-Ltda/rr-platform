@@ -27,6 +27,9 @@ export interface PagoRow {
   monto_clp: number;
   expira_at: string;
   estado: 'pendiente' | 'aprobado' | 'emitido' | 'aprobado_sin_emitir';
+  // Lo escribe `reclamarAprobado` al tomar la fila. Es lo que le permite al
+  // webhook distinguir una emision en vuelo de una fila realmente atascada.
+  aprobado_at?: string | null;
   mp_payment_id?: string | null;
   intentos_rechazados?: number;
   datos: Record<string, unknown>;

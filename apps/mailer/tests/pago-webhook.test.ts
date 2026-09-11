@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { construirManifiesto } from '../src/pago/firma.js';
 import { _limpiarCacheKapso } from '../src/pago/kapso.js';
-import { VENTANA_ALERTAS_MS, _limpiarVentanaAlertas, createWebhookHandler } from '../src/pago/webhook.js';
+import {
+  UMBRAL_FILA_ATASCADA_MS, VENTANA_ALERTAS_MS, _limpiarVentanaAlertas, createWebhookHandler,
+} from '../src/pago/webhook.js';
 
 const SECRET = 'secreto';
 const QUOTE = 'f9b6c8ad-5b51-408d-8de2-acd10ff35ec4';
@@ -351,10 +353,18 @@ describe('la fila que queda colgada entre la reclamacion y el desenlace', () => 
     expect(alertas[0][0]).toContain('pedidos');
   });
 
-  it('la reentrega sobre una fila que sigue en aprobado alerta en vez de responder muda', async () => {
+  // Corregido en R1. Antes este caso no informaba `aprobado_at` y daba por
+  // correcto alertar sobre CUALQUIER fila en `aprobado`, que es justo el falso
+  // positivo del camino feliz. Lo que hace atascada a una fila no es el estado
+  // sino la antiguedad de la reclamacion: aca se reclamo hace mucho mas de lo
+  // que puede durar la funcion, asi que no hay emision en vuelo posible.
+  it('la reentrega sobre una fila reclamada hace rato alerta en vez de responder muda', async () => {
     const alertas: Array<[string, string]> = [];
     const spy = routeFetch({
-      pago: [{ ...PAGO, estado: 'aprobado', mp_payment_id: PAYMENT_ID }],
+      pago: [{
+        ...PAGO, estado: 'aprobado', mp_payment_id: PAYMENT_ID,
+        aprobado_at: new Date(Date.now() - UMBRAL_FILA_ATASCADA_MS - 60_000).toISOString(),
+      }],
       reclamo: [],
     });
     const res = makeRes();
@@ -363,6 +373,65 @@ describe('la fila que queda colgada entre la reclamacion y el desenlace', () => 
     expect(spy.mock.calls.some(([u]) => String(u).includes('/invoke'))).toBe(false);
     expect(alertas).toHaveLength(1);
     expect(alertas[0][0]).toContain('atascad');
+  });
+
+  // R1, el falso positivo del camino feliz: Mercado Pago manda una
+  // notificacion al crearse el pago y otra al actualizarse, con segundos de
+  // diferencia. La segunda lee la fila en `aprobado` porque la primera la
+  // reclamo y sigue emitiendo. Nada esta atascado.
+  it('la reentrega inmediata sobre una fila recien reclamada NO alerta', async () => {
+    const alertas: string[] = [];
+    routeFetch({
+      pago: [{
+        ...PAGO, estado: 'aprobado', mp_payment_id: PAYMENT_ID,
+        aprobado_at: new Date().toISOString(),
+      }],
+      reclamo: [],
+    });
+    const res = makeRes();
+    await createWebhookHandler(async (a) => { alertas.push(a); })(makeReq(), res, ENV);
+    expect(res.statusCode).toBe(200);
+    expect(alertas).toHaveLength(0);
+  });
+
+  // Justo por debajo del umbral: la emision todavia puede estar en vuelo.
+  it('una reclamacion mas nueva que el umbral todavia cuenta como emision en vuelo', async () => {
+    const alertas: string[] = [];
+    routeFetch({
+      pago: [{
+        ...PAGO, estado: 'aprobado', mp_payment_id: PAYMENT_ID,
+        aprobado_at: new Date(Date.now() - (UMBRAL_FILA_ATASCADA_MS - 30_000)).toISOString(),
+      }],
+      reclamo: [],
+    });
+    await createWebhookHandler(async (a) => { alertas.push(a); })(makeReq(), makeRes(), ENV);
+    expect(alertas).toHaveLength(0);
+  });
+
+  // `reclamarAprobado` SIEMPRE escribe `aprobado_at`, asi que una fila en
+  // `aprobado` sin ese dato no la dejo el camino feliz. No se puede probar que
+  // haya una emision en vuelo, y la invariante es no perder un pago en
+  // silencio: se alerta.
+  it('una fila en aprobado sin aprobado_at alerta: no se puede probar que haya emision en vuelo', async () => {
+    const alertas: Array<[string, string]> = [];
+    routeFetch({
+      pago: [{ ...PAGO, estado: 'aprobado', mp_payment_id: PAYMENT_ID }],
+      reclamo: [],
+    });
+    await createWebhookHandler(async (a, d) => { alertas.push([a, d]); })(makeReq(), makeRes(), ENV);
+    expect(alertas).toHaveLength(1);
+    expect(alertas[0][0]).toContain('atascad');
+  });
+
+  it('un aprobado_at ilegible se trata como ausente y alerta', async () => {
+    const alertas: string[] = [];
+    routeFetch({
+      pago: [{ ...PAGO, estado: 'aprobado', mp_payment_id: PAYMENT_ID, aprobado_at: 'no-es-una-fecha' }],
+      reclamo: [],
+    });
+    await createWebhookHandler(async (a) => { alertas.push(a); })(makeReq(), makeRes(), ENV);
+    expect(alertas).toHaveLength(1);
+    expect(alertas[0]).toContain('atascad');
   });
 
   it('la reentrega sobre una fila ya emitido sigue siendo un 200 silencioso', async () => {
@@ -425,7 +494,10 @@ describe('un segundo pago genuino sobre el mismo link', () => {
   it('con id distinto sobre una fila colgada en aprobado: alerta por las dos cosas', async () => {
     const alertas: string[] = [];
     routeFetch({
-      pago: [{ ...PAGO, estado: 'aprobado', mp_payment_id: '111111111' }],
+      pago: [{
+        ...PAGO, estado: 'aprobado', mp_payment_id: '111111111',
+        aprobado_at: new Date(Date.now() - UMBRAL_FILA_ATASCADA_MS - 60_000).toISOString(),
+      }],
       mpPago: { id: '222222222', status: 'approved', external_reference: QUOTE, transaction_amount: 219725 },
       reclamo: [],
     });

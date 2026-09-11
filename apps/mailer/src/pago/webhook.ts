@@ -70,6 +70,52 @@ function fueraDeVentana(clave: string): boolean {
   return true;
 }
 
+/**
+ * Antiguedad minima de `aprobado_at` para llamar atascada a una fila que
+ * sigue en `aprobado`.
+ *
+ * El estado por si solo no distingue nada. Mercado Pago manda habitualmente
+ * dos notificaciones por el mismo pago -- una al crearse y otra al
+ * actualizarse, con segundos de diferencia. La primera reclama la fila y
+ * arranca la emision, que puede tardar minutos; la segunda lee la fila en
+ * `aprobado` y falla la transicion condicional. Eso es el camino feliz, no una
+ * fila colgada, y alertar ahi convertia la unica alarma del sistema en un
+ * generador rutinario de falsos positivos que ademas no se deduplica.
+ *
+ * Diez minutos, elegidos sobre el presupuesto real de timeouts, no sobre un
+ * numero redondo:
+ *
+ * - Lo que puede tardar una emision normal despues de la reclamacion son los
+ *   AbortSignal.timeout que quedan por delante: leerCotizacion 8s +
+ *   invocarFunction (listado 30s + invoke 30s + re-listado e invoke por 404
+ *   obsoleto 60s) + marcarEstado 8s + marcarPedidosPagados 8s + enviarTexto
+ *   5s = 149s en el peor caso.
+ * - Y hay un techo duro por encima de eso: la funcion muere a los 300s
+ *   (`maxDuration` de api/pago/), asi que NINGUNA emision en vuelo puede tener
+ *   una reclamacion mas vieja que 300s. Ese es el piso correcto del umbral.
+ * - 600s = el doble de ese techo duro. El margen extra no es decorativo: la
+ *   marca la escribe la instancia que reclamo y la lee otra instancia
+ *   distinta, y entre relojes de maquinas distintas hay deriva.
+ *
+ * Mas alto seria peor, no mas seguro: la alerta solo puede salir cuando llega
+ * otra entrega, y cuanto mas tarde se abra la ventana menos entregas quedan
+ * para dispararla.
+ */
+export const UMBRAL_FILA_ATASCADA_MS = 10 * 60_000;
+
+/**
+ * `reclamarAprobado` SIEMPRE escribe `aprobado_at`, asi que una fila en
+ * `aprobado` sin esa marca -- o con una ilegible -- no la dejo ahi el camino
+ * feliz de esta version del codigo. No se puede probar que haya una emision en
+ * vuelo, y ante la duda la invariante manda: mejor un correo de mas que un
+ * pago perdido en silencio. Se trata como atascada.
+ */
+function emisionYaNoPuedeEstarEnVuelo(aprobadoAt: unknown): boolean {
+  const marca = Date.parse(String(aprobadoAt ?? ''));
+  if (Number.isNaN(marca)) return true;
+  return Date.now() - marca >= UMBRAL_FILA_ATASCADA_MS;
+}
+
 /** Tipo y id de la notificacion, que Mercado Pago manda por query o por body. */
 function leerNotificacion(req: VercelRequest): { tipo: string; dataId: string } {
   const q = req.query as Record<string, unknown>;
@@ -280,7 +326,8 @@ export function createWebhookHandler(alertar: Alertar = alertarPorDefecto) {
       // Una sola lectura del estado: `fila`, leida arriba. Dos cosas
       // distintas llegan hasta aca y las dos eran mudas.
       //
-      // (a) La fila sigue en `aprobado`: alguien la reclamo y nunca escribio
+      // (a) La fila sigue en `aprobado` desde hace mas que el techo de
+      //     ejecucion de la funcion: alguien la reclamo y nunca escribio
       //     el desenlace -- el proceso murio entre medio. Como la emision
       //     corre en un Worker aparte, lo mas probable es que las ordenes de
       //     compra ya hayan salido: hay un mayorista despachando, un cliente
@@ -297,10 +344,16 @@ export function createWebhookHandler(alertar: Alertar = alertarPorDefecto) {
       //
       // Pueden ser ciertas las dos a la vez, y entonces salen las dos: son
       // dos hechos distintos con dos acciones distintas.
-      if (fila.estado === 'aprobado') {
+      // El estado por si solo no alcanza: en el camino feliz la segunda
+      // notificacion de Mercado Pago tambien lee la fila en `aprobado`,
+      // porque la primera la reclamo hace segundos y sigue emitiendo. Lo que
+      // separa los dos casos es la antiguedad de `aprobado_at`.
+      if (fila.estado === 'aprobado' && emisionYaNoPuedeEstarEnVuelo(fila.aprobado_at)) {
         await alertar(
           `Pago atascado entre la reclamacion y el desenlace (cotizacion ${quoteId})`,
-          `La fila sigue en 'aprobado' y la reentrega ya no puede reclamarla. Es probable que las ordenes `
+          `La fila sigue en 'aprobado', se reclamo hace mas que el techo de ejecucion de la funcion `
+          + `(reclamada: ${fila.aprobado_at ?? 'sin marca'}) y la reentrega ya no puede reclamarla, asi que no hay `
+          + `emision en vuelo que la explique. Es probable que las ordenes `
           + `de compra SI se hayan emitido y que el cliente no haya recibido confirmacion. Revisar la fila `
           + `de pagos, el correo de ordenes de compra y avisarle al cliente a mano.`,
         );
