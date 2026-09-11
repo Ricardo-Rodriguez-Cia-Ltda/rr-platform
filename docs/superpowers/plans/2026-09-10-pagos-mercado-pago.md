@@ -2637,24 +2637,53 @@ Nada de lo anterior cobra un peso hasta este paso. Va con credenciales de **prue
 - Consumes: todo lo anterior.
 - Produces: el cobro andando en el número sandbox.
 
+#### El orden de los pasos no es arbitrario
+
+Los cuatro despliegues de esta rama van en este orden, y cada uno por una razón que se puede verificar:
+
+1. **El SQL primero.** `generar-cotizacion-v2.js` cambió para persistir `proveedores_incompletos`, y el upsert de la cotización manda esa columna. Si las functions se redespliegan antes de que la columna exista, el upsert falla por columna inexistente, la cotización **no se persiste** — es best-effort, no revienta nada visible — y a partir de ahí cada cierre cae en el camino de cotización no encontrada: el cliente dice "sí, cúrsalo" y recibe el aviso de que hubo un problema. La tabla `pagos` del mismo script tiene que existir antes del primer cobro por la misma razón.
+2. **Las functions después del SQL.** Es el paso que empieza a llenar la columna. Saltárselo no rompe nada de forma visible: la columna queda en `null` para siempre y el aviso de "al cotizar no respondió X" desaparece del correo de la orden de compra, **en silencio** — justo la degradación que el spec dice estar previniendo. Es el paso más fácil de olvidar y el único cuyo olvido no se nota.
+3. **El relé después de las functions, y con sus variables ya cargadas.** El relé es el destino del nodo del grafo. Desplegarlo sin `MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET`, `PAGO_BASE_URL` y `KAPSO_API_KEY` deja `/api/pago/crear` respondiendo 503 `falta_configuracion`: si el grafo ya estuviera apuntando ahí, cada cierre moriría en ese 503. Por eso las variables van antes del deploy, y el deploy antes del grafo.
+4. **El grafo al final.** `npm run kapso:workflow` es el único comando de toda la rama que cambia lo que ve un cliente real. Hasta que corre, el bot sigue vendiendo exactamente como hoy; si el trabajo se detiene en cualquier punto anterior, producción queda intacta. Va último para que, cuando empiece a mandar tráfico, todo lo que va a consumir ese tráfico ya exista.
+
 - [ ] **Step 1: Crear la aplicación en Mercado Pago**
 
-En `developers.mercadopago.com`, con la cuenta de la empresa: crear una aplicación de tipo Checkout Pro. Anotar el **Access Token de prueba**. En la sección de Webhooks, configurar la notificación de tipo `payment` apuntando a `https://rr-mailing.vercel.app/api/pago/webhook` y copiar la **clave secreta** que Mercado Pago genera ahí.
+En `developers.mercadopago.com`, con la cuenta de la empresa: crear una aplicación de tipo Checkout Pro. Anotar el **Access Token de prueba**.
+
+En la sección de **Webhooks** — no en la preferencia — configurar la notificación de tipo `payment` apuntando a `https://rr-mailing.vercel.app/api/pago/webhook` y copiar la **clave secreta que Mercado Pago genera ahí**. Esa clave, y no otra, es la que valida `firma.ts`: no se deriva de la preferencia ni del access token. Cargar la equivocada es el modo de fallo más probable del primer día, y su síntoma es que *todos* los pagos fallan con 401 mientras el cliente espera una confirmación que nunca llega.
 
 Crear también un **usuario de prueba comprador** para poder pagar.
 
-- [ ] **Step 2: Cargar las variables en Vercel**
+- [ ] **Step 2: Ejecutar el SQL en Supabase**
+
+Pegar `docs/sql/2026-09-10-pagos.sql` en el SQL Editor de Supabase y ejecutarlo (es idempotente; si ya se corrió en la Task 1, este paso solo verifica).
+
+Expected: `pagos` aparece en el Table Editor y `cotizaciones` tiene la columna `proveedores_incompletos`. **No seguir sin esto**: el Step 4 la escribe y el cobro la lee.
+
+- [ ] **Step 3: Cargar las variables en Vercel**
 
 En el proyecto `rr-mailing` → Settings → Environment Variables, agregar las cuatro. `MP_ACCESS_TOKEN` y `MP_WEBHOOK_SECRET` como **Sensitive**.
 
 ```
 MP_ACCESS_TOKEN      = <access token de prueba>
-MP_WEBHOOK_SECRET    = <clave secreta del webhook>
+MP_WEBHOOK_SECRET    = <clave secreta de la sección Webhooks>
 PAGO_BASE_URL        = https://rr-mailing.vercel.app
 KAPSO_API_KEY        = <la misma de los scripts de kapso-agent>
 ```
 
-- [ ] **Step 3: Desplegar el relé**
+Van **antes** del deploy: un relé desplegado sin ellas responde 503 a todo cobro.
+
+- [ ] **Step 4: Redesplegar las functions de Kapso**
+
+```bash
+npm run kapso:functions   # redespliega generar-cotizacion-v2 con proveedores_incompletos
+```
+
+Expected: idempotente, sin errores. Este paso **no cambia el grafo** — sigue sin cobrarse nada.
+
+Verificar que la columna se está llenando: cotizar algo desde el número sandbox y mirar en Supabase que la fila nueva de `cotizaciones` tiene `proveedores_incompletos` con un array (aunque sea vacío), no `null`. Si sigue en `null`, el redespliegue no tomó y el aviso de qué mayorista no respondió va a desaparecer del correo de la orden de compra sin que nadie se entere.
+
+- [ ] **Step 5: Desplegar el relé**
 
 ```bash
 git push
@@ -2675,24 +2704,27 @@ curl -s -X POST "https://rr-mailing.vercel.app/api/pago/webhook?type=payment&dat
   -H 'Content-Type: application/json' -d '{}' -o /dev/null -w "%{http_code}\n"
 ```
 
-Expected: `401`.
+Expected: `401`. Y ese mismo curl **debe producir un correo de alerta interna**: es la forma más barata de confirmar que el camino de alerta funciona de punta a punta (ver Step 11c). Un segundo curl dentro de los 10 minutos siguientes **no** debe producir un segundo correo — esa es la ventana antiinundación, y el endpoint es público.
 
-- [ ] **Step 4: Cargar `MAILER_API_KEY` en el workflow de Kapso y desplegar el grafo**
+Comprobar además que el techo de ejecución tomó: en el deployment, Functions → `api/pago/webhook`, la duración máxima tiene que decir **300s**, no 30. Si dice 30, el patrón específico de `vercel.json` no está ganando sobre el glob general, o el proyecto está en un plan que no admite 300 (en Hobby el tope es 60). Con 30 el handler se muere a mitad del desenlace y deja la fila colgada en `aprobado`, que es exactamente lo que ese techo arregla.
+
+- [ ] **Step 6: Cargar `MAILER_API_KEY` en Kapso y desplegar el grafo**
 
 En el panel de Kapso, en las variables de entorno del proyecto, confirmar que existe `MAILER_API_KEY` con el mismo valor que tiene la function `emitir-ordenes-compra`. Después:
 
 ```bash
-npm run kapso:functions   # redespliega generar-cotizacion-v2 con el campo nuevo
 npm run kapso:workflow    # aplica la cirugia del grafo
 ```
 
-Expected: ambos idempotentes, sin errores. El segundo imprime `workflow actualizado: f8fbe458-...`.
+Expected: idempotente, sin errores. Imprime `workflow actualizado: f8fbe458-...`.
 
-- [ ] **Step 5: Verificar el camino feliz**
+**Este es el comando que cambia producción.** Desde acá, cada cierre cobra.
+
+- [ ] **Step 7: Verificar el camino feliz**
 
 Desde el número sandbox, conversar con el bot hasta el sí de `agente_cierre`.
 
-Expected: llega un mensaje con botón "Pagar" y el monto correcto con IVA.
+Expected, **y en este orden**: primero mirar el log de `/api/pago/crear` y confirmar un 200. Recién después confirmar que al cliente le llegó el botón "Pagar" con el monto correcto con IVA. El orden importa porque el mensaje al cliente lo manda el relé al final de todo: "no llegó el botón" tiene media docena de causas posibles y el log las distingue en un segundo. Si el log dice 400 `sin_confirmacion`, el agente de cierre llamó `complete_task` sin que `quote_confirmed` estuviera escrita — el guard hizo su trabajo, pero hay que revisar el prompt del cierre.
 
 Pagar con el usuario de prueba y una tarjeta de prueba **aprobada**.
 
@@ -2702,25 +2734,37 @@ Expected, en orden:
 3. El pedido aparece en el backoffice ya en estado **pagado**, no en `nuevo`.
 4. La fila de `pagos` en Supabase quedó en `emitido`.
 
-- [ ] **Step 6: Verificar el rechazo**
+- [ ] **Step 8: Verificar el rechazo**
 
 Repetir con una tarjeta de prueba **rechazada**.
 
 Expected: llega el aviso de rechazo, **no** se emite ninguna orden, la fila sigue `pendiente` y `intentos_rechazados` es 1. Pagar después con la tarjeta buena, con el mismo link, tiene que funcionar.
 
-- [ ] **Step 7: Verificar la idempotencia**
+- [ ] **Step 9: Verificar la idempotencia**
 
-Desde el panel de Mercado Pago, reenviar a mano la notificación del pago aprobado del paso 5.
+Desde el panel de Mercado Pago, reenviar a mano la notificación del pago aprobado del Step 7.
 
-Expected: no se emite una segunda orden de compra (ni llega un segundo correo), y la fila sigue en `emitido`.
+Expected: no se emite una segunda orden de compra (ni llega un segundo correo), la fila sigue en `emitido` y **no llega ninguna alerta interna** — la reentrega del mismo pago sobre una fila ya resuelta es el único caso en que el 200 silencioso sigue siendo lo correcto.
 
-- [ ] **Step 8: Verificar el caso sin vigencia**
+- [ ] **Step 10: Verificar el caso sin vigencia**
 
 En Supabase, sobre una cotización nueva de prueba, adelantar `valida_hasta` a dentro de 5 minutos. Confirmar el pedido en el bot.
 
 Expected: no se crea link; llega el mensaje de que hay que refrescar precios.
 
-- [ ] **Step 9: Anotar el resultado**
+- [ ] **Step 11: Verificar los cuatro riesgos de la primera corrida**
+
+Ninguno de estos cuatro se descubre mirando WhatsApp, y los cuatro son caminos que nunca se ejecutaron en producción. Verificarlos acá es más barato que descubrirlos con plata de por medio.
+
+**a. El secreto del webhook.** El primer chequeo del smoke test es el **log del webhook**, antes que cualquier cosa del lado del cliente. Después de pagar en el Step 7, abrir los logs de `/api/pago/webhook` en Vercel y confirmar un **200**. Un 401 ahí significa que `MP_WEBHOOK_SECRET` no es la clave de la sección Webhooks del panel (no se deriva de la preferencia), y el síntoma del lado del cliente — "no me llegó la confirmación" — es idéntico al de media docena de otras causas.
+
+**b. La expiración del link.** Mercado Pago puede aceptar el POST de la preferencia e **ignorar** `expiration_date_to`, que es peor que rechazarlo: deja links vivos que sobreviven a la cotización que los justifica. No darlo por bueno porque la preferencia se creó. Consultar la preferencia por API (`GET /checkout/preferences/<id>` con el access token) y confirmar que `expires` es `true` y que `expiration_date_to` es la fecha que se mandó. Si no lo es, el link hay que tratarlo como permanente hasta que alguien lo arregle.
+
+**c. La alerta interna, de verdad.** Es la única alarma del sistema y su camino de producción — Gmail, `MAILER_FROM`, la lista blanca de `MAILER_ALLOWED_RECIPIENTS` — nunca se ejecutó. Forzar una alerta real y **confirmar que el correo llega a la casilla**; lo más barato es el curl con firma inválida del Step 5. Si no llega, todos los modos de fallo con plata recibida vuelven a ser silenciosos, que es la situación que esta rama entera existe para evitar.
+
+**d. Qué hace el nodo del grafo con un código que no es 2xx.** Es el único comportamiento de la plataforma sin verificar en el camino crítico: no sabemos si Kapso reintenta, si sigue a la arista `next` igual, o si corta la ejecución. Forzarlo — por ejemplo con un `MP_ACCESS_TOKEN` inválido por un momento (502), o cerrando sobre una cotización cuya `valida_hasta` ya pasó (409) — y mirar el **historial de ejecución del workflow en Kapso**, no solo el WhatsApp. Anotar qué hizo. Si reintenta, hay que saberlo: `/api/pago/crear` es idempotente por `quote_id` a propósito, pero esa idempotencia nunca se ejercitó contra reintentos reales de la plataforma.
+
+- [ ] **Step 12: Anotar el resultado**
 
 Agregar al final del README de `apps/mailer` una línea con la fecha de la verificación y qué credenciales se usaron (prueba o producción), igual que hace `apps/kapso-agent/README.md` con sus verificaciones.
 
@@ -2739,4 +2783,4 @@ git commit -m "docs(pagos): resultado de la verificacion de punta a punta"
 - `invocarFunction` queda duplicada entre `apps/tienda/src/lib/kapso.ts` y `apps/mailer/src/pago/kapso.ts`. Colapsan en un paquete cuando la tienda cobre.
 - Pasar a producción es cambiar `MP_ACCESS_TOKEN` y `MP_WEBHOOK_SECRET` en Vercel y el `notification_url` en el panel de Mercado Pago. No toca código.
 
-**El orden de las tareas no es negociable en un punto:** el bot sigue vendiendo exactamente como hoy hasta el Step 4 de la Task 11, el `npm run kapso:workflow` que aplica la cirugía del grafo. Las tareas 1 a 10 solo agregan código que nadie invoca todavía — la Task 10 deja el grafo nuevo escrito en el script, pero no desplegado. Si el trabajo se detiene en cualquier punto antes de ese comando, producción queda intacta.
+**El orden de las tareas no es negociable en un punto:** el bot sigue vendiendo exactamente como hoy hasta el Step 6 de la Task 11, el `npm run kapso:workflow` que aplica la cirugía del grafo. Las tareas 1 a 10 solo agregan código que nadie invoca todavía — la Task 10 deja el grafo nuevo escrito en el script, pero no desplegado. Si el trabajo se detiene en cualquier punto antes de ese comando, producción queda intacta.
