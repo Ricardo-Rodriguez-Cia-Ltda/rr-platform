@@ -231,6 +231,40 @@ describe('POST /api/pago/webhook', () => {
     expect(mensajes[0]).toContain('rechazado');
   });
 
+  it('segunda notificacion de un pago rechazado con el mismo id: no repite el aviso ni la escritura', async () => {
+    // Mercado Pago reenvia habitualmente mas de una notificacion por el mismo
+    // pago (una al crearse, otra al actualizarse). La fila ya trae
+    // mp_payment_id de la entrega anterior: misma id, no se vuelve a sumar
+    // el contador ni a avisar al cliente por segunda vez.
+    const escrituras: any[] = [];
+    const mensajes: string[] = [];
+    routeFetch({
+      escrituras, mensajes,
+      pago: [{ ...PAGO, mp_payment_id: PAYMENT_ID }],
+      mpPago: { id: PAYMENT_ID, status: 'rejected', external_reference: QUOTE, transaction_amount: 219725 },
+    });
+    const res = makeRes();
+    await createWebhookHandler()(makeReq(), res, ENV);
+    expect(res.statusCode).toBe(200);
+    expect(escrituras).toHaveLength(0);
+    expect(mensajes).toHaveLength(0);
+  });
+
+  it('segunda notificacion de monto que no calza con el mismo id: no repite la alerta interna', async () => {
+    const escrituras: any[] = [];
+    const alertas: string[] = [];
+    routeFetch({
+      escrituras,
+      pago: [{ ...PAGO, mp_payment_id: PAYMENT_ID }],
+      mpPago: { id: PAYMENT_ID, status: 'approved', external_reference: QUOTE, transaction_amount: 1000 },
+    });
+    const res = makeRes();
+    await createWebhookHandler(async (asunto) => { alertas.push(asunto); })(makeReq(), res, ENV);
+    expect(res.statusCode).toBe(200);
+    expect(alertas).toHaveLength(0);
+    expect(escrituras).toHaveLength(0);
+  });
+
   it('pago aun pending: 200 y nada se escribe', async () => {
     const escrituras: any[] = [];
     routeFetch({

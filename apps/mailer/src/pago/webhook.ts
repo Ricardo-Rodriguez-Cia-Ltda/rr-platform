@@ -115,7 +115,27 @@ export function createWebhookHandler(alertar: Alertar = alertarPorDefecto) {
       texto,
     });
 
+    // Mercado Pago reenvia habitualmente mas de una notificacion por el
+    // mismo pago (una al crearse, otra al actualizarse), ambas con firma
+    // valida y el mismo id de pago. Sin este guard, las ramas de rechazado y
+    // de monto que no calza -- que corren ANTES de la transicion atomica y
+    // por lo tanto no estan protegidas por ella -- mandarian el aviso o la
+    // alerta una vez por cada reentrega.
+    //
+    // No suprime un rechazo genuino posterior: si el cliente reintenta con
+    // el mismo link, Mercado Pago crea un pago NUEVO con id distinto, asi
+    // que este guard no se activa y el cliente recibe su aviso.
+    //
+    // El camino aprobado con monto correcto no usa este guard: ya tiene su
+    // propia proteccion en la transicion atomica de reclamarAprobado (mas
+    // abajo), que es la que decide si esta entrega ya se tomo.
+    const yaProcesado = fila.mp_payment_id != null && String(fila.mp_payment_id) === String(pagoMP.id);
+
     if (pagoMP.status === 'rejected') {
+      if (yaProcesado) {
+        res.status(200).json({ ok: true, estado: 'rechazado', duplicado: true });
+        return;
+      }
       // No cambia el estado: la fila sigue `pendiente` para que el siguiente
       // intento con el mismo link pueda reclamarla.
       await sumarRechazo(env, quoteId, String(pagoMP.id));
@@ -132,6 +152,10 @@ export function createWebhookHandler(alertar: Alertar = alertarPorDefecto) {
     // El monto tiene que ser exactamente el que cobramos. Un pago aprobado por
     // otra cifra es plata recibida contra un pedido que no cuadra: se congela.
     if (Number(pagoMP.transaction_amount) !== Number(fila.monto_clp)) {
+      if (yaProcesado) {
+        res.status(200).json({ ok: true, estado: 'aprobado_sin_emitir', duplicado: true });
+        return;
+      }
       await marcarEstado(env, quoteId, 'aprobado_sin_emitir', { mp_payment_id: String(pagoMP.id) });
       await alertar(
         `Pago aprobado con monto que no calza (cotizacion ${quoteId})`,
