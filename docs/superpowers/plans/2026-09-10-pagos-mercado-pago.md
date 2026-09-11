@@ -2706,7 +2706,9 @@ curl -s -X POST "https://rr-mailing.vercel.app/api/pago/webhook?type=payment&dat
 
 Expected: `401`. Y ese mismo curl **debe producir un correo de alerta interna**: es la forma más barata de confirmar que el camino de alerta funciona de punta a punta (ver Step 11c). Un segundo curl dentro de los 10 minutos siguientes **no** debe producir un segundo correo — esa es la ventana antiinundación, y el endpoint es público.
 
-Comprobar además que el techo de ejecución tomó: en el deployment, Functions → `api/pago/webhook`, la duración máxima tiene que decir **300s**, no 30. Si dice 30, el patrón específico de `vercel.json` no está ganando sobre el glob general, o el proyecto está en un plan que no admite 300 (en Hobby el tope es 60). Con 30 el handler se muere a mitad del desenlace y deja la fila colgada en `aprobado`, que es exactamente lo que ese techo arregla.
+Confirmar que el plan del proyecto admite 300s de ejecución: en **Hobby el tope es 60**, y con 60 el handler puede morirse a mitad del desenlace y dejar la fila colgada en `aprobado`, que es exactamente lo que ese techo arregla. Eso el código no lo puede forzar y el plan sigue siendo cosa de mirar.
+
+Lo que ya **no** hace falta verificar a ojo es cuál patrón ganó: el techo lo declara cada archivo de `api/pago/` con `export const maxDuration = 300`, y el runtime de Node lo lee de ahí. Gana sobre la configuración por globs y no depende de en qué orden Vercel resuelva dos patrones que se solapan, así que `vercel.json` quedó con un solo glob general y el modo de fallo silencioso —el techo quedándose en 30 sin ningún error— desapareció. Una prueba lo sostiene (`pago-webhook.test.ts`, «techo de ejecucion de las rutas de pago»).
 
 - [ ] **Step 6: Cargar `MAILER_API_KEY` en Kapso y desplegar el grafo**
 

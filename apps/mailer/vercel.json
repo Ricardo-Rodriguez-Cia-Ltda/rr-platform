@@ -3,9 +3,6 @@
   "buildCommand": "cd ../.. && npm run build:packages && cd apps/mailer && mkdir -p salida-vacia && printf 'rr-mailing: solo funciones en /api, sin contenido estatico.' > salida-vacia/index.html",
   "outputDirectory": "salida-vacia",
   "functions": {
-    "api/pago/*.ts": {
-      "maxDuration": 300
-    },
     "api/**/*.ts": {
       "maxDuration": 30
     }

@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { construirManifiesto } from '../src/pago/firma.js';
@@ -568,21 +568,31 @@ describe('el monto que no calza no pisa una fila ya resuelta', () => {
 // un techo por debajo del presupuesto es exactamente el bug; no mas alto
 // porque no hay nada que esperar despues de esos 175s.
 // =====================================================================
+//
+// R2: ese techo se conseguia con una entrada especifica de `vercel.json`
+// puesta antes del glob general, y dependia de que Vercel resolviera los dos
+// patrones en ese orden. Si el glob general ganaba, el techo se quedaba en 30
+// y el arreglo del estado colgado no aplicaba, sin ningun error visible. El
+// runtime de Node lee `export const maxDuration` del archivo de la funcion y
+// eso gana sobre la configuracion por globs, sin depender de ningun orden.
 describe('techo de ejecucion de las rutas de pago', () => {
   const config = JSON.parse(readFileSync('apps/mailer/vercel.json', 'utf8'));
-  const patrones = Object.keys(config.functions);
+  const rutasDePago = readdirSync('apps/mailer/api/pago').filter((f) => f.endsWith('.ts'));
 
-  it('las rutas de pago tienen un techo holgado frente al presupuesto de timeouts', () => {
-    const pago = patrones.find((p) => p.startsWith('api/pago/'));
-    expect(pago, 'no hay una entrada especifica para las rutas de pago').toBeDefined();
-    expect(config.functions[pago!].maxDuration).toBeGreaterThanOrEqual(175);
+  it('hay rutas de pago que mirar', () => {
+    expect(rutasDePago.length).toBeGreaterThan(0);
   });
 
-  it('el patron especifico va antes del glob general, que gana por orden', () => {
-    const pago = patrones.findIndex((p) => p.startsWith('api/pago/'));
-    const general = patrones.indexOf('api/**/*.ts');
-    expect(general, 'el glob general sigue existiendo para el resto de api/').toBeGreaterThan(-1);
-    expect(pago).toBeLessThan(general);
+  it.each(rutasDePago)('api/pago/%s declara su propio techo, holgado frente al presupuesto de timeouts', (archivo) => {
+    const fuente = readFileSync(`apps/mailer/api/pago/${archivo}`, 'utf8');
+    const m = fuente.match(/export const maxDuration\s*=\s*(\d+)/);
+    expect(m, `api/pago/${archivo} no declara maxDuration`).not.toBeNull();
+    expect(Number(m![1])).toBeGreaterThanOrEqual(175);
+  });
+
+  it('vercel.json queda con un solo glob, asi que no hay orden que resolver', () => {
+    const patrones = Object.keys(config.functions);
+    expect(patrones).toEqual(['api/**/*.ts']);
   });
 
   it('el resto de api/ conserva su techo corto', () => {

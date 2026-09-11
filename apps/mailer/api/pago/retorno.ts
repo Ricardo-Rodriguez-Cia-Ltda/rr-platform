@@ -1,5 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
+// Mismo techo que api/pago/webhook.ts, declarado en el archivo por la misma
+// razon: gana sobre los globs de `vercel.json` sin depender del orden en que
+// Vercel los resuelva. La justificacion del 300 esta en webhook.ts.
+export const maxDuration = 300;
+
 // La pagina a la que Mercado Pago devuelve al cliente. No decide nada: la
 // verdad del pago llega por el webhook. Solo lo devuelve a la conversacion.
 export default function handler(_req: VercelRequest, res: VercelResponse): void {
