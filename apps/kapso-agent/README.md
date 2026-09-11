@@ -8,8 +8,11 @@ Functions y sale como precio de venta.
 
 - **Workflow:** `rr-isia-version2`
 - **id:** `f8fbe458-118e-4c0f-97d0-b24c2fbf151d`
-- **Estado a la fecha de este documento (2026-08-28):** `active`, 13 nodos,
-  15 aristas (verificado con `GET /workflows/{id}/definition`).
+- **Grafo a la fecha de este documento (2026-09-10):** 12 nodos, 14 aristas,
+  tal como los define `scripts/deploy-workflow.ts` — todavía sin desplegar,
+  así que no hay una verificación fresca contra `GET /workflows/{id}/definition`
+  que lo confirme. La última verificación contra la API real fue el
+  2026-08-28, contra el grafo anterior (`active`, 13 nodos, 15 aristas).
 - **Los 7 nodos que invocan una function apuntan a functions `deployed`**, y el
   cupo quedó en 5 de 5. Cualquier function nueva que haga falta desplegar exige
   liberar cupo antes.
