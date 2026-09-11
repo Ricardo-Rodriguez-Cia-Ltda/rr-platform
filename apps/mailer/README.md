@@ -15,8 +15,9 @@ autenticado, decide si puede mandarlo, y lo manda. Toda la lógica de negocio
 (agrupar por mayorista, la reserva idempotente, qué hacer si falla) vive en
 quien lo llama, no acá.
 
-Esta app tiene un segundo endpoint, `GET /api/cotizacion/<quote_id>`, que sí
-conoce las cotizaciones: lee la fila en Supabase y devuelve el PDF. Ver la
+Además de `POST /api/send`, esta app expone `GET /api/cotizacion/<quote_id>`
+— que sí conoce las cotizaciones, lee la fila en Supabase y devuelve el PDF
+— y las rutas de cobro con Mercado Pago bajo `/api/pago/`. Cada una tiene su
 sección dedicada más abajo.
 
 ## Arquitectura
@@ -59,6 +60,14 @@ Variables nuevas en el proyecto `rr-mailing`:
 
 En el panel de Mercado Pago hay que apuntar la notificación de tipo `payment`
 a `<PAGO_BASE_URL>/api/pago/webhook`.
+
+El aviso interno ("recibimos plata y no pudimos emitir la orden") sale al
+primer valor de `MAILER_ALLOWED_RECIPIENTS` — la misma lista blanca del
+endpoint de correo, documentada en "Variables de entorno" y en "La lista
+blanca de destinatarios es deliberada" más abajo. Hoy funciona porque esa
+lista tiene una sola dirección; si alguien le agrega una segunda por
+cualquier otro motivo, este aviso empieza a salir hacia lo que quede
+primero en la lista, no necesariamente hacia quien debe verlo.
 
 **Por qué el cobro vive acá y no en una app propia:** el relé ya autentica
 llamadas de Kapso, ya lee Supabase y ya manda correo en proceso — las tres
@@ -232,6 +241,12 @@ Hoy la lista tiene una sola dirección: la casilla interna. Cuando llegue la
 fase 2 (cotizaciones y facturas a clientes) habrá que mandar a direcciones
 arbitrarias, y ese es el momento de **reemplazar** la lista blanca por otro
 control — no de vaciarla ni de aflojarla antes.
+
+**Ojo si se le agrega una segunda dirección por cualquier otro motivo:**
+`crearAlertar` (`apps/mailer/src/pago/alerta.ts`, ver "Cobro con Mercado
+Pago" más arriba) manda el aviso interno de pagos sin orden emitida al
+*primer* valor de esta misma lista. Agregar una dirección sin revisar ese
+acoplamiento puede desplazar ese aviso a quien no debe recibirlo.
 
 ## Tests
 
