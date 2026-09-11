@@ -40,6 +40,22 @@ describe('armarPayloadEmision', () => {
     expect(p.execution_context.vars.quote_result.quote_id).toBe(ROW.quote_id);
     expect(p.execution_context.context.phone_number).toBe('56941757584');
   });
+
+  it('quote_confirmed y quote_result no pueden ser pisados por datos, aunque datos los incluya', () => {
+    const quote = reconstruirQuote(ROW);
+    const p: any = armarPayloadEmision(quote, {
+      quote_customer_name: 'Acme SpA',
+      quote_confirmed: false,
+      quote_result: { basura: true },
+    }, '56941757584');
+    // quote_confirmed debe ser true (autoritativa)
+    expect(p.execution_context.vars.quote_confirmed).toBe(true);
+    // quote_result debe ser el real, no la basura
+    expect(p.execution_context.vars.quote_result.quote_id).toBe(ROW.quote_id);
+    expect(p.execution_context.vars.quote_result.basura).toBeUndefined();
+    // quote_customer_name sí debe pasar desde datos
+    expect(p.execution_context.vars.quote_customer_name).toBe('Acme SpA');
+  });
 });
 
 describe('vigenciaUtil', () => {

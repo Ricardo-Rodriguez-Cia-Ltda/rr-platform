@@ -22,6 +22,11 @@ export function reconstruirQuote(row: CotizacionRow): Record<string, unknown> {
 /**
  * El mismo execution_context sintetico que arma apps/tienda/src/lib/pedido.ts.
  * `datos` viene de la fila `pagos`: quote_customer_name y los billing_*.
+ *
+ * El orden de las claves importa: quote_result y quote_confirmed van después de
+ * ...datos para que sean autoritativas. Si datos incluyera esas claves, no debe
+ * poder pisarlas, porque estos campos alimentan emitir-ordenes-compra que hace
+ * órdenes de compra reales a mayoristas.
  */
 export function armarPayloadEmision(
   quote: Record<string, unknown>,
@@ -30,7 +35,7 @@ export function armarPayloadEmision(
 ): unknown {
   return {
     execution_context: {
-      vars: { quote_result: quote, quote_confirmed: true, ...datos },
+      vars: { ...datos, quote_result: quote, quote_confirmed: true },
       context: { phone_number: telefono ?? '' },
     },
   };
