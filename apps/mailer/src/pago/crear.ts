@@ -98,6 +98,17 @@ export function createCrearHandler() {
       res.status(405).json({ ok: false, error: 'metodo_no_permitido' });
       return;
     }
+
+    // Caso puntual, no el chequeo de configuracion completo: sin esta clave
+    // NINGUN valor de x-api-key puede autorizar, asi que un 401 aqui no
+    // protege nada -- solo confunde a quien despliega, que sale a buscar un
+    // problema de credenciales que no existe. No se adelanta el resto de
+    // REQUERIDAS: eso si le daria a cualquiera sin credenciales una sonda
+    // para averiguar que otras variables faltan.
+    if (!env.MAILER_API_KEY) {
+      res.status(503).json({ ok: false, error: 'falta_configuracion', faltan: ['MAILER_API_KEY'] });
+      return;
+    }
     if (!isAuthorized(firstString(req.headers['x-api-key']), env.MAILER_API_KEY)) {
       res.status(401).json({ ok: false, error: 'no_autorizado' });
       return;
@@ -115,13 +126,6 @@ export function createCrearHandler() {
       res.status(503).json({ ok: false, error: 'falta_configuracion', faltan });
       return;
     }
-
-    const avisar = (texto: string) => enviarTexto({
-      telefono: entrada.telefono,
-      phoneNumberId: entrada.phoneNumberId,
-      key: env.KAPSO_API_KEY as string,
-      texto,
-    });
 
     // Idempotencia: una segunda llamada por la misma cotizacion devuelve el
     // link que ya existe en vez de crear otra preferencia. La llave primaria
@@ -145,6 +149,20 @@ export function createCrearHandler() {
       res.status(404).json({ ok: false, error: 'cotizacion_no_encontrada' });
       return;
     }
+
+    // Unica expresion de "cual es el telefono del cliente": la usan tanto la
+    // fila que se persiste como los avisos de fallo de mas abajo. Antes,
+    // `avisar` capturaba solo `entrada.telefono` sin este fallback, asi que
+    // un cuerpo sin phone_number usable dejaba mudos los cuatro caminos de
+    // fallo aunque la cotizacion sí tuviera telefono guardado.
+    const telefonoCliente = entrada.telefono || cotizacion.telefono || '';
+
+    const avisar = (texto: string) => enviarTexto({
+      telefono: telefonoCliente,
+      phoneNumberId: entrada.phoneNumberId,
+      key: env.KAPSO_API_KEY as string,
+      texto,
+    });
 
     // Por debajo del margen el link nace condenado: se aprobaria el pago y
     // emitir-ordenes-compra lo rechazaria por vigencia. Mejor no mandarlo.
@@ -184,7 +202,7 @@ export function createCrearHandler() {
       quote_id: entrada.quoteId,
       quote_version: String(cotizacion.version ?? entrada.quoteVersion),
       numero: cotizacion.numero ?? null,
-      telefono: entrada.telefono || cotizacion.telefono || null,
+      telefono: telefonoCliente || null,
       phone_number_id: entrada.phoneNumberId || null,
       preference_id: preferencia.id,
       init_point: preferencia.init_point,
@@ -202,7 +220,7 @@ export function createCrearHandler() {
     }
 
     await enviarBotonPago({
-      telefono: fila.telefono ?? '',
+      telefono: telefonoCliente,
       phoneNumberId: entrada.phoneNumberId,
       key: env.KAPSO_API_KEY as string,
       texto: MENSAJES.linkCreado(formatearClp(montoClp)),

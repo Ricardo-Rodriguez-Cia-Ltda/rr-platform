@@ -215,4 +215,55 @@ describe('POST /api/pago/crear', () => {
     const cuerpoPreferencia = preferenciaEnviada[0] as any;
     expect(cuerpoPreferencia.payer.name).toBe('Cliente');
   });
+
+  // Añadido (ronda 3, fix #1 del coordinador): `avisar` capturaba solo
+  // `entrada.telefono`, sin el fallback al telefono de la cotizacion que si
+  // usa la fila persistida. Un cuerpo sin phone_number usable, con la
+  // cotizacion sí guardando telefono, dejaba mudos los cuatro caminos de
+  // fallo que deben avisarle al cliente.
+  it('sin phone_number en el cuerpo, el aviso de fallo usa el telefono de la cotizacion', async () => {
+    const mensajes: string[] = [];
+    const { phone_number, ...cuerpoSinTelefono } = CUERPO as any;
+    routeFetch({
+      cotizacion: [{ ...COTIZACION, valida_hasta: new Date(Date.now() + 5 * 60_000).toISOString() }],
+      mensajes,
+    });
+    const res = makeRes();
+    await createCrearHandler()(makeReq(cuerpoSinTelefono), res, ENV);
+    expect(res.statusCode).toBe(409);
+    expect(mensajes).toHaveLength(1);
+    const enviado = JSON.parse(mensajes[0]);
+    expect(enviado.to).toBe(COTIZACION.telefono);
+    expect(enviado.text.body).toContain('refrescar');
+  });
+
+  // Añadido (ronda 3, fix #2 del coordinador): el escenario que mas preocupa
+  // -- la preferencia se crea bien en Mercado Pago pero la fila no se puede
+  // guardar en `pagos`. No se debe mandar el link (no hay donde anotar el
+  // pago para que el webhook lo reclame), pero si avisar honestamente.
+  it('la preferencia se crea pero la fila no se puede guardar: 503, aviso y sin boton de pago', async () => {
+    const mensajes: string[] = [];
+    routeFetch({ crearPago: 500, mensajes });
+    const res = makeRes();
+    await createCrearHandler()(makeReq(CUERPO), res, ENV);
+    expect(res.statusCode).toBe(503);
+    expect(mensajes).toHaveLength(1);
+    const enviado = JSON.parse(mensajes[0]);
+    expect(enviado.type).toBe('text');
+    expect(enviado.text.body).toContain('problema');
+  });
+
+  // Añadido (ronda 3, fix #3 del coordinador): si falta justo MAILER_API_KEY,
+  // NINGUN valor de x-api-key puede autorizar. Responder 401 en ese caso
+  // confunde a quien despliega, que sale a buscar un problema de credenciales
+  // que no existe. Debe responder 503 nombrando la variable, sin tocar fetch.
+  it('falta MAILER_API_KEY: 503 nombrandola, no 401', async () => {
+    const spy = vi.fn();
+    vi.stubGlobal('fetch', spy);
+    const res = makeRes();
+    await createCrearHandler()(makeReq(CUERPO), res, { ...ENV, MAILER_API_KEY: undefined } as any);
+    expect(res.statusCode).toBe(503);
+    expect(res.jsonBody.faltan).toContain('MAILER_API_KEY');
+    expect(spy).not.toHaveBeenCalled();
+  });
 });
