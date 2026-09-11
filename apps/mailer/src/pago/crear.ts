@@ -34,35 +34,56 @@ interface Entrada {
 // El nodo `webhook` de Kapso rellena plantillas {{vars.xxx}} en el cuerpo que
 // manda. Si una variable nunca se escribio durante la conversacion, Kapso
 // puede entregar el literal sin renderizar en vez de una cadena vacia. Un
-// valor asi no es un dato real: es un placeholder roto que, si se guardara,
-// terminaria impreso tal cual en el PDF de la orden de compra al mayorista.
-// Por eso se trata igual que un valor vacio -- se omite. No "limpiar" esto:
-// el origen del riesgo es el webhook de Kapso, no un bug de formato.
+// valor asi no es un dato real: es un placeholder roto que, sin sanear, puede
+// llegar a un lugar que lo muestra a una persona -- el PDF de la orden de
+// compra via `datos`, o la pagina de pago de Mercado Pago via el nombre del
+// pagador. Por eso se trata igual que un valor vacio, y el saneo ocurre UNA
+// sola vez, al leer cada campo (ver `leerTexto`): todo lo que corre aguas
+// abajo hereda el valor ya sano, sin repetir el guard en cada punto de uso.
+// No "limpiar" esto: el origen del riesgo es el webhook de Kapso, no un bug
+// de formato.
 function esPlantillaSinRenderizar(valor: string): boolean {
   return valor.startsWith('{{') && valor.endsWith('}}');
+}
+
+// Lee y recorta un campo de texto del cuerpo; si el resultado esta vacio o
+// parece una plantilla de Kapso sin renderizar, devuelve `porDefecto`.
+function leerTexto(valor: unknown, porDefecto = ''): string {
+  const texto = String(valor ?? '').trim();
+  return texto && !esPlantillaSinRenderizar(texto) ? texto : porDefecto;
 }
 
 function leerEntrada(body: unknown): Entrada | null {
   if (typeof body !== 'object' || body === null) return null;
   const b = body as Record<string, unknown>;
-  const quoteId = String(b.quote_id ?? '').trim();
+  const quoteId = leerTexto(b.quote_id);
   if (!quoteId) return null;
 
   const datos: Record<string, unknown> = {};
-  const nombre = String(b.customer_name ?? '').trim();
-  if (nombre && !esPlantillaSinRenderizar(nombre)) datos.quote_customer_name = nombre;
+  const nombre = leerTexto(b.customer_name);
+  if (nombre) datos.quote_customer_name = nombre;
   for (const campo of BILLING) {
-    const valor = String(b[campo] ?? '').trim();
-    if (valor && !esPlantillaSinRenderizar(valor)) datos[campo] = valor;
+    const valor = leerTexto(b[campo]);
+    if (valor) datos[campo] = valor;
   }
 
   return {
     quoteId,
-    quoteVersion: String(b.quote_version ?? '1'),
-    telefono: String(b.phone_number ?? '').replace(/\D/g, ''),
-    phoneNumberId: String(b.phone_number_id ?? '').trim(),
+    quoteVersion: leerTexto(b.quote_version, '1'),
+    // El digit-strip de mas abajo ya diluye casi cualquier plantilla sin
+    // renderizar (no trae digitos), pero se sanea primero de todos modos:
+    // es el mismo campo que decide si `enviarBotonPago`/`enviarTexto`
+    // encuentran destinatario, y no debe depender de esa coincidencia.
+    telefono: leerTexto(b.phone_number).replace(/\D/g, ''),
+    // Si llega sin renderizar, cae a cadena vacia: `enviarMensaje` en
+    // kapso.ts ya trata phoneNumberId vacio como "no hay a quien mandarle" y
+    // no intenta la llamada, en vez de pegarle a la API de Meta con un id
+    // literal como "{{vars.phone_number_id}}".
+    phoneNumberId: leerTexto(b.phone_number_id),
     datos,
-    email: String(b.billing_email ?? '').trim() || 'sin-email@drcomputacion.cl',
+    // `datos.billing_email` ya paso por el mismo saneo en el loop de arriba;
+    // se reusa en vez de releer el campo crudo una segunda vez.
+    email: typeof datos.billing_email === 'string' ? datos.billing_email : 'sin-email@drcomputacion.cl',
     nombre: nombre || 'Cliente',
   };
 }

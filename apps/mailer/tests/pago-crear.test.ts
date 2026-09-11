@@ -47,6 +47,7 @@ function routeFetch(h: {
   preferencia?: { status: number; body: unknown };
   mensajes?: string[];
   escrituras?: unknown[];
+  preferenciaEnviada?: unknown[];
 }) {
   const spy = vi.fn(async (url: any, init?: RequestInit) => {
     const href = String(url);
@@ -63,6 +64,11 @@ function routeFetch(h: {
       return new Response('[]', { status: h.crearPago ?? 201 });
     }
     if (href.includes('api.mercadopago.com')) {
+      // Captura el cuerpo que se le manda a Mercado Pago (el payer incluido),
+      // para que los tests puedan verificar que no lleva plantillas de Kapso.
+      if (init?.body && h.preferenciaEnviada) {
+        h.preferenciaEnviada.push(JSON.parse(String(init.body)));
+      }
       const p = h.preferencia ?? { status: 201, body: { id: 'pref-1', init_point: 'https://mp/pagar' } };
       return new Response(JSON.stringify(p.body), { status: p.status });
     }
@@ -189,5 +195,24 @@ describe('POST /api/pago/crear', () => {
     expect(filaPago.datos).not.toHaveProperty('billing_rut');
     // El resto del cuerpo, que si vino renderizado, se guarda con normalidad.
     expect(filaPago.datos.quote_customer_name).toBe('Acme SpA');
+  });
+
+  // Añadido (ronda 2, pedido del coordinador): el mismo defecto por otra
+  // puerta. `customer_name` sin renderizar no solo puede quedar guardado en
+  // `datos` -- tambien viaja como nombre del pagador a Mercado Pago, visible
+  // en la pagina de pago que ve el cliente. El saneo tiene que ocurrir una
+  // sola vez al leer la entrada, para que el payer herede el valor ya sano
+  // y caiga en su fallback 'Cliente' en vez del literal.
+  it('customer_name como plantilla sin renderizar cae al payer por defecto en Mercado Pago', async () => {
+    const preferenciaEnviada: unknown[] = [];
+    routeFetch({ preferenciaEnviada });
+    const res = makeRes();
+    await createCrearHandler()(makeReq({
+      ...CUERPO,
+      customer_name: '{{vars.quote_customer_name}}',
+    }), res, ENV);
+    expect(res.statusCode).toBe(200);
+    const cuerpoPreferencia = preferenciaEnviada[0] as any;
+    expect(cuerpoPreferencia.payer.name).toBe('Cliente');
   });
 });
