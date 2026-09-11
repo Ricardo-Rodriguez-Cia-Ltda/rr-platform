@@ -2710,6 +2710,10 @@ Confirmar que el plan del proyecto admite 300s de ejecución: en **Hobby el tope
 
 Lo que ya **no** hace falta verificar a ojo es cuál patrón ganó: el techo lo declara cada archivo de `api/pago/` con `export const maxDuration = 300`, y el runtime de Node lo lee de ahí. Gana sobre la configuración por globs y no depende de en qué orden Vercel resuelva dos patrones que se solapan, así que `vercel.json` quedó con un solo glob general y el modo de fallo silencioso —el techo quedándose en 30 sin ningún error— desapareció. Una prueba lo sostiene (`pago-webhook.test.ts`, «techo de ejecucion de las rutas de pago»).
 
+**Pero sí hay que mirarlo una vez, después del primer deploy.** Que el runtime honre `export const maxDuration` por sobre `vercel.json` es documentación de Vercel, no algo que este repositorio haya comprobado: las pruebas verifican que el archivo lo declara, no que la plataforma lo respete. Y si esa premisa fuera falsa, nada lo detectaría — el techo se quedaría en 30 y volvería el fallo que este paso arregla, en silencio.
+
+Así que en el dashboard, tras el primer deploy: Functions → `api/pago/webhook` → confirmar que la duración máxima dice **300s** y no 30. Es una sola vez, no en cada deploy: a diferencia del problema del orden de los globs, esto no cambia entre despliegues. Si dice 30, el `export` no está ganando y hay que volver a la entrada específica en `vercel.json`, verificando el valor efectivo de nuevo.
+
 - [ ] **Step 6: Cargar `MAILER_API_KEY` en Kapso y desplegar el grafo**
 
 En el panel de Kapso, en las variables de entorno del proyecto, confirmar que existe `MAILER_API_KEY` con el mismo valor que tiene la function `emitir-ordenes-compra`. Después:
@@ -2779,10 +2783,53 @@ git commit -m "docs(pagos): resultado de la verificacion de punta a punta"
 
 ## Notas de cierre
 
+**Lo primero que hay que hacer después de esto, y no es opcional:** un barrido
+periódico sobre las filas de `pagos` que lleven rato en estado `aprobado`.
+
+Hoy la detección de una fila atascada —pago cobrado, orden no emitida— depende
+de que llegue una notificación de Mercado Pago más de diez minutos después de
+que la fila se reclamó. Las dos notificaciones que Mercado Pago manda de rutina
+llegan con segundos de diferencia, o sea dentro del umbral, y después de
+responder 200 no tiene motivo para mandar una tercera. Así que una fila
+realmente muerta puede no alertar nunca.
+
+Ese umbral es deliberado y la alternativa era peor: sin él, la alerta se
+disparaba en cada pago exitoso, y una alarma que suena siempre se termina
+ignorando. Pero el hueco queda abierto hasta que algo recorra esas filas sin
+que nadie se lo pida. Un cron que liste `pagos` con `estado = 'aprobado'` y
+`aprobado_at` de hace más de diez minutos, y que alerte, cierra la invariante
+completa. Es media hora de trabajo y es lo que falta para que "no se pierde un
+pago en silencio" sea cierto sin asteriscos.
+
 **Lo que queda pendiente y es deliberado:**
 
 - La tienda web sigue emitiendo sin cobrar. Enchufarla es reusar `POST /api/pago/crear` tal cual, en una fase aparte.
 - `invocarFunction` queda duplicada entre `apps/tienda/src/lib/kapso.ts` y `apps/mailer/src/pago/kapso.ts`. Colapsan en un paquete cuando la tienda cobre.
 - Pasar a producción es cambiar `MP_ACCESS_TOKEN` y `MP_WEBHOOK_SECRET` en Vercel y el `notification_url` en el panel de Mercado Pago. No toca código.
+
+**Diferidos con nombre, del más al menos urgente.** Todos se revisaron y se
+decidió dejarlos; ninguno bloquea el cobro, pero conviene que no se pierdan:
+
+- El `503 falta_configuracion` de `crear.ts` no le avisa al cliente. Se
+  argumentó que puede faltar justamente la clave con que se manda el mensaje,
+  pero eso cubre una de seis variables: en las otras cinco hay con qué avisar y
+  el cliente igual se queda esperando. Es el escenario del primer día.
+- El envío del botón de pago no verifica su resultado. Un identificador de
+  número de WhatsApp roto produce un cobro que el cliente no puede recibir ni
+  ahora ni después, y la reentrada idempotente no lo reintenta.
+- No hay vista de `pagos` en el backoffice. La única señal de "plata recibida
+  sin orden" es un correo.
+- La columna `expira_at` guarda la vigencia de la cotización, no la del link,
+  que muere quince minutos antes. Importa el día que exista el cron.
+- La URL del relé está escrita a mano en el nodo del grafo mientras
+  `PAGO_BASE_URL` gobierna las otras dos URL del mismo host.
+- El presupuesto de timeouts de la emisión suma 175s, y 120 de esos son el
+  puente a Kapso. Subir el techo fue lo correcto ahora; bajar el presupuesto es
+  la mejora de fondo.
+- La paridad entre el criterio de confirmación de `crear.ts` y el de
+  `emitir-ordenes-compra.js` solo la sostiene un comentario. Si alguien endurece
+  uno, nada se pone rojo. Un test compartido cuesta diez líneas.
+- La respuesta del nodo se guarda en `pago_response` y ningún nodo posterior la
+  lee.
 
 **El orden de las tareas no es negociable en un punto:** el bot sigue vendiendo exactamente como hoy hasta el Step 6 de la Task 11, el `npm run kapso:workflow` que aplica la cirugía del grafo. Las tareas 1 a 10 solo agregan código que nadie invoca todavía — la Task 10 deja el grafo nuevo escrito en el script, pero no desplegado. Si el trabajo se detiene en cualquier punto antes de ese comando, producción queda intacta.
