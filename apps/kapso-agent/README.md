@@ -14,6 +14,23 @@ Functions y sale como precio de venta.
   cupo quedó en 5 de 5. Cualquier function nueva que haga falta desplegar exige
   liberar cupo antes.
 
+### El cobro no es una function
+
+Desde el 2026-09-10 el nodo final antes del handoff es `fn_crear_pago`, un
+nodo **`webhook`** que llama a `POST /api/pago/crear` del relé
+(`apps/mailer`). No es una function de Kapso a propósito: el cupo de
+Cloudflare Workers está en 5 de 5 y un nodo `webhook` no consume cupo.
+
+`emitir-ordenes-compra` **sigue desplegada y sin cambios**, pero ya no está en
+el grafo: ahora la invoca el servicio de pagos por la Platform API cuando
+Mercado Pago confirma que el pago se acreditó. El nodo `send_confirmacion`
+también salió — los mensajes al cliente los manda el servicio de pagos, que es
+el único que sabe cuál de los seis corresponde.
+
+Necesita `MAILER_API_KEY` como variable de entorno del workflow en Kapso
+(`${ENV:MAILER_API_KEY}`), con el mismo valor que ya tiene cargado como
+secreto la function `emitir-ordenes-compra`.
+
 ---
 
 ## Mapa de functions
