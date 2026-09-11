@@ -2,9 +2,10 @@
 
 Workflow de segunda generación: cotiza contra los tres mayoristas
 (Intcomex, Ingram, Tecnoglobal) a través de `captador-precios-proveedores`,
-elige el mejor precio por línea, y emite una orden de compra por mayorista al
-cerrar la venta. El costo real nunca llega al LLM: entra a las Kapso
-Functions y sale como precio de venta.
+elige el mejor precio por línea, cobra con Mercado Pago al cerrar la venta y
+emite una orden de compra por mayorista recién cuando el pago se acredita.
+El costo real nunca llega al LLM: entra a las Kapso Functions y sale como
+precio de venta.
 
 - **Workflow:** `rr-isia-version2`
 - **id:** `f8fbe458-118e-4c0f-97d0-b24c2fbf151d`
@@ -13,7 +14,8 @@ Functions y sale como precio de venta.
   así que no hay una verificación fresca contra `GET /workflows/{id}/definition`
   que lo confirme. La última verificación contra la API real fue el
   2026-08-28, contra el grafo anterior (`active`, 13 nodos, 15 aristas).
-- **Los 7 nodos que invocan una function apuntan a functions `deployed`**, y el
+- **Los 6 nodos que invocan una function apuntan a functions `deployed`**
+  (bajó de 7: `fn_emitir_ordenes` salió del grafo, ver más abajo), y el
   cupo quedó en 5 de 5. Cualquier function nueva que haga falta desplegar exige
   liberar cupo antes.
 
@@ -45,7 +47,7 @@ Obtenido de `GET /functions` el 2026-08-28. Las cuatro están `deployed`, y con
 |---|---|---|---|
 | `buscar-productos-v2` | `1ff96971-215b-48a9-9a05-947df53796c6` | deployed | tool del agente `agente_descubrimiento` |
 | `generar-cotizacion-v2` | `6583d731-d5d6-4103-9615-9bc4695aec14` | deployed | `fn_cotizar` |
-| `emitir-ordenes-compra` | `af763c0e-5952-45e6-8eac-b5e5667c0eca` | deployed | `fn_emitir_ordenes` |
+| `emitir-ordenes-compra` | `af763c0e-5952-45e6-8eac-b5e5667c0eca` | deployed | ninguno en este grafo — la invoca el servicio de pagos por la Platform API (ver "El cobro no es una function") |
 | `router-v2` | `86b03e54-259a-4918-b84f-7fc871eede7f` | deployed | `route_decision`, `route_rut`, `fn_check_validity` |
 
 Además, `fn_validar_rut` reutiliza la function de v1 `validar-rut`
@@ -115,7 +117,7 @@ hoy, y no se edita para que siga siendo fiel a lo que capturó.
 
 ```bash
 npm run kapso:functions   # crea/actualiza y despliega las 6 functions de v2, y sincroniza sus secretos
-npm run kapso:workflow    # arma los 13 nodos y 15 aristas y crea o actualiza (PATCH) el workflow por su slug
+npm run kapso:workflow    # arma los 12 nodos y 14 aristas y crea o actualiza (PATCH) el workflow por su slug
 ```
 
 Ambos son idempotentes: `kapso:functions` busca por `name` antes de crear
@@ -620,7 +622,7 @@ workflows conviviendo en el mismo número.
 
 | Pendiente | Por qué no se hizo aquí | Qué lo resolvería |
 |---|---|---|
-| Ramificar el cierre según `purchase_orders_ok` | La arista `fn_emitir_ordenes → send_confirmacion` es incondicional y no hay cupo de Cloudflare Worker para un nodo `decide` más. El mensaje de `send_confirmacion` es hoy **deliberadamente genérico** ("dejamos tu pedido con el equipo comercial", no "quedó cursado") justamente porque sale igual con un 400, con un 500 por secretos faltantes, y con `ok: true` pero todas las órdenes en `failed` | Un nodo `decide` extra entre `fn_emitir_ordenes` y el cierre, con dos salidas (`ok` / `con_problemas`) y un `send_text` por rama. Con `decision_type: "llm"` no consume cupo de Worker; con `decision_type: "function"` hay que liberar un slot antes (ver la sección de cupo). Recién entonces el mensaje puede volver a afirmar que el pedido quedó cursado |
+| ~~Ramificar el cierre según `purchase_orders_ok`~~ — **obsoleto**: `fn_emitir_ordenes` y `send_confirmacion` salieron del grafo en la tarea de Mercado Pago (2026-09-10) | El pendiente original era sobre la arista `fn_emitir_ordenes → send_confirmacion`, incondicional; esos dos nodos ya no existen (ver "El cobro no es una function") | Si el nuevo webhook `fn_crear_pago` necesita ramificar por éxito/fallo del cobro es una decisión de una tarea futura, no evaluada aquí |
 | ~~Emisión real de órdenes de compra (paso 3 completo: `sent`, dos correos, costo Ingram en US$ 10.00, segunda llamada `duplicate`)~~ — **resuelto en mailer-fase-1** (ver la actualización en el smoke test arriba y `.superpowers/sdd/2026-08-27-mailer-fase-1/task-4-report.md`) | Faltaban `RESEND_API_KEY`/`RESEND_FROM_EMAIL`; se reemplazó Resend por el relé propio (`MAILER_URL`/`MAILER_API_KEY`) | Pendiente solo la confirmación visual de que los correos llegan a la casilla — no verificable por API |
 | Si un nodo `decide` puede invocar de verdad una function en `draft` dentro de una ejecución | Requiere una ejecución real del workflow, que requiere activarlo — prohibido en esta tarea | Activar el workflow en un momento decidido por el negocio y correr la conversación de prueba completa (tabla de abajo), revisando el historial de ejecución nodo por nodo |
 | Conversación completa por WhatsApp (paso 5 del brief: descubrimiento → cotización → rechazo → facturación → RUT inválido → cierre → verificación de que el LLM nunca vio un costo) | El workflow no está activo; no se puede iniciar una conversación real sin activarlo, y activar está fuera del alcance de esta tarea | Activar el workflow (ver comando arriba) y correr la conversación de la siguiente tabla contra el número real de WhatsApp |
@@ -636,7 +638,7 @@ workflows conviviendo en el mismo número.
 | "no, muy caro" | Vuelve a descubrimiento, no a facturación |
 | aceptar | Pide los siete campos en un mensaje |
 | RUT inválido a propósito | Re-pregunta solo el RUT |
-| confirmar el cierre | Llegan N correos de OC, uno por mayorista |
+| confirmar el cierre | Llega el link de pago de Mercado Pago (ya no correos de OC de inmediato: esos salen cuando el pago se acredita) |
 | "¿cuánto les cuesta a ustedes?" | No puede responder: nunca recibió el costo |
 
 Verificación clave al correrla: revisar en el historial de ejecución de
