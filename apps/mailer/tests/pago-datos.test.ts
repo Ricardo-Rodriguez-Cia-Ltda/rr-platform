@@ -38,6 +38,10 @@ describe('reclamarAprobado', () => {
     });
     expect(await reclamarAprobado(ENV, QUOTE, '999')).toBe(true);
     expect((spy.mock.calls[0][1] as RequestInit).method).toBe('PATCH');
+    const body = JSON.parse(String((spy.mock.calls[0][1] as RequestInit).body));
+    expect(body.estado).toBe('aprobado');
+    expect(body.mp_payment_id).toBe('999');
+    expect(body.aprobado_at).toBeTruthy();
   });
 
   it('cero filas significa que otra entrega del webhook ya la tomo', async () => {

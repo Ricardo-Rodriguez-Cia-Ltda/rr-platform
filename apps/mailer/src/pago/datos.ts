@@ -79,7 +79,17 @@ async function pedir(
 
 const ahora = () => new Date().toISOString();
 
-// null = no existe · undefined = no se pudo preguntar.
+/**
+ * Devuelve null = no existe · undefined = no se pudo preguntar.
+ *
+ * Nota: `cotizaciones` tiene llave primaria compuesta (quote_id, version), pero esta
+ * función consulta solo por quote_id sin filtro ni orden de versión, trayendo la
+ * primera fila. Hoy es correcto porque generar-cotizacion-v2 genera un quote_id UUID
+ * fresco en cada cotización, así que hay exactamente uno por quote_id. Si en el
+ * futuro una re-cotización reutilizara quote_id, este limit=1 podría traer una
+ * versión distinta de la que se cobró, emitiendo compras con líneas equivocadas.
+ * Revisar cuando se implemente re-cotización.
+ */
 export async function leerCotizacion(env: PagoEnv, quoteId: string): Promise<CotizacionRow | null | undefined> {
   const filas = await pedir(env, 'GET', `/cotizaciones?quote_id=eq.${encodeURIComponent(quoteId)}&limit=1`);
   if (filas === null) return undefined;
