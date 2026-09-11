@@ -53,6 +53,25 @@ function leerTexto(valor: unknown, porDefecto = ''): string {
   return texto && !esPlantillaSinRenderizar(texto) ? texto : porDefecto;
 }
 
+// El guard de consentimiento del cliente. Hasta que el grafo dejo de ir
+// directo a `fn_emitir_ordenes`, este chequeo vivia en
+// apps/kapso-agent/functions/emitir-ordenes-compra.js, que rechaza con 400
+// cualquier invocacion sin `quote_confirmed`. Con el cobro en medio, ese
+// archivo ya no esta en el camino y el chequeo tiene que estar aca: sin el,
+// un `complete_task` del agente de cierre sin un si inequivoco le manda un
+// cobro real a alguien que no acepto comprar.
+//
+// El criterio es copia del de emitir-ordenes-compra.js, no una version
+// propia: lo escribe un LLM con save_variable, asi que puede llegar como
+// booleano o como la cadena "true". Cualquier otra cosa -- ausente, "false",
+// "quizas", o la plantilla `{{vars.quote_confirmed}}` sin renderizar -- no es
+// un si. Si los dos criterios se separan, uno de los dos deja de proteger.
+function confirmoElCliente(body: unknown): boolean {
+  if (typeof body !== 'object' || body === null) return false;
+  const valor = (body as Record<string, unknown>).quote_confirmed;
+  return valor === true || String(valor ?? '').trim().toLowerCase() === 'true';
+}
+
 function leerEntrada(body: unknown): Entrada | null {
   if (typeof body !== 'object' || body === null) return null;
   const b = body as Record<string, unknown>;
@@ -116,7 +135,27 @@ export function createCrearHandler() {
 
     const entrada = leerEntrada(req.body);
     if (!entrada) {
+      // Unico camino de fallo que NO le avisa al cliente, a proposito. Un
+      // cuerpo que no se puede leer tampoco es una fuente confiable de a
+      // quien mandarle el WhatsApp: el `phone_number` que trae viene del
+      // mismo cuerpo roto, y no hay cotizacion de donde sacar el bueno
+      // (`quote_id` es justamente lo que falta). Avisar seria mandarle un
+      // texto a un numero que dicta un llamador que ya demostro no estar
+      // hablando el protocolo -- y este endpoint tiene mas clientes posibles
+      // que el bot. Cuando el bot manda un cuerpo bien formado, cualquier
+      // otro fallo si avisa.
       res.status(400).json({ ok: false, error: 'cuerpo_invalido' });
+      return;
+    }
+
+    // Va antes de tocar Mercado Pago, la base o el telefono del cliente: un
+    // "no" acá no es un fallo que haya que contarle a nadie, es una llamada
+    // que no debio ocurrir. Sin crear preferencia, sin persistir fila y sin
+    // mandar mensaje -- mandarle algo a alguien que no dijo que si es
+    // exactamente el ruido que este guard existe para evitar.
+    if (!confirmoElCliente(req.body)) {
+      console.error('[pago/crear] rechazado: el cuerpo no trae la confirmacion del cliente');
+      res.status(400).json({ ok: false, error: 'sin_confirmacion' });
       return;
     }
 
@@ -127,11 +166,32 @@ export function createCrearHandler() {
       return;
     }
 
+    // Unica expresion de "cual es el telefono del cliente": la usan tanto la
+    // fila que se persiste como los avisos de fallo. Empieza con el telefono
+    // del cuerpo -- que es lo unico que hay antes de leer la cotizacion -- y
+    // se completa con el de la cotizacion apenas esta disponible. `avisar`
+    // lee la variable, no una copia, para que los avisos de mas abajo hereden
+    // el fallback sin duplicar la expresion.
+    let telefonoCliente = entrada.telefono;
+
+    // Definido ACA, arriba de todos los retornos: el spec saco del grafo el
+    // nodo que mandaba el texto fijo argumentando que el servicio de pagos
+    // sabe que decir. Si `avisar` vive mas abajo, los cuatro caminos de fallo
+    // que ocurren antes responden y dejan al cliente -- que acaba de decir
+    // "si, cursalo" -- sin una sola palabra.
+    const avisar = (texto: string) => enviarTexto({
+      telefono: telefonoCliente,
+      phoneNumberId: entrada.phoneNumberId,
+      key: env.KAPSO_API_KEY as string,
+      texto,
+    });
+
     // Idempotencia: una segunda llamada por la misma cotizacion devuelve el
     // link que ya existe en vez de crear otra preferencia. La llave primaria
     // de `pagos` es el quote_id justamente para esto.
     const yaExiste = await leerPago(env, entrada.quoteId);
     if (yaExiste === undefined) {
+      await avisar(MENSAJES.sinLink);
       res.status(503).json({ ok: false, error: 'upstream' });
       return;
     }
@@ -142,27 +202,22 @@ export function createCrearHandler() {
 
     const cotizacion = await leerCotizacion(env, entrada.quoteId);
     if (cotizacion === undefined) {
+      await avisar(MENSAJES.sinLink);
       res.status(503).json({ ok: false, error: 'upstream' });
       return;
     }
     if (cotizacion === null) {
+      // El alcanzable de verdad: la persistencia de la cotizacion es
+      // best-effort, asi que un fallo de la base al cotizar deja al cliente
+      // conversando con un bot que no encuentra lo que le acaba de cotizar.
+      // `sinLink` es el texto honesto -- hubo un problema y lo resolvemos
+      // nosotros -- sin prometer nada que no se haya verificado.
+      await avisar(MENSAJES.sinLink);
       res.status(404).json({ ok: false, error: 'cotizacion_no_encontrada' });
       return;
     }
 
-    // Unica expresion de "cual es el telefono del cliente": la usan tanto la
-    // fila que se persiste como los avisos de fallo de mas abajo. Antes,
-    // `avisar` capturaba solo `entrada.telefono` sin este fallback, asi que
-    // un cuerpo sin phone_number usable dejaba mudos los cuatro caminos de
-    // fallo aunque la cotizacion sí tuviera telefono guardado.
-    const telefonoCliente = entrada.telefono || cotizacion.telefono || '';
-
-    const avisar = (texto: string) => enviarTexto({
-      telefono: telefonoCliente,
-      phoneNumberId: entrada.phoneNumberId,
-      key: env.KAPSO_API_KEY as string,
-      texto,
-    });
+    telefonoCliente = entrada.telefono || cotizacion.telefono || '';
 
     // Por debajo del margen el link nace condenado: se aprobaria el pago y
     // emitir-ordenes-compra lo rechazaria por vigencia. Mejor no mandarlo.

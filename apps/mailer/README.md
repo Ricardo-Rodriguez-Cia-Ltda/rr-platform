@@ -45,7 +45,7 @@ está en `docs/superpowers/specs/2026-09-10-pagos-mercado-pago-design.md`.
 
 | Ruta | Qué hace |
 |---|---|
-| `POST /api/pago/crear` | Autenticada con `x-api-key`. Crea la preferencia, guarda la fila `pagos` y manda el link por WhatsApp |
+| `POST /api/pago/crear` | Autenticada con `x-api-key` **y** con `quote_confirmed` en el cuerpo. Crea la preferencia, guarda la fila `pagos` y manda el link por WhatsApp |
 | `POST /api/pago/webhook` | Pública, autenticada por la firma HMAC de Mercado Pago. Emite las órdenes de compra cuando el pago queda aprobado |
 | `GET /api/pago/retorno` | La página a la que Mercado Pago devuelve al cliente |
 
@@ -60,6 +60,20 @@ Variables nuevas en el proyecto `rr-mailing`:
 
 En el panel de Mercado Pago hay que apuntar la notificación de tipo `payment`
 a `<PAGO_BASE_URL>/api/pago/webhook`.
+
+**`quote_confirmed` es obligatorio en `/api/pago/crear`, y no es un detalle de
+validación.** La arista `agente_cierre -> fn_crear_pago` del grafo es
+incondicional: el agente decide que el cliente dijo que sí y llama
+`complete_task`, y el nodo dispara igual. Hasta que el cobro entró en medio, el
+único chequeo determinista de ese consentimiento vivía en
+`apps/kapso-agent/functions/emitir-ordenes-compra.js`, que rechaza con 400
+cualquier invocación sin esa variable. Al cambiar el destino del nodo, ese
+chequeo salió del camino. Ahora lo hace este endpoint, con el **mismo** criterio
+permisivo que la function: vale el booleano `true` o la cadena `"true"` sin
+distinguir mayúsculas, porque lo escribe un LLM con `save_variable` y puede
+llegar de las dos formas. Cualquier otra cosa responde `400 sin_confirmacion`
+sin crear preferencia, sin persistir fila y sin mandarle nada al cliente. Si los
+dos criterios se separan, uno de los dos deja de proteger.
 
 El aviso interno ("recibimos plata y no pudimos emitir la orden") sale al
 primer valor de `MAILER_ALLOWED_RECIPIENTS` — la misma lista blanca del

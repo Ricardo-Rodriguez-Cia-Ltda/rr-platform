@@ -21,8 +21,11 @@ const COTIZACION = {
   proveedores_incompletos: [],
 };
 
+// `quote_confirmed` es parte del contrato desde C1: el nodo del grafo lo manda
+// y el handler lo exige. Sin el, cualquier cuerpo es un "el cliente no dijo que
+// si" y se rechaza antes de tocar Mercado Pago.
 const CUERPO = {
-  quote_id: QUOTE, quote_version: '1',
+  quote_id: QUOTE, quote_version: '1', quote_confirmed: true,
   phone_number: '56941757584', phone_number_id: 'PNID',
   customer_name: 'Acme SpA', billing_email: 'contacto@acme.cl',
 };
@@ -157,6 +160,126 @@ describe('POST /api/pago/crear', () => {
     const res = makeRes();
     await createCrearHandler()(makeReq({ ...CUERPO, quote_id: '' }), res, ENV);
     expect(res.statusCode).toBe(400);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------
+  // C1: el guard de consentimiento. Hasta el cambio de grafo, el unico
+  // chequeo determinista de que el cliente dijo que si vivia en
+  // emitir-ordenes-compra.js, que ya no esta en el camino. El criterio es
+  // copia del suyo: el booleano true, o la cadena "true" sin distinguir
+  // mayusculas, porque lo escribe un LLM con save_variable.
+  // -------------------------------------------------------------------
+
+  it('quote_confirmed como booleano true deja pasar el cobro', async () => {
+    routeFetch({});
+    const res = makeRes();
+    await createCrearHandler()(makeReq({ ...CUERPO, quote_confirmed: true }), res, ENV);
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('quote_confirmed como la cadena "TRUE" deja pasar el cobro', async () => {
+    routeFetch({});
+    const res = makeRes();
+    await createCrearHandler()(makeReq({ ...CUERPO, quote_confirmed: ' TRUE ' }), res, ENV);
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('sin quote_confirmed: 400, sin preferencia, sin fila y sin mensaje al cliente', async () => {
+    const mensajes: string[] = [];
+    const { quote_confirmed, ...sinConfirmar } = CUERPO as any;
+    const spy = routeFetch({ mensajes });
+    const res = makeRes();
+    await createCrearHandler()(makeReq(sinConfirmar), res, ENV);
+    expect(res.statusCode).toBe(400);
+    expect(res.jsonBody.error).toBe('sin_confirmacion');
+    expect(spy).not.toHaveBeenCalled();
+    expect(mensajes).toHaveLength(0);
+  });
+
+  it('quote_confirmed con un valor que no es un si: 400, sin preferencia y sin fila', async () => {
+    const mensajes: string[] = [];
+    const spy = routeFetch({ mensajes });
+    const res = makeRes();
+    await createCrearHandler()(makeReq({ ...CUERPO, quote_confirmed: 'quizas' }), res, ENV);
+    expect(res.statusCode).toBe(400);
+    expect(res.jsonBody.error).toBe('sin_confirmacion');
+    expect(spy).not.toHaveBeenCalled();
+    expect(mensajes).toHaveLength(0);
+  });
+
+  it('quote_confirmed como plantilla de Kapso sin renderizar tampoco es un si', async () => {
+    const spy = routeFetch({});
+    const res = makeRes();
+    await createCrearHandler()(makeReq({ ...CUERPO, quote_confirmed: '{{vars.quote_confirmed}}' }), res, ENV);
+    expect(res.statusCode).toBe(400);
+    expect(res.jsonBody.error).toBe('sin_confirmacion');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------
+  // I1: las salidas mudas. El cliente acaba de decir "si, cursalo"; el spec
+  // saco el nodo que mandaba el texto fijo porque "el servicio de pagos sabe
+  // que decir". Ninguna de estas respuestas puede dejarlo sin una palabra.
+  // -------------------------------------------------------------------
+
+  it('cotizacion no encontrada: 404 y ademas avisa al cliente', async () => {
+    const mensajes: string[] = [];
+    routeFetch({ cotizacion: [], mensajes });
+    const res = makeRes();
+    await createCrearHandler()(makeReq(CUERPO), res, ENV);
+    expect(res.statusCode).toBe(404);
+    expect(mensajes).toHaveLength(1);
+    expect(JSON.parse(mensajes[0]).text.body).toContain('problema');
+  });
+
+  it('fallo de red al leer la cotizacion: 503 y aviso al cliente', async () => {
+    const mensajes: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: any, init?: RequestInit) => {
+      const href = String(url);
+      if (href.includes('/cotizaciones')) return new Response('{}', { status: 500 });
+      if (href.includes('/pagos')) return new Response('[]', { status: 200 });
+      if (href.includes('/meta/whatsapp/')) {
+        mensajes.push(String(init?.body));
+        return new Response('{}', { status: 200 });
+      }
+      throw new Error(`llamada inesperada: ${href}`);
+    }));
+    const res = makeRes();
+    await createCrearHandler()(makeReq(CUERPO), res, ENV);
+    expect(res.statusCode).toBe(503);
+    expect(mensajes).toHaveLength(1);
+    expect(JSON.parse(mensajes[0]).text.body).toContain('problema');
+  });
+
+  it('fallo de red al leer la fila de pagos: 503 y aviso al cliente', async () => {
+    const mensajes: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: any, init?: RequestInit) => {
+      const href = String(url);
+      if (href.includes('/pagos')) return new Response('{}', { status: 500 });
+      if (href.includes('/meta/whatsapp/')) {
+        mensajes.push(String(init?.body));
+        return new Response('{}', { status: 200 });
+      }
+      throw new Error(`llamada inesperada: ${href}`);
+    }));
+    const res = makeRes();
+    await createCrearHandler()(makeReq(CUERPO), res, ENV);
+    expect(res.statusCode).toBe(503);
+    expect(mensajes).toHaveLength(1);
+    expect(JSON.parse(mensajes[0]).text.body).toContain('problema');
+  });
+
+  // Decision deliberada (I1): el cuerpo invalido NO avisa. Ver el comentario
+  // en crear.ts -- un cuerpo que no se puede leer tampoco es fuente confiable
+  // de a quien mandarle un WhatsApp.
+  it('cuerpo invalido: 400 mudo, sin mandar nada por WhatsApp', async () => {
+    const spy = vi.fn();
+    vi.stubGlobal('fetch', spy);
+    const res = makeRes();
+    await createCrearHandler()(makeReq({ ...CUERPO, quote_id: '' }), res, ENV);
+    expect(res.statusCode).toBe(400);
+    expect(res.jsonBody.error).toBe('cuerpo_invalido');
     expect(spy).not.toHaveBeenCalled();
   });
 

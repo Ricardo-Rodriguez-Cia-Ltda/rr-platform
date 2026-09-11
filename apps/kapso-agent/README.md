@@ -26,6 +26,14 @@ nodo **`webhook`** que llama a `POST /api/pago/crear` del relé
 (`apps/mailer`). No es una function de Kapso a propósito: el cupo de
 Cloudflare Workers está en 5 de 5 y un nodo `webhook` no consume cupo.
 
+El cuerpo del nodo incluye **`quote_confirmed`**, y no por completitud: la
+arista `agente_cierre -> fn_crear_pago` es incondicional, así que el consentimiento
+del cliente lo verifica el destino, no el grafo. Mientras el destino fue
+`fn_emitir_ordenes`, ese chequeo lo hacía `emitir-ordenes-compra.js` (400 sin la
+variable); ahora lo hace `POST /api/pago/crear`, con el mismo criterio. Si la
+variable se cae del cuerpo, un `complete_task` sin un sí inequívoco cobra de
+verdad. `tests/deploy-workflow.test.ts` lo verifica.
+
 `emitir-ordenes-compra` **sigue desplegada y sin cambios**, pero ya no está en
 el grafo: ahora la invoca el servicio de pagos por la Platform API cuando
 Mercado Pago confirma que el pago se acreditó. El nodo `send_confirmacion`

@@ -185,6 +185,16 @@ async function main() {
       {
         quote_id: '{{vars.quote_id}}',
         quote_version: '{{vars.quote_version}}',
+        // El guard de consentimiento. La arista `agente_cierre ->
+        // fn_crear_pago` es incondicional; hasta este cambio de grafo el
+        // destino era `fn_emitir_ordenes`, y emitir-ordenes-compra.js
+        // rechazaba con 400 cualquier invocacion sin `quote_confirmed`. Ese
+        // era el unico chequeo determinista de que el cliente dijo que si, y
+        // al mover el destino quedo fuera del camino. Va aca, y el handler de
+        // `/api/pago/crear` lo exige con el mismo criterio permisivo. Si se
+        // cae de este cuerpo, un `complete_task` sin un si inequivoco le
+        // manda un cobro real a alguien que no acepto comprar.
+        quote_confirmed: '{{vars.quote_confirmed}}',
         phone_number: '{{context.phone_number}}',
         phone_number_id: '{{system.whatsapp_config.phone_number_id}}',
         customer_name: '{{vars.quote_customer_name}}',
