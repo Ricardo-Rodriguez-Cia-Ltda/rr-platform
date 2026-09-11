@@ -24,9 +24,11 @@ function tipoDeFallo(error: unknown): string {
   return 'desconocido';
 }
 
-async function idPorNombre(nombre: string, key: string): Promise<string | null> {
-  const cacheado = cacheIds.get(nombre);
-  if (cacheado) return cacheado;
+async function idPorNombre(nombre: string, key: string, forzar: boolean = false): Promise<string | null> {
+  if (!forzar) {
+    const cacheado = cacheIds.get(nombre);
+    if (cacheado) return cacheado;
+  }
   try {
     const r = await fetch(`${BASE}/functions`, {
       headers: { 'X-API-Key': key },
@@ -66,6 +68,30 @@ export async function invocarFunction(
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     const data = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+
+    // Si es 404, el id puede ser obsoleto: borra cache, re-resuelve y reintenta una sola vez
+    if (r.status === 404) {
+      registrar('invoke', nombre, 'status 404 (id obsoleto): re-resolviendo');
+      cacheIds.delete(nombre);
+      const nuevoId = await idPorNombre(nombre, key, true);
+      if (nuevoId) {
+        try {
+          const r2 = await fetch(`${BASE}/functions/${nuevoId}/invoke`, {
+            method: 'POST',
+            headers: { 'X-API-Key': key, 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(TIMEOUT_MS),
+          });
+          const data2 = (await r2.json().catch(() => ({}))) as Record<string, unknown>;
+          if (r2.status >= 400) registrar('invoke (reintento)', nombre, `status ${r2.status}`);
+          return { status: r2.status, data: data2 };
+        } catch (error) {
+          registrar('invoke (reintento)', nombre, tipoDeFallo(error));
+          return null;
+        }
+      }
+    }
+
     if (r.status >= 400) registrar('invoke', nombre, `status ${r.status}`);
     return { status: r.status, data };
   } catch (error) {

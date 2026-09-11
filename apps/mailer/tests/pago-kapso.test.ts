@@ -40,6 +40,29 @@ describe('invocarFunction', () => {
     const r = await invocarFunction('emitir-ordenes-compra', {}, 'k');
     expect(r?.status).toBe(409);
   });
+
+  it('404 en invoke => borra cache, re-resuelve id, reintenta una sola vez y devuelve 200', async () => {
+    let callCount = 0;
+    const spy = vi.fn(async (url: any) => {
+      callCount++;
+      if (String(url).endsWith('/functions')) {
+        // Primer listado devuelve id viejo, segundo devuelve id nuevo
+        return new Response(JSON.stringify(callCount === 1
+          ? { data: [{ id: 'id-emitir-viejo', name: 'emitir-ordenes-compra' }] }
+          : { data: [{ id: 'id-emitir-nuevo', name: 'emitir-ordenes-compra' }] }
+        ), { status: 200 });
+      }
+      // Primer invoke (con id viejo) => 404
+      if (callCount === 2) return new Response(JSON.stringify({ error: 'not found' }), { status: 404 });
+      // Segundo invoke (con id nuevo) => 200
+      return new Response(JSON.stringify({ estado: 'ok' }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', spy);
+    const r = await invocarFunction('emitir-ordenes-compra', { test: 'data' }, 'k');
+    expect(r?.status).toBe(200);
+    // 1 listado inicial + 1 invoke 404 + 1 listado re-resuelve + 1 invoke retry = 4 fetches
+    expect(spy).toHaveBeenCalledTimes(4);
+  });
 });
 
 describe('mensajes de WhatsApp', () => {
