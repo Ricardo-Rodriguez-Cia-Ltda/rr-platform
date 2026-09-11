@@ -579,7 +579,7 @@ export async function consultarPago(paymentId: string, token: string): Promise<P
 - [ ] **Step 4: Correr el test y verificar que pasa**
 
 Run: `npx vitest run apps/mailer/tests/pago-mercadopago.test.ts`
-Expected: PASS, 9 casos.
+Expected: PASS, 10 casos.
 
 - [ ] **Step 5: Commit**
 
@@ -1733,7 +1733,7 @@ export function createCrearHandler() {
 - [ ] **Step 4: Correr el test y verificar que pasa**
 
 Run: `npx vitest run apps/mailer/tests/pago-crear.test.ts`
-Expected: PASS, 9 casos.
+Expected: PASS, 10 casos.
 
 - [ ] **Step 5: Commit**
 
