@@ -161,10 +161,45 @@ igual que `apps/pricing-api` — porque importa código de `packages/mailer` y
 ### `vercel.json`: por qué tiene `installCommand`, `buildCommand` y `outputDirectory`
 
 Cita parcial — solo las tres claves que explica esta sección. El archivo
-real (`apps/mailer/vercel.json`) tiene además un bloque `functions` que le
-pone `maxDuration: 30` a `api/**/*.ts`; es lo único que acota un envío SMTP
-colgado (sin eso, una conexión a `smtp.gmail.com` que nunca responde dejaría
-la función corriendo hasta el límite por defecto de Vercel).
+real (`apps/mailer/vercel.json`) tiene además un bloque `functions` con dos
+entradas: `api/pago/*.ts` con `maxDuration: 300` y `api/**/*.ts` con
+`maxDuration: 30`. La segunda es lo único que acota un envío SMTP colgado (sin
+eso, una conexión a `smtp.gmail.com` que nunca responde dejaría la función
+corriendo hasta el límite por defecto de Vercel). La primera existe por otra
+razón, y **el orden importa**: Vercel resuelve el primer patrón que calza, así
+que la entrada específica tiene que ir antes del glob general.
+
+**Por qué las rutas de pago necesitan 300 y no 30.** En `/api/pago/webhook`,
+entre que la fila se reclama como `aprobado` y que se marca `emitido` o
+`aprobado_sin_emitir` hay cuatro llamadas de red y la emisión entera — que
+genera un PDF y manda un correo por mayorista, en serie, en un Worker aparte.
+Si el proceso se muere ahí, la fila queda en `aprobado` para siempre: Mercado
+Pago reintenta, la reentrega no vuelve a pasar la transición condicional, y lo
+más probable es que las órdenes de compra sí hayan salido. Con un techo de 30s
+eso no era hipotético; el presupuesto de timeouts del handler suma mucho más:
+
+| Paso | Timeout |
+|---|---|
+| `consultarPago` (`mercadopago.ts`) | 10s |
+| `leerPago` (`datos.ts`) | 8s |
+| `reclamarAprobado` | 8s |
+| `leerCotizacion` | 8s |
+| `invocarFunction`: listado + invoke (`kapso.ts`) | 60s |
+| …más el re-listado e invoke del reintento por 404 obsoleto | 60s |
+| `marcarEstado` | 8s |
+| `marcarPedidosPagados` | 8s |
+| `enviarTexto` | 5s |
+| **Peor caso** | **175s** |
+
+300 cubre ese peor caso con margen y es el máximo documentado de Vercel fuera
+de fluid compute. No se elige más bajo porque un techo por debajo del
+presupuesto es exactamente el bug que esto arregla, ni más alto porque después
+de esos 175s ya no queda nada que esperar. `tests/pago-webhook.test.ts` lo
+verifica contra el archivo real.
+
+**Ojo al desplegar:** `maxDuration: 300` exige plan Pro. En Hobby el techo es
+60 y el despliegue lo rechaza. El webhook también sigue respondiendo cuando el
+handler termina, no a los 300s: el techo es un límite, no una espera.
 
 ```json
 {

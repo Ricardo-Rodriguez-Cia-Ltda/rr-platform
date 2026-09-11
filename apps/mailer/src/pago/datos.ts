@@ -122,13 +122,30 @@ export async function reclamarAprobado(env: PagoEnv, quoteId: string, mpPaymentI
   return filas !== null && filas.length > 0;
 }
 
+/**
+ * `desde` es el estado desde el que se permite la transicion. Sin el, el PATCH
+ * va solo por quote_id y pisa la fila este como este: asi, la rama de monto
+ * que no calza podia degradar a `aprobado_sin_emitir` una fila que ya estaba
+ * `emitido` por un pago anterior legitimo, borrando el registro de que las
+ * ordenes si salieron. Los llamadores que transicionan desde un estado
+ * conocido lo pasan; queda opcional para no tocar a los que no lo necesitan.
+ *
+ * El valor de retorno significa **"la escritura no fallo"**, no "la fila
+ * cambio": cero filas afectadas (el `desde` no calzo) devuelve `true`. La
+ * distincion importa porque webhook.ts alerta al interno cuando esto devuelve
+ * `false` -- una fila que quedo colgada sin desenlace. Una transicion que
+ * legitimamente no correspondia no es eso, y confundirlas convertiria cada
+ * carrera benigna en una falsa alarma.
+ */
 export async function marcarEstado(
   env: PagoEnv,
   quoteId: string,
   estado: PagoRow['estado'],
   extra: Record<string, unknown> = {},
+  desde?: PagoRow['estado'],
 ): Promise<boolean> {
-  const filas = await pedir(env, 'PATCH', `/pagos?quote_id=eq.${encodeURIComponent(quoteId)}`, {
+  const condicion = desde ? `&estado=eq.${encodeURIComponent(desde)}` : '';
+  const filas = await pedir(env, 'PATCH', `/pagos?quote_id=eq.${encodeURIComponent(quoteId)}${condicion}`, {
     estado, updated_at: ahora(), ...extra,
   });
   return filas !== null;

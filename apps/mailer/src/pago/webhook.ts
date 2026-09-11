@@ -115,6 +115,29 @@ export function createWebhookHandler(alertar: Alertar = alertarPorDefecto) {
       texto,
     });
 
+    // Entre la transicion atomica y esta escritura hay cuatro llamadas de red
+    // y la emision entera. Si la escritura del desenlace falla, la fila queda
+    // diciendo `aprobado` -- un estado sin salida: la reentrega de Mercado
+    // Pago no vuelve a pasar la transicion condicional, y la emision ya corrio
+    // en un Worker aparte, asi que lo mas probable es que las ordenes SI hayan
+    // salido. Esta alerta es la unica senal de que eso paso.
+    //
+    // Solo alerta cuando la escritura fallo de verdad (`false`). Cero filas
+    // afectadas porque el `desde` no calzo devuelve `true` y no alerta: eso es
+    // "no correspondia escribir", una carrera benigna, no una fila colgada.
+    const marcar = async (
+      estado: 'emitido' | 'aprobado_sin_emitir',
+      extra: Record<string, unknown> = {},
+      desde: 'pendiente' | 'aprobado' = 'aprobado',
+    ): Promise<void> => {
+      if (await marcarEstado(env, quoteId, estado, extra, desde)) return;
+      await alertar(
+        `No se pudo escribir el estado del pago (cotizacion ${quoteId})`,
+        `Estado que no se pudo escribir: ${estado}. La fila puede haber quedado colgada en 'aprobado' `
+        + `mientras la emision si corrio. Revisar la fila de pagos y el correo de ordenes de compra a mano.`,
+      );
+    };
+
     // Mercado Pago reenvia habitualmente mas de una notificacion por el
     // mismo pago (una al crearse, otra al actualizarse), ambas con firma
     // valida y el mismo id de pago. Sin este guard, las ramas de rechazado y
@@ -156,7 +179,13 @@ export function createWebhookHandler(alertar: Alertar = alertarPorDefecto) {
         res.status(200).json({ ok: true, estado: 'aprobado_sin_emitir', duplicado: true });
         return;
       }
-      await marcarEstado(env, quoteId, 'aprobado_sin_emitir', { mp_payment_id: String(pagoMP.id) });
+      // Desde `pendiente`, no desde cualquier cosa: un segundo pago por el
+      // monto equivocado sobre una fila que ya esta `emitido` por un pago
+      // anterior legitimo no puede degradarla, porque eso borraria el registro
+      // de que las ordenes si salieron. Si la fila ya no esta pendiente, el
+      // PATCH no toca nada -- pero la alerta de abajo sale igual, que es lo
+      // que hace falta: hay plata recibida que no cuadra.
+      await marcar('aprobado_sin_emitir', { mp_payment_id: String(pagoMP.id) }, 'pendiente');
       await alertar(
         `Pago aprobado con monto que no calza (cotizacion ${quoteId})`,
         `Cobrado: ${fila.monto_clp}. Pagado: ${pagoMP.transaction_amount}. Pago MP: ${pagoMP.id}. No se emitio ninguna orden.`,
@@ -169,13 +198,49 @@ export function createWebhookHandler(alertar: Alertar = alertarPorDefecto) {
     // La transicion que sostiene la idempotencia: si otra entrega del mismo
     // webhook ya la tomo, aca se devuelven cero filas y no se emite de nuevo.
     if (!(await reclamarAprobado(env, quoteId, String(pagoMP.id)))) {
+      // Una sola lectura del estado: `fila`, leida arriba. Dos cosas
+      // distintas llegan hasta aca y las dos eran mudas.
+      //
+      // (a) La fila sigue en `aprobado`: alguien la reclamo y nunca escribio
+      //     el desenlace -- el proceso murio entre medio. Como la emision
+      //     corre en un Worker aparte, lo mas probable es que las ordenes de
+      //     compra ya hayan salido: hay un mayorista despachando, un cliente
+      //     que pago sin saber nada, y una fila que miente. No se deduplica
+      //     por reentrega a proposito: es el unico aviso que existe y un
+      //     correo repetido es mucho mas barato que ninguno.
+      //
+      // (b) El id del pago no es el que la fila tiene registrado: Checkout
+      //     Pro no impide que una preferencia se pague dos veces, y el
+      //     mensaje de rechazo invita literalmente a reintentar con el mismo
+      //     link. Un segundo pago trae id distinto y monto correcto, asi que
+      //     pasa el guard de duplicado y el chequeo de monto y muere aca.
+      //     Es plata cobrada dos veces y alguien tiene que devolverla.
+      //
+      // Pueden ser ciertas las dos a la vez, y entonces salen las dos: son
+      // dos hechos distintos con dos acciones distintas.
+      if (fila.estado === 'aprobado') {
+        await alertar(
+          `Pago atascado entre la reclamacion y el desenlace (cotizacion ${quoteId})`,
+          `La fila sigue en 'aprobado' y la reentrega ya no puede reclamarla. Es probable que las ordenes `
+          + `de compra SI se hayan emitido y que el cliente no haya recibido confirmacion. Revisar la fila `
+          + `de pagos, el correo de ordenes de compra y avisarle al cliente a mano.`,
+        );
+      }
+      if (fila.mp_payment_id != null && String(fila.mp_payment_id) !== String(pagoMP.id)) {
+        await alertar(
+          `Segundo pago aprobado sobre la misma cotizacion (${quoteId})`,
+          `La fila ya tenia registrado el pago ${fila.mp_payment_id} y llego el pago ${pagoMP.id} por el `
+          + `mismo monto. Checkout Pro permite pagar dos veces la misma preferencia: hay un cobro de mas `
+          + `que hay que devolver. No se emitio nada por segunda vez.`,
+        );
+      }
       res.status(200).json({ ok: true, estado: 'ya_procesado' });
       return;
     }
 
     const cotizacion = await leerCotizacion(env, quoteId);
     if (!cotizacion) {
-      await marcarEstado(env, quoteId, 'aprobado_sin_emitir');
+      await marcar('aprobado_sin_emitir');
       await alertar(
         `Pago aprobado sin cotizacion legible (cotizacion ${quoteId})`,
         `Pago MP: ${pagoMP.id}. No se emitio ninguna orden.`,
@@ -198,7 +263,7 @@ export function createWebhookHandler(alertar: Alertar = alertarPorDefecto) {
       // Incluye el 409 por vigencia vencida: el pago esta hecho y los precios
       // ya no valen. Lo resuelve una persona, con la plata ya recibida.
       const motivo = emision === null ? 'sin respuesta' : `status ${emision.status}`;
-      await marcarEstado(env, quoteId, 'aprobado_sin_emitir');
+      await marcar('aprobado_sin_emitir');
       await alertar(
         `Pago aprobado que NO se pudo emitir (cotizacion ${quoteId})`,
         `Pago MP: ${pagoMP.id}. Monto: ${fila.monto_clp}. Emision: ${motivo}.`,
@@ -208,9 +273,18 @@ export function createWebhookHandler(alertar: Alertar = alertarPorDefecto) {
       return;
     }
 
-    await marcarEstado(env, quoteId, 'emitido', { emitido_at: new Date().toISOString() });
+    await marcar('emitido', { emitido_at: new Date().toISOString() });
     // El pedido nace `nuevo` en emitir-ordenes-compra; acá ya está pagado.
-    await marcarPedidosPagados(env, quoteId);
+    // Si esa escritura falla en silencio, el backoffice muestra como
+    // pendiente de cobro un pedido que ya se pago: nadie lo nota hasta que
+    // alguien va a cobrarlo por segunda vez.
+    if (!(await marcarPedidosPagados(env, quoteId))) {
+      await alertar(
+        `No se pudieron marcar los pedidos como pagados (cotizacion ${quoteId})`,
+        `El pago quedo en 'emitido' y las ordenes de compra salieron, pero los pedidos siguen en 'nuevo' `
+        + `en el backoffice. Moverlos a 'pagado' a mano para que nadie los cobre de nuevo.`,
+      );
+    }
     await avisar(MENSAJES.emitido);
     res.status(200).json({ ok: true, estado: 'emitido' });
   };

@@ -1,4 +1,5 @@
 import { createHmac } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { construirManifiesto } from '../src/pago/firma.js';
@@ -78,6 +79,9 @@ function routeFetch(h: {
   pagoForzado?: unknown[];
   mpPago?: unknown; mpStatus?: number;
   reclamo?: unknown[];
+  // Simula un fallo de Supabase en una escritura concreta, para ejercitar los
+  // caminos donde el estado de la fila no se puede escribir.
+  escrituraFalla?: (url: string, body: any) => boolean;
   emitir?: { status: number; body: unknown };
   escrituras?: Array<{ url: string; body: any }>;
   mensajes?: string[];
@@ -88,8 +92,14 @@ function routeFetch(h: {
 
     if (href.includes('supabase.test')) {
       if (metodo === 'PATCH' || metodo === 'POST') {
-        h.escrituras?.push({ url: href, body: JSON.parse(String(init?.body ?? '{}')) });
-        if (href.includes('estado=eq.pendiente')) {
+        const cuerpo = JSON.parse(String(init?.body ?? '{}'));
+        h.escrituras?.push({ url: href, body: cuerpo });
+        if (h.escrituraFalla?.(href, cuerpo)) return new Response('{}', { status: 500 });
+        // Solo la transicion atomica de reclamarAprobado, no cualquier PATCH
+        // que lleve `estado=eq.pendiente` en la URL: desde I4, marcarEstado
+        // tambien condiciona por estado y la rama de monto que no calza usa
+        // ese mismo filtro.
+        if (cuerpo.estado === 'aprobado' && href.includes('estado=eq.pendiente')) {
           return new Response(JSON.stringify(h.reclamo ?? [{ quote_id: QUOTE }]), { status: 200 });
         }
         return new Response('[]', { status: 200 });
@@ -311,5 +321,199 @@ describe('POST /api/pago/webhook', () => {
     await createWebhookHandler()(makeReq(), res, ENV);
     expect(res.statusCode).toBe(200);
     expect(spy.mock.calls.some(([u]) => String(u).includes('/invoke'))).toBe(false);
+  });
+});
+
+// =====================================================================
+// C2: `aprobado` era un estado terminal de facto. Entre que la fila se
+// reclama como `aprobado` y que se marca `emitido` o `aprobado_sin_emitir`
+// hay cuatro llamadas de red; si el proceso muere ahi, la fila queda en
+// `aprobado` para siempre y la reentrega de Mercado Pago respondia 200 muda.
+// Y como la emision corre en un Worker aparte, lo mas probable es que las
+// ordenes de compra SI hayan salido.
+// =====================================================================
+describe('la fila que queda colgada entre la reclamacion y el desenlace', () => {
+  it('si no se puede escribir el estado final, alerta al interno', async () => {
+    const alertas: Array<[string, string]> = [];
+    routeFetch({ escrituraFalla: (_u, b) => b.estado === 'emitido' });
+    const res = makeRes();
+    await createWebhookHandler(async (a, d) => { alertas.push([a, d]); })(makeReq(), res, ENV);
+    expect(alertas).toHaveLength(1);
+    expect(alertas[0][0].toLowerCase()).toContain('no se pudo escribir');
+  });
+
+  it('si no se pueden marcar los pedidos como pagados, alerta al interno', async () => {
+    const alertas: Array<[string, string]> = [];
+    routeFetch({ escrituraFalla: (u) => u.includes('/pedidos') });
+    const res = makeRes();
+    await createWebhookHandler(async (a, d) => { alertas.push([a, d]); })(makeReq(), res, ENV);
+    expect(alertas).toHaveLength(1);
+    expect(alertas[0][0]).toContain('pedidos');
+  });
+
+  it('la reentrega sobre una fila que sigue en aprobado alerta en vez de responder muda', async () => {
+    const alertas: Array<[string, string]> = [];
+    const spy = routeFetch({
+      pago: [{ ...PAGO, estado: 'aprobado', mp_payment_id: PAYMENT_ID }],
+      reclamo: [],
+    });
+    const res = makeRes();
+    await createWebhookHandler(async (a, d) => { alertas.push([a, d]); })(makeReq(), res, ENV);
+    expect(res.statusCode).toBe(200);
+    expect(spy.mock.calls.some(([u]) => String(u).includes('/invoke'))).toBe(false);
+    expect(alertas).toHaveLength(1);
+    expect(alertas[0][0]).toContain('atascad');
+  });
+
+  it('la reentrega sobre una fila ya emitido sigue siendo un 200 silencioso', async () => {
+    const alertas: string[] = [];
+    routeFetch({
+      pago: [{ ...PAGO, estado: 'emitido', mp_payment_id: PAYMENT_ID }],
+      reclamo: [],
+    });
+    const res = makeRes();
+    await createWebhookHandler(async (a) => { alertas.push(a); })(makeReq(), res, ENV);
+    expect(res.statusCode).toBe(200);
+    expect(alertas).toHaveLength(0);
+  });
+
+  it('la reentrega sobre una fila ya aprobado_sin_emitir tampoco alerta', async () => {
+    const alertas: string[] = [];
+    routeFetch({
+      pago: [{ ...PAGO, estado: 'aprobado_sin_emitir', mp_payment_id: PAYMENT_ID }],
+      reclamo: [],
+    });
+    const res = makeRes();
+    await createWebhookHandler(async (a) => { alertas.push(a); })(makeReq(), res, ENV);
+    expect(res.statusCode).toBe(200);
+    expect(alertas).toHaveLength(0);
+  });
+});
+
+// =====================================================================
+// I2: Checkout Pro no impide que una preferencia se pague dos veces, y el
+// mensaje de rechazo invita literalmente a reintentar con el mismo link. Un
+// segundo pago trae id distinto y monto correcto, asi que pasa el guard de
+// duplicado y el chequeo de monto, y muere callado en la transicion
+// condicional. Plata cobrada dos veces, cero rastro.
+// =====================================================================
+describe('un segundo pago genuino sobre el mismo link', () => {
+  it('con id distinto sobre una fila ya emitido: alerta y no emite de nuevo', async () => {
+    const alertas: Array<[string, string]> = [];
+    const escrituras: any[] = [];
+    const spy = routeFetch({
+      escrituras,
+      pago: [{ ...PAGO, estado: 'emitido', mp_payment_id: '111111111' }],
+      mpPago: { id: '222222222', status: 'approved', external_reference: QUOTE, transaction_amount: 219725 },
+      reclamo: [],
+    });
+    const res = makeRes();
+    await createWebhookHandler(async (a, d) => { alertas.push([a, d]); })(makeReq(), res, ENV);
+    expect(res.statusCode).toBe(200);
+    expect(spy.mock.calls.some(([u]) => String(u).includes('/invoke'))).toBe(false);
+    // La unica escritura intentada es la transicion condicional, que no
+    // encontro fila que tomar: el desenlace del primer pago queda intacto.
+    expect(escrituras.every((e) => e.url.includes('estado=eq.pendiente'))).toBe(true);
+    expect(alertas).toHaveLength(1);
+    expect(alertas[0][0].toLowerCase()).toContain('segundo');
+    // Quien lo resuelve necesita los dos identificadores para devolver el que
+    // sobra: el que ya estaba registrado y el que acaba de llegar.
+    expect(alertas[0][1]).toContain('222222222');
+    expect(alertas[0][1]).toContain('111111111');
+  });
+
+  it('con id distinto sobre una fila colgada en aprobado: alerta por las dos cosas', async () => {
+    const alertas: string[] = [];
+    routeFetch({
+      pago: [{ ...PAGO, estado: 'aprobado', mp_payment_id: '111111111' }],
+      mpPago: { id: '222222222', status: 'approved', external_reference: QUOTE, transaction_amount: 219725 },
+      reclamo: [],
+    });
+    const res = makeRes();
+    await createWebhookHandler(async (a) => { alertas.push(a); })(makeReq(), res, ENV);
+    expect(alertas).toHaveLength(2);
+    expect(alertas.some((a) => a.includes('atascad'))).toBe(true);
+    expect(alertas.some((a) => a.toLowerCase().includes('segundo'))).toBe(true);
+  });
+});
+
+// =====================================================================
+// I4 visto desde el webhook: la rama de monto que no calza transiciona desde
+// `pendiente`, no desde cualquier cosa. Sin esa condicion degradaba a
+// `aprobado_sin_emitir` una fila que ya estaba `emitido` por un pago anterior
+// legitimo, borrando el registro de que las ordenes si salieron.
+// =====================================================================
+describe('el monto que no calza no pisa una fila ya resuelta', () => {
+  it('condiciona la degradacion a que la fila siga pendiente', async () => {
+    const escrituras: any[] = [];
+    const alertas: string[] = [];
+    routeFetch({
+      escrituras,
+      pago: [{ ...PAGO, estado: 'emitido', mp_payment_id: '111111111' }],
+      mpPago: { id: '222222222', status: 'approved', external_reference: QUOTE, transaction_amount: 1000 },
+    });
+    const res = makeRes();
+    await createWebhookHandler(async (a) => { alertas.push(a); })(makeReq(), res, ENV);
+    const degradacion = escrituras.find((e) => e.body.estado === 'aprobado_sin_emitir');
+    expect(degradacion).toBeDefined();
+    expect(degradacion.url).toContain('estado=eq.pendiente');
+    // El monto sigue sin calzar: eso se alerta igual, la fila se pise o no.
+    expect(alertas).toHaveLength(1);
+  });
+
+  it('los caminos terminales transicionan desde aprobado', async () => {
+    const escrituras: any[] = [];
+    routeFetch({ escrituras });
+    const res = makeRes();
+    await createWebhookHandler()(makeReq(), res, ENV);
+    const final = escrituras.find((e) => e.body.estado === 'emitido');
+    expect(final.url).toContain('estado=eq.aprobado');
+  });
+});
+
+// =====================================================================
+// C2, parte 1: el techo de ejecucion. La razon por la que la fila se queda
+// colgada en `aprobado` es que el proceso se muere entre la reclamacion y el
+// desenlace, y con un techo de 30s eso no es hipotetico: el presupuesto de
+// timeouts de este handler suma mucho mas que eso.
+//
+// Peor caso del camino aprobado, sumando los AbortSignal.timeout reales:
+//   consultarPago (mercadopago.ts)          10s
+//   leerPago (datos.ts)                      8s
+//   reclamarAprobado (datos.ts)              8s
+//   leerCotizacion (datos.ts)                8s
+//   invocarFunction (kapso.ts): listado     30s
+//                             + invoke      30s
+//                 + re-listado e invoke por 404 obsoleto   60s
+//   marcarEstado                             8s
+//   marcarPedidosPagados                     8s
+//   enviarTexto                              5s
+//                                         ------
+//                                           175s
+//
+// De ahi el 300: cubre el peor caso completo con margen, y es el maximo
+// documentado de Vercel fuera de fluid compute. No se elige mas bajo porque
+// un techo por debajo del presupuesto es exactamente el bug; no mas alto
+// porque no hay nada que esperar despues de esos 175s.
+// =====================================================================
+describe('techo de ejecucion de las rutas de pago', () => {
+  const config = JSON.parse(readFileSync('apps/mailer/vercel.json', 'utf8'));
+  const patrones = Object.keys(config.functions);
+
+  it('las rutas de pago tienen un techo holgado frente al presupuesto de timeouts', () => {
+    const pago = patrones.find((p) => p.startsWith('api/pago/'));
+    expect(pago, 'no hay una entrada especifica para las rutas de pago').toBeDefined();
+    expect(config.functions[pago!].maxDuration).toBeGreaterThanOrEqual(175);
+  });
+
+  it('el patron especifico va antes del glob general, que gana por orden', () => {
+    const pago = patrones.findIndex((p) => p.startsWith('api/pago/'));
+    const general = patrones.indexOf('api/**/*.ts');
+    expect(general, 'el glob general sigue existiendo para el resto de api/').toBeGreaterThan(-1);
+    expect(pago).toBeLessThan(general);
+  });
+
+  it('el resto de api/ conserva su techo corto', () => {
+    expect(config.functions['api/**/*.ts'].maxDuration).toBe(30);
   });
 });

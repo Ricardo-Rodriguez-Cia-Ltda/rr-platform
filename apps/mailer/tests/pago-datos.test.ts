@@ -97,4 +97,36 @@ describe('crearPago, leerPago y marcarEstado', () => {
     expect(body.estado).toBe('emitido');
     expect(body.emitido_at).toBe('2026-09-10T00:00:00.000Z');
   });
+
+  // I4: el PATCH iba solo por quote_id, sin condicionar por estado. La rama de
+  // monto que no calza podia entonces degradar a `aprobado_sin_emitir` una
+  // fila que ya estaba `emitido` por un pago anterior legitimo, borrando el
+  // registro de que las ordenes si salieron.
+  it('marcarEstado sin `desde` no condiciona por estado (retrocompatible)', async () => {
+    const spy = stub(() => new Response('[]', { status: 200 }));
+    await marcarEstado(ENV, QUOTE, 'emitido');
+    expect(String(spy.mock.calls[0][0])).not.toContain('estado=eq.');
+  });
+
+  it('marcarEstado con `desde` condiciona el PATCH a ese estado de origen', async () => {
+    const spy = stub(() => new Response(JSON.stringify([{ quote_id: QUOTE }]), { status: 200 }));
+    await marcarEstado(ENV, QUOTE, 'emitido', {}, 'aprobado');
+    const url = String(spy.mock.calls[0][0]);
+    expect(url).toContain('quote_id=eq.' + QUOTE);
+    expect(url).toContain('estado=eq.aprobado');
+  });
+
+  // La distincion que el chequeo de retorno de webhook.ts necesita: cero filas
+  // afectadas NO es un fallo de escritura, es "no correspondia escribir".
+  // Confundirlas convertiria cada transicion legitimamente vacia en una alerta
+  // interna de fila colgada.
+  it('marcarEstado devuelve true cuando el estado de origen no calza: no se pudo pisar, pero tampoco fallo', async () => {
+    stub(() => new Response('[]', { status: 200 }));
+    expect(await marcarEstado(ENV, QUOTE, 'aprobado_sin_emitir', {}, 'pendiente')).toBe(true);
+  });
+
+  it('marcarEstado devuelve false solo cuando la escritura falla de verdad', async () => {
+    stub(() => new Response('{}', { status: 500 }));
+    expect(await marcarEstado(ENV, QUOTE, 'emitido', {}, 'aprobado')).toBe(false);
+  });
 });
