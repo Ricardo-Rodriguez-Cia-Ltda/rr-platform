@@ -1,4 +1,4 @@
-# `apps/mailer` — el relé de correo propio
+# `apps/mailer` — el relé
 
 Un endpoint HTTP, `POST /api/send`, que manda correo por el SMTP de Gmail.
 Reemplaza a Resend: Resend cobraba por un plan que no se quería, y hoy es
@@ -35,6 +35,36 @@ packages/mailer  ──SMTP──►  smtp.gmail.com  ──►  casilla interna
 verdad habla SMTP; esta app solo valida la petición HTTP y decide si la
 deja pasar. El diseño completo está en
 `docs/superpowers/specs/2026-08-27-mailer-fase-1-design.md`.
+
+## Cobro con Mercado Pago
+
+Desde el 2026-09-10 el relé también cobra: el workflow del Rayo le pide el
+link de pago y Mercado Pago le avisa cuando el pago se acredita. El diseño
+está en `docs/superpowers/specs/2026-09-10-pagos-mercado-pago-design.md`.
+
+| Ruta | Qué hace |
+|---|---|
+| `POST /api/pago/crear` | Autenticada con `x-api-key`. Crea la preferencia, guarda la fila `pagos` y manda el link por WhatsApp |
+| `POST /api/pago/webhook` | Pública, autenticada por la firma HMAC de Mercado Pago. Emite las órdenes de compra cuando el pago queda aprobado |
+| `GET /api/pago/retorno` | La página a la que Mercado Pago devuelve al cliente |
+
+Variables nuevas en el proyecto `rr-mailing`:
+
+| Variable | Qué es |
+|---|---|
+| `MP_ACCESS_TOKEN` | Access token de la aplicación de Mercado Pago. Cargar como **Sensitive** |
+| `MP_WEBHOOK_SECRET` | Clave secreta de la notificación, del panel de Mercado Pago. **Sensitive** |
+| `PAGO_BASE_URL` | `https://rr-mailing.vercel.app` |
+| `KAPSO_API_KEY` | La misma clave de la Platform API que usan los scripts de `apps/kapso-agent` |
+
+En el panel de Mercado Pago hay que apuntar la notificación de tipo `payment`
+a `<PAGO_BASE_URL>/api/pago/webhook`.
+
+**Por qué el cobro vive acá y no en una app propia:** el relé ya autentica
+llamadas de Kapso, ya lee Supabase y ya manda correo en proceso — las tres
+cosas que el cobro necesita. Un quinto proyecto de Vercel para dos endpoints
+habría que linkearlo, configurarlo y desplegarlo aparte, y el aviso interno
+tendría que salir por HTTP contra este mismo relé.
 
 ## Variables de entorno
 
@@ -140,7 +170,8 @@ tocar cualquiera sin entender las otras dos rompe el despliegue:
    vacío. `salida-vacia` es un directorio generado en cada build (nunca
    parte del árbol de `apps/mailer`) con un único `index.html` de una línea,
    solo para satisfacer ese requisito — esta app no sirve nada estático,
-   solo las dos funciones en `api/` (`send.ts` y `cotizacion/[id].ts`).
+   solo las funciones en `api/` (`send.ts`, `cotizacion/[id].ts` y las de
+   `pago/`).
 
 **Esto es deliberado. No lo "arregles" quitando `buildCommand` o apuntando
 `outputDirectory` a otra cosa** — sin los tres juntos, o vuelve el install
