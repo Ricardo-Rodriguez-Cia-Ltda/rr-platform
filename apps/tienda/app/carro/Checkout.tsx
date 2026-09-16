@@ -29,10 +29,6 @@ export function Checkout({ iva }: { iva: number }) {
   const [datos, setDatos] = useState<DatosGuardados>({ comprador: { nombre: '', telefono: '', email: '' }, facturacion: { ...FACT_VACIA } });
   const [estado, setEstado] = useState<'listo' | 'enviando'>('listo');
   const [error, setError] = useState('');
-  // Un fallo POSTERIOR a la emision deja el pedido en un estado incierto y un
-  // segundo POST crearia una quote nueva (la idempotencia D1 no lo cubre):
-  // el boton queda muerto para que un doble click no emita una segunda OC.
-  const [bloqueado, setBloqueado] = useState(false);
   const [recotizado, setRecotizado] = useState<{ totalClp: number; totalAnteriorClp: number } | null>(null);
 
   useEffect(() => { setItems(leerCarro()); setDatos(leerDatos()); }, []);
@@ -69,18 +65,22 @@ export function Checkout({ iva }: { iva: number }) {
     if (res.status === 409 && data.recotizado) { setRecotizado({ totalClp: data.totalClp, totalAnteriorClp: data.totalAnteriorClp }); return; }
     if (!res.ok) {
       setError(String(data.error ?? 'No pudimos procesar tu pedido.'));
-      if (data.noReintentar === true) setBloqueado(true);
+      return;
+    }
+    if (typeof data.initPoint !== 'string' || !data.initPoint) {
+      setError('No pudimos generar el link de pago. Intenta de nuevo.');
       return;
     }
     guardarCarro([]);
     try {
       sessionStorage.setItem(`drc-pedido-${data.quoteId}`, JSON.stringify({
         totalClp: data.totalClp,
-        avisoOc: data.avisoOc === true,
         avisoAbastecimiento: data.avisoAbastecimiento === true,
       }));
     } catch { /* opcional */ }
-    window.location.href = `/pedido/${data.quoteId}`;
+    // Directo a Mercado Pago. Al terminar (o al cerrar), vuelve a
+    // /pedido/{quoteId}, que le cuenta el estado real del pago.
+    window.location.href = data.initPoint;
   }
 
   if (items.length === 0) {
@@ -95,7 +95,7 @@ export function Checkout({ iva }: { iva: number }) {
   const f = datos.facturacion;
   const setC = (campo: string, valor: string) => setDatos({ ...datos, comprador: { ...c, [campo]: valor } });
   const setF = (campo: string, valor: string) => setDatos({ ...datos, facturacion: { ...f, [campo]: valor } });
-  const trabajando = estado === 'enviando' || bloqueado;
+  const trabajando = estado === 'enviando';
 
   return (
     <>
@@ -185,14 +185,15 @@ export function Checkout({ iva }: { iva: number }) {
 
           <button className="boton-compra grande" type="submit" disabled={trabajando}>
             {estado === 'enviando'
-              ? 'Consultando precios…'
+              ? 'Preparando el pago…'
               : recotizado
                 ? `Confirmar por ${formatCLP(recotizado.totalClp)}`
                 : 'Confirmar pedido'}
           </button>
           <p className="nota">
-            Todavía no cobramos en línea: al confirmar te escribimos por WhatsApp para coordinar
-            el pago (contado) y la entrega.
+            Al confirmar te llevamos a Mercado Pago para pagar con tarjeta. Las órdenes a los
+            proveedores se cursan solo cuando el pago se acredita, y la entrega la coordinamos
+            por WhatsApp.
           </p>
         </form>
       </div>
