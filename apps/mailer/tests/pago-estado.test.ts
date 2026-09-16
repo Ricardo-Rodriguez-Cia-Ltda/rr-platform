@@ -95,6 +95,7 @@ describe('GET /api/pago/estado/{id}', () => {
       if (Array.isArray(id)) { expect(res.statusCode).toBe(200); continue; }
       expect(res.statusCode).toBe(404);
       expect(res.jsonBody).toEqual({ ok: false, error: 'no_encontrado' });
+      expect(res.headers['cache-control']).toBe('no-store');
     }
     expect(spy).toHaveBeenCalledTimes(1);
   });
@@ -128,5 +129,6 @@ describe('GET /api/pago/estado/{id}', () => {
     const res = makeRes();
     await createEstadoHandler(() => AHORA)(makeReq(QUOTE, 'POST'), res, ENV);
     expect(res.statusCode).toBe(405);
+    expect(res.headers['cache-control']).toBe('no-store');
   });
 });

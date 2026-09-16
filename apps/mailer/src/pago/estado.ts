@@ -45,13 +45,15 @@ export function createEstadoHandler(ahora: () => number = Date.now) {
     res: VercelResponse,
     env: PagoEnv = process.env as PagoEnv,
   ): Promise<void> {
+    // La pagina del pedido lo consulta en bucle mientras espera el webhook:
+    // una respuesta cacheada le mentiria justo cuando cambia. Va primero,
+    // antes de cualquier retorno, para que ni siquiera el 405 se cachee.
+    res.setHeader('Cache-Control', 'no-store');
+
     if (req.method !== 'GET') {
       res.status(405).json({ ok: false, error: 'metodo_no_permitido' });
       return;
     }
-    // La pagina del pedido lo consulta en bucle mientras espera el webhook:
-    // una respuesta cacheada le mentiria justo cuando cambia.
-    res.setHeader('Cache-Control', 'no-store');
 
     const id = firstString(req.query.id as string | string[] | undefined) ?? '';
     if (!UUID_RE.test(id)) {
