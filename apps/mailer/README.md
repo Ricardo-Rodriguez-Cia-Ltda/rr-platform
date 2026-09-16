@@ -49,6 +49,7 @@ está en `docs/superpowers/specs/2026-09-10-pagos-mercado-pago-design.md`.
 | `POST /api/pago/webhook` | Pública, autenticada por la firma HMAC de Mercado Pago. Emite las órdenes de compra cuando el pago queda aprobado |
 | `GET /api/pago/retorno` | La página a la que Mercado Pago devuelve al cliente |
 | `GET /api/pago/estado/<quote_id>` | Pública por URL de capacidad (como el PDF). Estado, monto, rechazos y vencimiento del pago; el link de pago solo mientras está pendiente y vigente. Nunca teléfono, `datos` ni ids de Mercado Pago. La consulta la página del pedido de la tienda |
+| `GET /api/pago/barrido` | La llama Vercel Cron cada 30 minutos (`crons` en `vercel.json`), autenticada con `Authorization: Bearer <CRON_SECRET>`. Lista las filas de `pagos` en `aprobado` con más de diez minutos (o sin marca de reclamación) y manda **un** correo interno con todas. Se repite en cada corrida mientras alguna siga ahí: se calla al mover la fila a `emitido` o `aprobado_sin_emitir`. Si Supabase no responde, también avisa |
 
 Variables nuevas en el proyecto `rr-mailing`:
 
@@ -59,6 +60,7 @@ Variables nuevas en el proyecto `rr-mailing`:
 | `PAGO_BASE_URL` | `https://rr-mailing.vercel.app` |
 | `KAPSO_API_KEY` | La misma clave de la Platform API que usan los scripts de `apps/kapso-agent` |
 | `TIENDA_BASE_URL` | Base de la tienda web sin barra final (p. ej. `https://drcomputacion.cl`). Solo la exige un `crear` con `origen: "tienda"`: es a donde Mercado Pago devuelve al cliente web. Tras cargarla hay que **redesplegar**: Vercel no aplica variables a un despliegue ya construido |
+| `CRON_SECRET` | Valor aleatorio largo, generado a mano, **Sensitive**. Vercel lo manda en cada llamada del cron; sin él el barrido responde `503 falta_configuracion` y nunca queda abierto. Tras cargarlo, **redesplegar** |
 
 En el panel de Mercado Pago hay que apuntar la notificación de tipo `payment`
 a `<PAGO_BASE_URL>/api/pago/webhook`.
