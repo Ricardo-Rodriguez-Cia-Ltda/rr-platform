@@ -30,7 +30,9 @@ export function crearAlertar(env: AlertaEnv, mailerInyectado?: Mailer): Alertar 
         to: destino,
         subject: `[pagos] ${asunto}`,
         text: detalle,
-        html: `<p>${detalle.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</p>`,
+        // Los detalles largos (el barrido) traen listas y parrafos: los saltos
+        // de linea tienen que sobrevivir en la parte HTML.
+        html: `<p>${detalle.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br>')}</p>`,
       });
     } catch {
       // Ya quedo en la fila de `pagos`; el correo es un extra.

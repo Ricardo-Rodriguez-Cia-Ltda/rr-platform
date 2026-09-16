@@ -209,9 +209,18 @@ export async function marcarPedidosPagados(env: PagoEnv, quoteId: string): Promi
  *
  * `null` = no se pudo preguntar; `[]` = no hay atascadas.
  */
+// Tope de filas por barrido. Si se alcanza, el barrido avisa que hay mas: en
+// una falla sistemica (muchas filas atascadas a la vez) es justo cuando no se
+// puede subestimar. Las filas sin marca van primero porque son la anomalia mas
+// grave y no deben ser las que queden fuera de la pagina.
+export const TOPE_BARRIDO = 100;
+
 export async function listarAprobadasViejas(env: PagoEnv, limiteMs: number): Promise<PagoRow[] | null> {
   const corte = new Date(limiteMs).toISOString();
   const filtro = `or=(aprobado_at.is.null,aprobado_at.lt.${encodeURIComponent(corte)})`;
-  const filas = await pedir(env, 'GET', `/pagos?estado=eq.aprobado&${filtro}&order=aprobado_at.asc&limit=100`);
+  const filas = await pedir(
+    env, 'GET',
+    `/pagos?estado=eq.aprobado&${filtro}&order=aprobado_at.asc.nullsfirst&limit=${TOPE_BARRIDO}`,
+  );
   return filas === null ? null : (filas as PagoRow[]);
 }

@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { isAuthorized } from '@rr/http/auth';
 import { firstString } from '@rr/http/http';
-import { listarAprobadasViejas, type PagoEnv, type PagoRow } from './datos.js';
+import { listarAprobadasViejas, TOPE_BARRIDO, type PagoEnv, type PagoRow } from './datos.js';
 import { formatearClp } from './mensajes.js';
 import { UMBRAL_FILA_ATASCADA_MS, type Alertar } from './webhook.js';
 
@@ -35,14 +36,17 @@ function minutosDesde(marca: unknown, ahoraMs: number): number | null {
 
 export function redactarAlertaAtascadas(filas: PagoRow[], ahoraMs: number): { asunto: string; detalle: string } {
   const n = filas.length;
+  // Al tope, el listado es una cota inferior: la consulta trae como maximo
+  // TOPE_BARRIDO filas y no se sabe cuantas mas hay.
+  const alTope = n >= TOPE_BARRIDO;
   const asunto = n === 1
     ? '1 pago atascado en aprobado sin orden emitida'
-    : `${n} pagos atascados en aprobado sin orden emitida`;
+    : `${alTope ? 'Al menos ' : ''}${n} pagos atascados en aprobado sin orden emitida`;
   const lineas = filas.map((f) => {
     const min = minutosDesde(f.aprobado_at, ahoraMs);
     const edad = min === null ? 'sin marca de reclamacion' : `reclamado hace ${min} min`;
     return `- Pedido ${f.numero ?? 'S/N'} (cotizacion ${f.quote_id}), pago MP ${f.mp_payment_id ?? 'sin id'}, `
-      + `${formatearClp(Number(f.monto_clp))}, ${edad}.`;
+      + `${f.monto_clp != null && Number.isFinite(Number(f.monto_clp)) ? formatearClp(Number(f.monto_clp)) : 'monto desconocido'}, ${edad}.`;
   });
   const detalle = [
     'Estas filas de `pagos` llevan mas de diez minutos en estado `aprobado`: el pago se cobro y la '
@@ -50,6 +54,7 @@ export function redactarAlertaAtascadas(filas: PagoRow[], ahoraMs: number): { as
     + 'haya muerto a mitad de camino.',
     '',
     ...lineas,
+    ...(alTope ? ['', `OJO: el listado esta cortado en ${TOPE_BARRIDO} filas; hay mas. Esto es una falla sistemica, no un caso aislado.`] : []),
     '',
     'Que hacer: revisar el correo de ordenes de compra y el backoffice. Si las ordenes salieron, mover '
     + 'la fila a `emitido` (y el pedido a pagado); si no salieron, emitirlas a mano y despues mover la '
@@ -77,8 +82,10 @@ export function createBarridoHandler(alertar: Alertar, ahora: () => number = Dat
       res.status(503).json({ ok: false, error: 'falta_configuracion', faltan: ['CRON_SECRET'] });
       return;
     }
+    // Comparacion en tiempo constante, como el resto de las claves del rele.
     const auth = firstString(req.headers.authorization) ?? '';
-    if (auth !== `Bearer ${env.CRON_SECRET}`) {
+    const token = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length) : '';
+    if (!isAuthorized(token, env.CRON_SECRET)) {
       res.status(401).json({ ok: false, error: 'no_autorizado' });
       return;
     }

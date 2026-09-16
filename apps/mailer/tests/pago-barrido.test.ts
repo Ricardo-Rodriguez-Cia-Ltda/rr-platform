@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createBarridoHandler, redactarAlertaAtascadas } from '../src/pago/barrido.js';
+import { TOPE_BARRIDO } from '../src/pago/datos.js';
 import { UMBRAL_FILA_ATASCADA_MS } from '../src/pago/webhook.js';
 
 const ENV = { SUPABASE_URL: 'https://supabase.test', SUPABASE_SERVICE_KEY: 'clave', CRON_SECRET: 'cron-secreto' };
@@ -64,6 +65,16 @@ describe('redactarAlertaAtascadas', () => {
     expect(detalle).toMatch(/emitido|aprobado_sin_emitir/);
     expect(detalle).toContain('30 minutos');
   });
+  it('al tope, el asunto dice "al menos" y el detalle avisa que hay mas', () => {
+    const filas = Array.from({ length: TOPE_BARRIDO }, (_, i) => ({ ...ATASCADA, numero: 1600100 + i }));
+    const { asunto, detalle } = redactarAlertaAtascadas(filas as any, AHORA);
+    expect(asunto).toBe(`Al menos ${TOPE_BARRIDO} pagos atascados en aprobado sin orden emitida`);
+    expect(detalle).toContain('hay mas');
+    expect(redactarAlertaAtascadas([ATASCADA, SIN_MARCA] as any, AHORA).detalle).not.toContain('hay mas');
+  });
+  it('un monto ilegible no rompe el correo', () => {
+    expect(redactarAlertaAtascadas([{ ...ATASCADA, monto_clp: null }] as any, AHORA).detalle).toContain('monto desconocido');
+  });
   it('en singular cuando es una sola', () => {
     expect(redactarAlertaAtascadas([ATASCADA] as any, AHORA).asunto).toBe('1 pago atascado en aprobado sin orden emitida');
   });
@@ -101,7 +112,10 @@ describe('GET /api/pago/barrido', () => {
     expect(url).toContain('estado=eq.aprobado');
     expect(url).toContain(`aprobado_at.lt.${new Date(AHORA - UMBRAL_FILA_ATASCADA_MS).toISOString()}`);
     expect(url).toContain('aprobado_at.is.null');
-    expect(url).toContain('order=aprobado_at.asc');
+    // Las filas sin marca son la anomalia mas grave: van primero para que
+    // nunca sean las que queden fuera de la pagina.
+    expect(url).toContain('order=aprobado_at.asc.nullsfirst');
+    expect(url).toContain(`limit=${TOPE_BARRIDO}`);
   });
 
   it('sin filas: 200, cero atascadas y ningun correo', async () => {
