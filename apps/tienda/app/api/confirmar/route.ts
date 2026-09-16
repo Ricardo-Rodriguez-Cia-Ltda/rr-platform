@@ -3,11 +3,14 @@ import { armarCuerpoCrearPago, armarPayloadCotizacion, validarPedido } from '../
 import { crearPago } from '../../../src/lib/relay.js';
 import { permitir } from '../../../src/lib/rate-limit.js';
 
-// Esta ruta cotiza en vivo en Kapso (30s de timeout propio) y despues le pide
-// el link de pago al rele (15s), en serie: el techo tiene que dar para los dos
-// en el peor caso. Va como segment config de Next y no en vercel.json — en
-// App Router las functions las emite el framework, y un glob que no calza
-// rompe el build.
+// Esta ruta cotiza en vivo en Kapso y despues le pide el link de pago al
+// rele, en serie. Kapso usa 30s de timeout en cada tramo (listado de
+// functions, invoke, y el reintento por 404 cuando el id quedo obsoleto): el
+// peor caso de esa re-resolucion supera los 60s de este techo. Si eso pasa,
+// la plataforma corta la funcion antes de que nada se haya emitido, asi que
+// el reintento del cliente es seguro. Va como segment config de Next y no en
+// vercel.json — en App Router las functions las emite el framework, y un
+// glob que no calza rompe el build.
 export const maxDuration = 60;
 
 const json = (payload: unknown, status = 200) =>

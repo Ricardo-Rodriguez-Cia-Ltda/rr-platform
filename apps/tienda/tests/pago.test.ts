@@ -68,4 +68,58 @@ describe('describirPago', () => {
       if (estado !== 'emitido') expect(`${d.titulo} ${d.texto}`).not.toMatch(/quedó cursado/);
     }
   });
+
+  describe('retornoAprobado (query param del retorno de Mercado Pago)', () => {
+    it('con flag y pendiente vigente: no ofrece pagar, sigue consultando, sin comprobante', () => {
+      const d = describirPago(base, { retornoAprobado: true });
+      expect(d.accion).not.toBe('pagar');
+      expect(d.accion).toBe('ninguna');
+      expect(d.seguirConsultando).toBe(true);
+      expect(d.comprobante).toBe(false);
+      expect(d.sello).toBe('Pago en confirmación');
+      expect(d.titulo).toBe('Estamos confirmando tu pago.');
+    });
+    it('con flag y pendiente con rechazos: igual se degrada, no ofrece pagar', () => {
+      const d = describirPago({ ...base, intentos_rechazados: 1 }, { retornoAprobado: true });
+      expect(d.accion).not.toBe('pagar');
+      expect(d.seguirConsultando).toBe(true);
+    });
+    it('con flag y pendiente sin init_point (vencido): igual se degrada, no manda a volver', () => {
+      const { init_point: _sinLink, ...vencida } = base;
+      const d = describirPago(vencida, { retornoAprobado: true });
+      expect(d.accion).not.toBe('volver');
+      expect(d.accion).toBe('ninguna');
+      expect(d.seguirConsultando).toBe(true);
+    });
+    it('con flag y emitido: igual que sin flag (el query param solo degrada, nunca sube la vista)', () => {
+      const conFlag = describirPago({ ...base, estado: 'emitido', init_point: undefined }, { retornoAprobado: true });
+      const sinFlag = describirPago({ ...base, estado: 'emitido', init_point: undefined });
+      expect(conFlag).toEqual(sinFlag);
+    });
+    it('con flag y aprobado: igual que sin flag', () => {
+      const conFlag = describirPago({ ...base, estado: 'aprobado', init_point: undefined }, { retornoAprobado: true });
+      const sinFlag = describirPago({ ...base, estado: 'aprobado', init_point: undefined });
+      expect(conFlag).toEqual(sinFlag);
+    });
+    it('con flag y aprobado_sin_emitir: igual que sin flag', () => {
+      const conFlag = describirPago({ ...base, estado: 'aprobado_sin_emitir', init_point: undefined }, { retornoAprobado: true });
+      const sinFlag = describirPago({ ...base, estado: 'aprobado_sin_emitir', init_point: undefined });
+      expect(conFlag).toEqual(sinFlag);
+    });
+    it('sin flag: todo se comporta como antes', () => {
+      const d = describirPago(base);
+      expect(d.accion).toBe('pagar');
+      expect(d.sello).toBe('Falta pagar');
+    });
+  });
+
+  it('estado desconocido (cast): no lanza, forma conservadora, no ofrece pagar', () => {
+    const d = describirPago({ ...base, estado: 'algo_nuevo' as EstadoPago['estado'], init_point: undefined });
+    expect(d.sello).toBe('Pago en revisión');
+    expect(d.titulo).toBe('Estamos revisando tu pedido.');
+    expect(d.texto).toContain('WhatsApp');
+    expect(d.accion).toBe('ninguna');
+    expect(d.seguirConsultando).toBe(false);
+    expect(d.comprobante).toBe(false);
+  });
 });

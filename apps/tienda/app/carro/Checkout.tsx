@@ -59,15 +59,20 @@ export function Checkout({ iva }: { iva: number }) {
         totalConfirmadoClp,
       }),
     }).catch(() => null);
-    setEstado('listo');
-    if (!res) { setError('Sin conexión. Intenta de nuevo.'); return; }
+    if (!res) { setEstado('listo'); setError('Sin conexión. Intenta de nuevo.'); return; }
     const data = await res.json().catch(() => ({}));
-    if (res.status === 409 && data.recotizado) { setRecotizado({ totalClp: data.totalClp, totalAnteriorClp: data.totalAnteriorClp }); return; }
+    if (res.status === 409 && data.recotizado) {
+      setEstado('listo');
+      setRecotizado({ totalClp: data.totalClp, totalAnteriorClp: data.totalAnteriorClp });
+      return;
+    }
     if (!res.ok) {
+      setEstado('listo');
       setError(String(data.error ?? 'No pudimos procesar tu pedido.'));
       return;
     }
     if (typeof data.initPoint !== 'string' || !data.initPoint) {
+      setEstado('listo');
       setError('No pudimos generar el link de pago. Intenta de nuevo.');
       return;
     }
