@@ -10,6 +10,8 @@ import { vigenciaUtil } from './quote.js';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const REQUERIDAS = ['SUPABASE_URL', 'SUPABASE_SERVICE_KEY'] as const;
 
+// Mantener en espejo con apps/tienda/src/lib/pago.ts (misma forma, ahi como
+// tipo de entrada de describirPago).
 export interface EstadoPago {
   estado: PagoRow['estado'];
   monto_clp: number;
@@ -49,6 +51,12 @@ export function createEstadoHandler(ahora: () => number = Date.now) {
     // una respuesta cacheada le mentiria justo cuando cambia. Va primero,
     // antes de cualquier retorno, para que ni siquiera el 405 se cachee.
     res.setHeader('Cache-Control', 'no-store');
+    // El navegador de la tienda hace GET cross-origin a este endpoint desde
+    // su propio dominio. `*` es correcto aca: es un GET simple sin
+    // credenciales (no manda cookies ni headers de auth) a un endpoint
+    // publico por URL de capacidad, la misma politica que ya declara
+    // proyectarEstado. No hay preflight que restringir.
+    res.setHeader('Access-Control-Allow-Origin', '*');
 
     if (req.method !== 'GET') {
       res.status(405).json({ ok: false, error: 'metodo_no_permitido' });

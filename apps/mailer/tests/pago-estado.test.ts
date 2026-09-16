@@ -84,6 +84,7 @@ describe('GET /api/pago/estado/{id}', () => {
       expira_at: enHoras(3), init_point: 'https://mp/pagar',
     });
     expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.headers['access-control-allow-origin']).toBe('*');
   });
 
   it('id mal formado: 404 sin tocar Supabase', async () => {
@@ -96,6 +97,7 @@ describe('GET /api/pago/estado/{id}', () => {
       expect(res.statusCode).toBe(404);
       expect(res.jsonBody).toEqual({ ok: false, error: 'no_encontrado' });
       expect(res.headers['cache-control']).toBe('no-store');
+      expect(res.headers['access-control-allow-origin']).toBe('*');
     }
     expect(spy).toHaveBeenCalledTimes(1);
   });
@@ -130,5 +132,6 @@ describe('GET /api/pago/estado/{id}', () => {
     await createEstadoHandler(() => AHORA)(makeReq(QUOTE, 'POST'), res, ENV);
     expect(res.statusCode).toBe(405);
     expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.headers['access-control-allow-origin']).toBe('*');
   });
 });
