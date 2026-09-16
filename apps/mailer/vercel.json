@@ -4,7 +4,7 @@
   "outputDirectory": "salida-vacia",
   "functions": {
     "api/**/*.ts": {
-      "maxDuration": 30
+      "maxDuration": 300
     }
   }
 }

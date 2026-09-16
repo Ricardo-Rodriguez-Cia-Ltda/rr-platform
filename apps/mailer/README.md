@@ -186,13 +186,21 @@ igual que `apps/pricing-api` — porque importa código de `packages/mailer` y
 ### `vercel.json`: por qué tiene `installCommand`, `buildCommand` y `outputDirectory`
 
 Cita parcial — solo las tres claves que explica esta sección. El archivo
-real (`apps/mailer/vercel.json`) tiene además un bloque `functions` con dos
-entradas: `api/pago/*.ts` con `maxDuration: 300` y `api/**/*.ts` con
-`maxDuration: 30`. La segunda es lo único que acota un envío SMTP colgado (sin
-eso, una conexión a `smtp.gmail.com` que nunca responde dejaría la función
-corriendo hasta el límite por defecto de Vercel). La primera existe por otra
-razón, y **el orden importa**: Vercel resuelve el primer patrón que calza, así
-que la entrada específica tiene que ir antes del glob general.
+real (`apps/mailer/vercel.json`) tiene además un bloque `functions` con **un
+solo glob**, `api/**/*.ts` con `maxDuration: 300`. Es un solo glob a
+propósito: con dos patrones que se solapan, cuál gana depende de un orden que
+Vercel no documenta, y el modo de fallo es silencioso (el techo se queda en 30
+sin ningún error). Y es 300 para todo `api/` porque las rutas que no son de
+pago ya acotan su propio trabajo: el transporte SMTP tiene timeouts propios
+(`packages/mailer/src/gmail.ts`) y las lecturas a Supabase llevan
+`AbortSignal` de 8s, así que un techo alto no las deja colgadas.
+
+**Los `export const maxDuration = 300` de cada archivo de `api/pago/` NO son
+el techo efectivo aquí.** El 2026-09-16 el resumen del despliegue en Vercel
+mostró las cuatro rutas de pago con "≤30s" pese a esos exports: en este
+proyecto no hay framework y Vercel solo respetó el glob de `vercel.json`. Los
+exports se conservan como documentación; el archivo de configuración es el que
+manda, y `tests/pago-webhook.test.ts` lo verifica.
 
 **Por qué las rutas de pago necesitan 300 y no 30.** En `/api/pago/webhook`,
 entre que la fila se reclama como `aprobado` y que se marca `emitido` o
@@ -224,7 +232,9 @@ verifica contra el archivo real.
 
 **Ojo al desplegar:** `maxDuration: 300` exige plan Pro. En Hobby el techo es
 60 y el despliegue lo rechaza. El webhook también sigue respondiendo cuando el
-handler termina, no a los 300s: el techo es un límite, no una espera.
+handler termina, no a los 300s: el techo es un límite, no una espera. Tras
+cada cambio del techo, mirar una vez el resumen del despliegue en Vercel
+(Deployment Summary → Functions): cada ruta de `api/pago/` debe decir ≤300s.
 
 ```json
 {

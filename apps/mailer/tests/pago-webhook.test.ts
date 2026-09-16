@@ -624,10 +624,19 @@ describe('el monto que no calza no pisa una fila ya resuelta', () => {
 //
 // R2: ese techo se conseguia con una entrada especifica de `vercel.json`
 // puesta antes del glob general, y dependia de que Vercel resolviera los dos
-// patrones en ese orden. Si el glob general ganaba, el techo se quedaba en 30
-// y el arreglo del estado colgado no aplicaba, sin ningun error visible. El
-// runtime de Node lee `export const maxDuration` del archivo de la funcion y
-// eso gana sobre la configuracion por globs, sin depender de ningun orden.
+// patrones en ese orden. Se reemplazo por `export const maxDuration` en cada
+// archivo, asumiendo que el runtime lo leia por encima de los globs.
+//
+// R3 (2026-09-16): esa premisa era falsa para este proyecto. El resumen del
+// despliegue en Vercel mostro las cuatro rutas de pago con "<=30s" pese al
+// export: aqui no hay framework y lo unico que Vercel respeto fue el glob de
+// `vercel.json`. Por eso el techo efectivo vive en ese archivo, en UN solo
+// glob (para que no haya orden que resolver) y en 300 para todo `api/`: las
+// otras rutas ya acotan su propio trabajo (SMTP con timeouts propios en
+// packages/mailer/src/gmail.ts, Supabase con AbortSignal de 8s), asi que un
+// techo alto no las deja colgadas. Los exports por archivo se conservan como
+// documentacion y por si el runtime algun dia los honra, pero la prueba que
+// protege el arreglo es la del glob.
 describe('techo de ejecucion de las rutas de pago', () => {
   const config = JSON.parse(readFileSync('apps/mailer/vercel.json', 'utf8'));
   // Recorre subdirectorios: api/pago/estado/[id].ts tambien es una ruta de
@@ -657,8 +666,10 @@ describe('techo de ejecucion de las rutas de pago', () => {
     expect(patrones).toEqual(['api/**/*.ts']);
   });
 
-  it('el resto de api/ conserva su techo corto', () => {
-    expect(config.functions['api/**/*.ts'].maxDuration).toBe(30);
+  it('el glob de vercel.json declara el techo efectivo, holgado frente al presupuesto', () => {
+    // Es lo unico que el despliegue demostro respetar (R3). Si esto vuelve a
+    // 30, el webhook puede morir entre la reclamacion y el desenlace.
+    expect(config.functions['api/**/*.ts'].maxDuration).toBeGreaterThanOrEqual(175);
   });
 });
 
