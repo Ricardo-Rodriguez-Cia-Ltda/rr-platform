@@ -14,6 +14,10 @@ export interface DatosPreferencia {
   email: string;
   baseUrl: string;
   validUntil: string;
+  // A donde vuelve el cliente al salir del checkout. El bot no la manda y cae
+  // a la pagina "vuelve a WhatsApp" del rele; la tienda manda su pagina del
+  // pedido. El webhook NO depende de esto: siempre es el nuestro.
+  retornoUrl?: string;
 }
 
 export interface PagoMP {
@@ -36,7 +40,7 @@ function tipoDeFallo(error: unknown): string {
 
 export function construirPreferencia(p: DatosPreferencia): Record<string, unknown> {
   const base = p.baseUrl.replace(/\/+$/, '');
-  const retorno = `${base}/api/pago/retorno`;
+  const retorno = p.retornoUrl ?? `${base}/api/pago/retorno`;
   return {
     items: [{
       id: p.quoteId,
