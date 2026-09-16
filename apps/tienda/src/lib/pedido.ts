@@ -68,32 +68,39 @@ export function armarPayloadCotizacion(items: ItemCarro[], telefono: string): un
   };
 }
 
-export function armarPayloadEmision(
-  quote: unknown, comprador: Comprador, facturacion: Facturacion | null, telefono: string,
-): unknown {
+/**
+ * El cuerpo que `POST <rele>/api/pago/crear` espera. Es plano (no es una
+ * function de Kapso, no lleva execution_context) y va sin `phone_number_id`
+ * a proposito: el cliente web no esta en WhatsApp, y sin ese id el rele no
+ * intenta mandar nada. `origen: 'tienda'` es lo que hace que Mercado Pago lo
+ * devuelva a /pedido/{quote_id} en vez de a la pagina "vuelve a WhatsApp".
+ */
+export function armarCuerpoCrearPago(
+  quote: { quote_id: string; quote_version?: string | number },
+  comprador: Comprador,
+  facturacion: Facturacion | null,
+): Record<string, unknown> {
   return {
-    execution_context: {
-      vars: {
-        quote_result: quote,
-        quote_confirmed: true,
-        quote_customer_name: comprador.nombre,
-        // El email SIEMPRE viaja: sin el, un pedido sin facturacion llegaba al
-        // backoffice sin ninguna direccion a la que mandar la cotizacion.
-        // Los otros 6 billing_* siguen atados a la facturacion COMPLETA: a
-        // medias gatillarian el upsert de clientes con datos incompletos.
-        billing_email: facturacion?.emailFactura ?? comprador.email,
-        ...(facturacion
-          ? {
-              billing_rut: facturacion.rut,
-              billing_razon_social: facturacion.razonSocial,
-              billing_giro: facturacion.giro,
-              billing_direccion: facturacion.direccion,
-              billing_comuna: facturacion.comuna,
-              billing_ciudad: facturacion.ciudad,
-            }
-          : {}),
-      },
-      context: { phone_number: telefono },
-    },
+    quote_id: quote.quote_id,
+    quote_version: String(quote.quote_version ?? '1'),
+    quote_confirmed: true,
+    origen: 'tienda',
+    phone_number: comprador.telefono,
+    customer_name: comprador.nombre,
+    // El email SIEMPRE viaja: sin el, un pedido sin facturacion llegaba al
+    // backoffice sin ninguna direccion a la que mandar la cotizacion.
+    // Los otros 6 billing_* siguen atados a la facturacion COMPLETA: a
+    // medias gatillarian el upsert de clientes con datos incompletos.
+    billing_email: facturacion?.emailFactura ?? comprador.email,
+    ...(facturacion
+      ? {
+          billing_rut: facturacion.rut,
+          billing_razon_social: facturacion.razonSocial,
+          billing_giro: facturacion.giro,
+          billing_direccion: facturacion.direccion,
+          billing_comuna: facturacion.comuna,
+          billing_ciudad: facturacion.ciudad,
+        }
+      : {}),
   };
 }
