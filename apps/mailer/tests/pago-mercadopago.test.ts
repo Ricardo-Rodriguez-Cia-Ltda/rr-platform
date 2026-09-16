@@ -50,6 +50,13 @@ describe('construirPreferencia', () => {
     expect(p.notification_url).toBe('https://rr-mailing.vercel.app/api/pago/webhook');
     expect(p.back_urls.success).toBe('https://rr-mailing.vercel.app/api/pago/retorno');
   });
+
+  it('con retornoUrl, las tres back_urls la usan y el webhook sigue siendo nuestro', () => {
+    const retorno = `https://drcomputacion.cl/pedido/${BASE.quoteId}`;
+    const p: any = construirPreferencia({ ...BASE, retornoUrl: retorno });
+    expect(p.back_urls).toEqual({ success: retorno, failure: retorno, pending: retorno });
+    expect(p.notification_url).toBe('https://rr-mailing.vercel.app/api/pago/webhook');
+  });
 });
 
 describe('crearPreferencia', () => {

@@ -14,13 +14,40 @@ Spec: `docs/superpowers/specs/2026-09-03-tienda-dr-computacion-design.md`.
 | `MARGEN` | `0.13` — DEBE calzar con el del bot |
 | `TIPO_CAMBIO_CLP_USD` | `950` — DEBE calzar con el del bot |
 | `IVA_RATE` | `0.19` |
-| `NEXT_PUBLIC_RAYO_WA` | teléfono del bot para wa.me (solo dígitos) — **requerida**: sin ella el botón de WhatsApp no se muestra y el cliente queda sin ninguna vía de contacto (la tienda no cobra online) |
+| `NEXT_PUBLIC_RAYO_WA` | teléfono del bot para wa.me (solo dígitos) — **requerida**: sin ella el botón de WhatsApp no se muestra y el cliente queda sin ninguna vía de contacto (la entrega se coordina por WhatsApp) |
+| `MAILER_URL` | `https://rr-mailing.vercel.app` — el relé, para pedirle el link de pago (server-side) |
+| `MAILER_API_KEY` | la misma `MAILER_API_KEY` del proyecto `rr-mailing`, cargada como **Sensitive** |
+| `NEXT_PUBLIC_MAILER_URL` | `https://rr-mailing.vercel.app` — la URL pública del relé que usa el navegador para el PDF y el estado del pago (sin key). Si falta, cae a ese mismo valor |
 
 Todas son requeridas. El techo de ejecución se fija con `export const
-maxDuration = 30` en cada entrypoint (`/api/confirmar` invoca dos functions de
-Kapso en vivo y la búsqueda espera hasta 21s a la pricing-api). Va como segment
-config de Next, no en `vercel.json`: en App Router las functions las emite el
-framework, y un glob que no calza ninguna hace fallar el build.
+maxDuration` en cada entrypoint: `60` en `/api/confirmar` (cotiza en Kapso, 30s,
+y después le pide el link de pago al relé, 15s, en serie) y `30` en el resto
+(la búsqueda espera hasta 21s a la pricing-api). Va como segment config de
+Next, no en `vercel.json`: en App Router las functions las emite el framework,
+y un glob que no calza ninguna hace fallar el build.
+
+## Cómo cobra
+
+Desde el 2026-09-16 la tienda cobra con Mercado Pago a través del servicio de
+pagos del relé (`apps/mailer`, `api/pago/*`). Diseño en
+`docs/superpowers/specs/2026-09-16-tienda-cobro-design.md`.
+
+1. `/api/confirmar` recotiza en vivo (Kapso) y compara el total, como siempre.
+2. En vez de emitir, llama a `POST <MAILER_URL>/api/pago/crear` con
+   `origen: "tienda"`, la confirmación y los datos del comprador. El relé crea
+   la preferencia, guarda la fila en `pagos` y devuelve el `init_point`.
+3. El checkout redirige el navegador a Mercado Pago. Al terminar, Mercado
+   Pago vuelve a `/pedido/{quote_id}` (lo decide `TIENDA_BASE_URL` en el relé).
+4. La emisión de las órdenes de compra la hace el webhook del relé cuando el
+   pago se acredita: el pedido aparece en el backoffice ya en `pagado`.
+5. `/pedido/{quote_id}` consulta `GET <NEXT_PUBLIC_MAILER_URL>/api/pago/estado/{quote_id}`
+   cada 3 s mientras el desenlace puede cambiar, y muestra el estado con los
+   textos de `src/lib/pago.ts`. Ninguno afirma algo que el estado no haya
+   verificado.
+
+Una confirmación abandonada deja una cotización huérfana y una fila `pendiente`
+en `pagos`; ambas vencen solas. Reintentar `/api/confirmar` es seguro: nada se
+emite hasta que hay plata.
 
 ## Deploy
 

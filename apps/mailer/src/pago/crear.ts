@@ -14,12 +14,22 @@ export interface CrearEnv extends PagoEnv {
   MP_ACCESS_TOKEN?: string;
   PAGO_BASE_URL?: string;
   KAPSO_API_KEY?: string;
+  // Solo la exige un cuerpo con origen 'tienda': es a donde vuelve el cliente
+  // web despues de pagar. El bot no la necesita y no debe fallar por ella.
+  TIENDA_BASE_URL?: string;
 }
 
 const BILLING = [
   'billing_rut', 'billing_razon_social', 'billing_giro', 'billing_direccion',
   'billing_comuna', 'billing_ciudad', 'billing_email',
 ] as const;
+
+// De donde viene el cobro. Decide a donde vuelve el cliente al salir del
+// checkout y queda anotado en la fila para que el backoffice o una alerta lo
+// puedan decir sin adivinar. NO decide si se manda WhatsApp: eso lo decide
+// `phone_number_id`, que la tienda simplemente no manda.
+type Origen = 'bot' | 'tienda';
+const ORIGENES: readonly Origen[] = ['bot', 'tienda'];
 
 interface Entrada {
   quoteId: string;
@@ -29,6 +39,7 @@ interface Entrada {
   datos: Record<string, unknown>;
   email: string;
   nombre: string;
+  origen: Origen;
 }
 
 // El nodo `webhook` de Kapso rellena plantillas {{vars.xxx}} en el cuerpo que
@@ -78,9 +89,13 @@ function leerEntrada(body: unknown): Entrada | null {
   const quoteId = leerTexto(b.quote_id);
   if (!quoteId) return null;
 
+  const origen = leerTexto(b.origen, 'bot');
+  if (!(ORIGENES as readonly string[]).includes(origen)) return null;
+
   const datos: Record<string, unknown> = {};
   const nombre = leerTexto(b.customer_name);
   if (nombre) datos.quote_customer_name = nombre;
+  if (origen === 'tienda') datos.origen = 'tienda';
   for (const campo of BILLING) {
     const valor = leerTexto(b[campo]);
     if (valor) datos[campo] = valor;
@@ -104,6 +119,7 @@ function leerEntrada(body: unknown): Entrada | null {
     // se reusa en vez de releer el campo crudo una segunda vez.
     email: typeof datos.billing_email === 'string' ? datos.billing_email : 'sin-email@drcomputacion.cl',
     nombre: nombre || 'Cliente',
+    origen: origen as Origen,
   };
 }
 
@@ -163,6 +179,11 @@ export function createCrearHandler() {
     const faltan = REQUERIDAS.filter((n) => !env[n]);
     if (faltan.length > 0) {
       res.status(503).json({ ok: false, error: 'falta_configuracion', faltan });
+      return;
+    }
+
+    if (entrada.origen === 'tienda' && !env.TIENDA_BASE_URL) {
+      res.status(503).json({ ok: false, error: 'falta_configuracion', faltan: ['TIENDA_BASE_URL'] });
       return;
     }
 
@@ -243,6 +264,9 @@ export function createCrearHandler() {
         email: entrada.email,
         baseUrl: env.PAGO_BASE_URL as string,
         validUntil: cotizacion.valida_hasta,
+        ...(entrada.origen === 'tienda'
+          ? { retornoUrl: `${(env.TIENDA_BASE_URL as string).replace(/\/+$/, '')}/pedido/${entrada.quoteId}` }
+          : {}),
       }),
       env.MP_ACCESS_TOKEN as string,
       entrada.quoteId,

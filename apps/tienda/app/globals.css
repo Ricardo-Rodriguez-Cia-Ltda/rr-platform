@@ -316,6 +316,7 @@ main { max-width: var(--ancho); margin: 0 auto; padding: 34px 22px 72px; }
   font: inherit; font-weight: 600; font-size: 13.5px;
   padding: 10px 16px; border: none; border-radius: var(--r-elemento);
   background: var(--tinta); color: var(--papel-alto); cursor: pointer; white-space: nowrap;
+  text-decoration: none; display: inline-block;
 }
 .boton-compra:hover { background: var(--teal); }
 .boton-compra:active { transform: scale(0.975); }

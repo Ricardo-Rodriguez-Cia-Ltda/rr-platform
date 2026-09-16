@@ -30,6 +30,14 @@ const CUERPO = {
   customer_name: 'Acme SpA', billing_email: 'contacto@acme.cl',
 };
 
+// El cuerpo que manda la tienda: sin phone_number_id (el cliente no esta en
+// WhatsApp) y con origen explicito.
+const CUERPO_TIENDA = {
+  quote_id: QUOTE, quote_version: '1', quote_confirmed: true, origen: 'tienda',
+  phone_number: '56941757584', customer_name: 'Vicente Pareja', billing_email: 'comprador@a.cl',
+};
+const ENV_TIENDA = { ...ENV, TIENDA_BASE_URL: 'https://drcomputacion.cl/' };
+
 function makeRes() {
   const res = {
     statusCode: 0, jsonBody: undefined as any,
@@ -388,5 +396,65 @@ describe('POST /api/pago/crear', () => {
     expect(res.statusCode).toBe(503);
     expect(res.jsonBody.faltan).toContain('MAILER_API_KEY');
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('origen tienda: retorno a la pagina del pedido, datos.origen en la fila y ningun WhatsApp', async () => {
+    const mensajes: string[] = [];
+    const escrituras: unknown[] = [];
+    const preferenciaEnviada: unknown[] = [];
+    const spy = routeFetch({ mensajes, escrituras, preferenciaEnviada });
+    const res = makeRes();
+    await createCrearHandler()(makeReq(CUERPO_TIENDA), res, ENV_TIENDA);
+    expect(res.statusCode).toBe(200);
+    expect(res.jsonBody).toEqual({ ok: true, estado: 'pendiente', init_point: 'https://mp/pagar' });
+
+    const pref = preferenciaEnviada[0] as any;
+    const retorno = `https://drcomputacion.cl/pedido/${QUOTE}`; // sin la barra doble
+    expect(pref.back_urls).toEqual({ success: retorno, failure: retorno, pending: retorno });
+    expect(pref.notification_url).toBe('https://rr-mailing.vercel.app/api/pago/webhook');
+
+    const fila = escrituras[0] as any;
+    expect(fila.datos.origen).toBe('tienda');
+    expect(fila.datos.billing_email).toBe('comprador@a.cl');
+    expect(fila.phone_number_id).toBeNull();
+    expect(fila.telefono).toBe('56941757584');
+
+    expect(mensajes).toHaveLength(0);
+    expect(spy.mock.calls.some(([u]) => String(u).includes('/meta/whatsapp/'))).toBe(false);
+  });
+
+  it('origen tienda sin TIENDA_BASE_URL: 503 nombrandola, sin preferencia ni fila', async () => {
+    const escrituras: unknown[] = [];
+    const preferenciaEnviada: unknown[] = [];
+    routeFetch({ escrituras, preferenciaEnviada });
+    const res = makeRes();
+    await createCrearHandler()(makeReq(CUERPO_TIENDA), res, ENV);
+    expect(res.statusCode).toBe(503);
+    expect(res.jsonBody).toEqual({ ok: false, error: 'falta_configuracion', faltan: ['TIENDA_BASE_URL'] });
+    expect(preferenciaEnviada).toHaveLength(0);
+    expect(escrituras).toHaveLength(0);
+  });
+
+  it('origen desconocido: 400 cuerpo_invalido sin tocar nada', async () => {
+    const spy = vi.fn();
+    vi.stubGlobal('fetch', spy);
+    const res = makeRes();
+    await createCrearHandler()(makeReq({ ...CUERPO_TIENDA, origen: 'Tienda' }), res, ENV_TIENDA);
+    expect(res.statusCode).toBe(400);
+    expect(res.jsonBody.error).toBe('cuerpo_invalido');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('sin origen todo sigue igual: retorno del rele y la fila sin origen', async () => {
+    const escrituras: unknown[] = [];
+    const preferenciaEnviada: unknown[] = [];
+    const mensajes: string[] = [];
+    routeFetch({ escrituras, preferenciaEnviada, mensajes });
+    const res = makeRes();
+    await createCrearHandler()(makeReq(CUERPO), res, ENV); // ENV no tiene TIENDA_BASE_URL y no hace falta
+    expect(res.statusCode).toBe(200);
+    expect((preferenciaEnviada[0] as any).back_urls.success).toBe('https://rr-mailing.vercel.app/api/pago/retorno');
+    expect((escrituras[0] as any).datos.origen).toBeUndefined();
+    expect(mensajes).toHaveLength(1);
   });
 });

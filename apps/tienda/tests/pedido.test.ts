@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { armarPayloadCotizacion, armarPayloadEmision, validarPedido } from '../src/lib/pedido.js';
+import { armarCuerpoCrearPago, armarPayloadCotizacion, validarPedido } from '../src/lib/pedido.js';
 
 const ITEM = { sku: 'A', mpn: 'M-1', marca: 'HP', nombre: 'Prod', cantidad: 2, precioNetoClp: 840, precioTiendaClp: 1000 };
 const BASE = {
@@ -56,28 +56,33 @@ describe('payloads', () => {
     expect(p.execution_context.vars.cart_items).toEqual([{ sku: 'A', mpn: 'M-1', marca: 'HP', cantidad: 2 }]);
     expect(p.execution_context.context.phone_number).toBe('56941757584');
   });
-  it('emision: quote_confirmed true; billing_* solo con facturacion', () => {
+  it('cuerpo para crear pago: confirmacion booleana, origen tienda y sin facturacion solo billing_email', () => {
     const quote = { quote_id: 'q-1', lineas: [], total_clp: 2000 };
-    const sin = armarPayloadEmision(quote, { nombre: 'V', telefono: 'x', email: 'e' }, null, '569') as any;
-    expect(sin.execution_context.vars.quote_confirmed).toBe(true);
-    expect(sin.execution_context.vars.quote_result).toBe(quote);
-    expect(sin.execution_context.vars.billing_rut).toBeUndefined();
-    const conF = armarPayloadEmision(quote, { nombre: 'V', telefono: 'x', email: 'e' },
-      { rut: '1-9', razonSocial: 'Acme', giro: 'G', direccion: 'D', comuna: 'C', ciudad: 'S', emailFactura: 'f@a.cl' }, '569') as any;
-    expect(conF.execution_context.vars.billing_razon_social).toBe('Acme');
-    expect(conF.execution_context.vars.billing_email).toBe('f@a.cl');
+    const sin = armarCuerpoCrearPago(quote, { nombre: 'Vicente', telefono: '56941757584', email: 'comprador@a.cl' }, null);
+    expect(sin).toEqual({
+      quote_id: 'q-1',
+      quote_version: '1',
+      quote_confirmed: true,
+      origen: 'tienda',
+      phone_number: '56941757584',
+      customer_name: 'Vicente',
+      billing_email: 'comprador@a.cl',
+    });
+    // Ni phone_number_id (no hay WhatsApp) ni execution_context (no es Kapso).
+    expect(sin).not.toHaveProperty('phone_number_id');
+    expect(sin).not.toHaveProperty('execution_context');
   });
-  it('billing_email SIEMPRE viaja (sin facturacion, el del comprador): sin el, nadie sabe a quien escribirle', () => {
-    // Los otros 6 billing_* siguen atados a la facturacion completa: mandarlos
-    // a medias gatilla el upsert de clientes con datos incompletos.
-    const quote = { quote_id: 'q-1', lineas: [], total_clp: 2000 };
-    const sin = armarPayloadEmision(quote, { nombre: 'V', telefono: 'x', email: 'comprador@a.cl' }, null, '569') as any;
-    expect(sin.execution_context.vars.billing_email).toBe('comprador@a.cl');
-    expect(sin.execution_context.vars.billing_rut).toBeUndefined();
-    expect(sin.execution_context.vars.billing_razon_social).toBeUndefined();
-    // Con facturacion, manda el email de factura (no el del comprador).
-    const conF = armarPayloadEmision(quote, { nombre: 'V', telefono: 'x', email: 'comprador@a.cl' },
-      { rut: '1-9', razonSocial: 'Acme', giro: 'G', direccion: 'D', comuna: 'C', ciudad: 'S', emailFactura: 'f@a.cl' }, '569') as any;
-    expect(conF.execution_context.vars.billing_email).toBe('f@a.cl');
+  it('con facturacion completa viajan los siete billing_*, y billing_email es el de factura', () => {
+    const quote = { quote_id: 'q-1', quote_version: 2 };
+    const conF = armarCuerpoCrearPago(quote, { nombre: 'V', telefono: '569', email: 'comprador@a.cl' },
+      { rut: '1-9', razonSocial: 'Acme', giro: 'G', direccion: 'D', comuna: 'C', ciudad: 'S', emailFactura: 'f@a.cl' });
+    expect(conF.quote_version).toBe('2');
+    expect(conF.billing_rut).toBe('1-9');
+    expect(conF.billing_razon_social).toBe('Acme');
+    expect(conF.billing_giro).toBe('G');
+    expect(conF.billing_direccion).toBe('D');
+    expect(conF.billing_comuna).toBe('C');
+    expect(conF.billing_ciudad).toBe('S');
+    expect(conF.billing_email).toBe('f@a.cl');
   });
 });

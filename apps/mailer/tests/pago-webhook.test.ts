@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { construirManifiesto } from '../src/pago/firma.js';
@@ -629,10 +630,19 @@ describe('el monto que no calza no pisa una fila ya resuelta', () => {
 // eso gana sobre la configuracion por globs, sin depender de ningun orden.
 describe('techo de ejecucion de las rutas de pago', () => {
   const config = JSON.parse(readFileSync('apps/mailer/vercel.json', 'utf8'));
-  const rutasDePago = readdirSync('apps/mailer/api/pago').filter((f) => f.endsWith('.ts'));
+  // Recorre subdirectorios: api/pago/estado/[id].ts tambien es una ruta de
+  // pago y tambien tiene que declarar su techo.
+  const listarRutas = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? listarRutas(join(dir, e.name)) : e.name.endsWith('.ts') ? [join(dir, e.name)] : []);
+  const rutasDePago = listarRutas('apps/mailer/api/pago')
+    .map((p) => relative('apps/mailer/api/pago', p).replace(/\\/g, '/'));
 
   it('hay rutas de pago que mirar', () => {
     expect(rutasDePago.length).toBeGreaterThan(0);
+  });
+
+  it('la ruta de estado esta en la lista (el recorrido entra a subdirectorios)', () => {
+    expect(rutasDePago).toContain('estado/[id].ts');
   });
 
   it.each(rutasDePago)('api/pago/%s declara su propio techo, holgado frente al presupuesto de timeouts', (archivo) => {

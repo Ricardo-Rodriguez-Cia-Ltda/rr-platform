@@ -48,6 +48,7 @@ está en `docs/superpowers/specs/2026-09-10-pagos-mercado-pago-design.md`.
 | `POST /api/pago/crear` | Autenticada con `x-api-key` **y** con `quote_confirmed` en el cuerpo. Crea la preferencia, guarda la fila `pagos` y manda el link por WhatsApp |
 | `POST /api/pago/webhook` | Pública, autenticada por la firma HMAC de Mercado Pago. Emite las órdenes de compra cuando el pago queda aprobado |
 | `GET /api/pago/retorno` | La página a la que Mercado Pago devuelve al cliente |
+| `GET /api/pago/estado/<quote_id>` | Pública por URL de capacidad (como el PDF). Estado, monto, rechazos y vencimiento del pago; el link de pago solo mientras está pendiente y vigente. Nunca teléfono, `datos` ni ids de Mercado Pago. La consulta la página del pedido de la tienda |
 
 Variables nuevas en el proyecto `rr-mailing`:
 
@@ -57,6 +58,7 @@ Variables nuevas en el proyecto `rr-mailing`:
 | `MP_WEBHOOK_SECRET` | Clave secreta de la notificación, del panel de Mercado Pago. **Sensitive** |
 | `PAGO_BASE_URL` | `https://rr-mailing.vercel.app` |
 | `KAPSO_API_KEY` | La misma clave de la Platform API que usan los scripts de `apps/kapso-agent` |
+| `TIENDA_BASE_URL` | Base de la tienda web sin barra final (p. ej. `https://drcomputacion.cl`). Solo la exige un `crear` con `origen: "tienda"`: es a donde Mercado Pago devuelve al cliente web. Tras cargarla hay que **redesplegar**: Vercel no aplica variables a un despliegue ya construido |
 
 En el panel de Mercado Pago hay que apuntar la notificación de tipo `payment`
 a `<PAGO_BASE_URL>/api/pago/webhook`.
@@ -74,6 +76,15 @@ distinguir mayúsculas, porque lo escribe un LLM con `save_variable` y puede
 llegar de las dos formas. Cualquier otra cosa responde `400 sin_confirmacion`
 sin crear preferencia, sin persistir fila y sin mandarle nada al cliente. Si los
 dos criterios se separan, uno de los dos deja de proteger.
+
+**`origen` en `/api/pago/crear`.** Opcional, `bot` (default) o `tienda`. La
+tienda web (`apps/tienda`) llama a este mismo endpoint desde
+`/api/confirmar` con `origen: "tienda"` y sin `phone_number_id`: no hay
+WhatsApp que mandar (el envío en `src/pago/kapso.ts` ya es no-op sin ese id) y
+las `back_urls` de la preferencia apuntan a `<TIENDA_BASE_URL>/pedido/<quote_id>`
+en vez de a `/api/pago/retorno`. El origen queda en `datos.origen` de la fila.
+El webhook no distingue orígenes. Diseño en
+`docs/superpowers/specs/2026-09-16-tienda-cobro-design.md`.
 
 **El webhook también alerta cuando no llega a procesar nada.** Un 401 por firma
 inválida o un 500 por configuración incompleta antes escribían solo al log. Si
