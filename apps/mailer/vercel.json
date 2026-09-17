@@ -10,7 +10,7 @@
   "crons": [
     {
       "path": "/api/pago/barrido",
-      "schedule": "*/30 * * * *"
+      "schedule": "0 12 * * *"
     }
   ]
 }

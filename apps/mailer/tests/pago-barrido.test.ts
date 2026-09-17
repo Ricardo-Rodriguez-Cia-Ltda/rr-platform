@@ -162,8 +162,12 @@ describe('GET /api/pago/barrido', () => {
 });
 
 describe('el cron de vercel.json', () => {
-  it('apunta al barrido y corre cada 30 minutos', () => {
+  // El plan hobby de Vercel solo admite crons de una vez al dia: un '*/30' aca
+  // no degrada la cadencia, hace fallar el despliegue entero del rele. La
+  // corrida cada 30 minutos la dispara cron-job.org contra la misma ruta; este
+  // cron es el piso que corre igual si ese disparador externo se cae.
+  it('es el piso diario, no la cadencia real', () => {
     const config = JSON.parse(readFileSync('apps/mailer/vercel.json', 'utf8'));
-    expect(config.crons).toEqual([{ path: '/api/pago/barrido', schedule: '*/30 * * * *' }]);
+    expect(config.crons).toEqual([{ path: '/api/pago/barrido', schedule: '0 12 * * *' }]);
   });
 });
