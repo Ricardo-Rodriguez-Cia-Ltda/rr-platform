@@ -49,6 +49,7 @@ está en `docs/superpowers/specs/2026-09-10-pagos-mercado-pago-design.md`.
 | `POST /api/pago/webhook` | Pública, autenticada por la firma HMAC de Mercado Pago. Emite las órdenes de compra cuando el pago queda aprobado |
 | `GET /api/pago/retorno` | La página a la que Mercado Pago devuelve al cliente |
 | `GET /api/pago/estado/<quote_id>` | Pública por URL de capacidad (como el PDF). Estado, monto, rechazos y vencimiento del pago; el link de pago solo mientras está pendiente y vigente. Nunca teléfono, `datos` ni ids de Mercado Pago. La consulta la página del pedido de la tienda |
+| `GET /api/pago/barrido` | La llama el disparador externo cada 30 minutos (ver abajo), autenticada con `Authorization: Bearer <CRON_SECRET>`. Lista las filas de `pagos` en `aprobado` con más de diez minutos (o sin marca de reclamación) y manda **un** correo interno con todas. Se repite en cada corrida mientras alguna siga ahí: se calla al mover la fila a `emitido` o `aprobado_sin_emitir`. Si Supabase no responde, también avisa |
 
 Variables nuevas en el proyecto `rr-mailing`:
 
@@ -59,6 +60,30 @@ Variables nuevas en el proyecto `rr-mailing`:
 | `PAGO_BASE_URL` | `https://rr-mailing.vercel.app` |
 | `KAPSO_API_KEY` | La misma clave de la Platform API que usan los scripts de `apps/kapso-agent` |
 | `TIENDA_BASE_URL` | Base de la tienda web sin barra final (p. ej. `https://drcomputacion.cl`). Solo la exige un `crear` con `origen: "tienda"`: es a donde Mercado Pago devuelve al cliente web. Tras cargarla hay que **redesplegar**: Vercel no aplica variables a un despliegue ya construido |
+| `CRON_SECRET` | Valor aleatorio largo, generado a mano, **Sensitive**. Vercel lo manda solo en su cron diario; el job de cron-job.org lo lleva en la cabecera `Authorization`. Sin él el barrido responde `503 falta_configuracion` y nunca queda abierto. Tras cargarlo, **redesplegar** |
+
+## Quién dispara el barrido
+
+El plan **hobby** de Vercel solo admite cron jobs de **una vez al día**. Un
+`*/30 * * * *` en `vercel.json` no baja la cadencia: hace **fallar el despliegue
+entero** del relé, sin crear siquiera un deployment (el check de GitHub apunta a
+`vercel.com/docs/cron-jobs/usage-and-pricing`). Por eso el cron de `vercel.json`
+quedó en `0 12 * * *` (09:00 en Chile) y es solo un **piso**: corre igual si el
+disparador externo se cae.
+
+La cadencia real —cada 30 minutos— la pone un job en
+[cron-job.org](https://console.cron-job.org):
+
+- **URL:** `https://rr-mailing.vercel.app/api/pago/barrido`
+- **Método:** GET, cada 30 minutos
+- **Cabecera:** `Authorization: Bearer <CRON_SECRET>` (el mismo valor cargado en
+  Vercel; hay que escribirlo a mano en el panel del job)
+- Conviene dejar prendido el aviso por fallo del job: si el disparador se cae,
+  el barrido deja de correr y eso no se nota solo.
+
+La respuesta es `{ ok, atascadas }` y nada más: el detalle de las filas va por
+correo interno, nunca al que llama. Aun así el secreto vive en un tercero, así
+que si se filtra, rotarlo en Vercel y en el job.
 
 En el panel de Mercado Pago hay que apuntar la notificación de tipo `payment`
 a `<PAGO_BASE_URL>/api/pago/webhook`.

@@ -199,3 +199,28 @@ export async function marcarPedidosPagados(env: PagoEnv, quoteId: string): Promi
   );
   return filas !== null;
 }
+
+/**
+ * Las filas que el barrido periodico llama atascadas: en `aprobado` desde hace
+ * mas del umbral, o en `aprobado` sin marca de reclamacion (que el webhook ya
+ * trata como atascada, porque `reclamarAprobado` siempre la escribe). Mismo
+ * criterio que `emisionYaNoPuedeEstarEnVuelo` en webhook.ts, expresado en
+ * PostgREST para no traer la tabla entera.
+ *
+ * `null` = no se pudo preguntar; `[]` = no hay atascadas.
+ */
+// Tope de filas por barrido. Si se alcanza, el barrido avisa que hay mas: en
+// una falla sistemica (muchas filas atascadas a la vez) es justo cuando no se
+// puede subestimar. Las filas sin marca van primero porque son la anomalia mas
+// grave y no deben ser las que queden fuera de la pagina.
+export const TOPE_BARRIDO = 100;
+
+export async function listarAprobadasViejas(env: PagoEnv, limiteMs: number): Promise<PagoRow[] | null> {
+  const corte = new Date(limiteMs).toISOString();
+  const filtro = `or=(aprobado_at.is.null,aprobado_at.lt.${encodeURIComponent(corte)})`;
+  const filas = await pedir(
+    env, 'GET',
+    `/pagos?estado=eq.aprobado&${filtro}&order=aprobado_at.asc.nullsfirst&limit=${TOPE_BARRIDO}`,
+  );
+  return filas === null ? null : (filas as PagoRow[]);
+}
