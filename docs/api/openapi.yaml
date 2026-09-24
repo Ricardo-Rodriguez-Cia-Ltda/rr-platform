@@ -927,7 +927,7 @@ components:
 
     Producto:
       type: object
-      required: [sku, mpn, nombre, marca, categoria, precio, moneda, stock]
+      required: [sku, mpn, nombre, marca, categoria, precio, moneda, stock, foto]
       properties:
         sku:
           type: string
@@ -947,6 +947,11 @@ components:
           description: Identificador de moneda del proveedor, típicamente "US".
         stock:
           type: [integer, 'null']
+        foto:
+          type: [string, 'null']
+          description: |
+            URL pública en Supabase Storage del banco de fotos, o null si el
+            producto todavía no tiene una.
 
     ProductoDetallado:
       allOf:

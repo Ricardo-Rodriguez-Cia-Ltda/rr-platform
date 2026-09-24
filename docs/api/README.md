@@ -207,7 +207,8 @@ Si un parámetro se repite en la query string, se usa **la primera** aparición.
       "categoria": "Computadores",
       "precio": 703.42,
       "moneda": "US",
-      "stock": 12
+      "stock": 12,
+      "foto": "https://proyecto.supabase.co/storage/v1/object/public/fotos-productos/hp/8a5z2lt.jpg"
     }
   ],
   "facetas": {
@@ -230,7 +231,9 @@ Los tres contadores significan cosas distintas y se confunden con facilidad:
 
 Campos de cada producto: `mpn`, `nombre`, `marca`, `categoria` y `stock` pueden
 ser `null` (el catálogo de Intcomex no siempre los trae). `sku`, `precio` y
-`moneda` siempre vienen.
+`moneda` siempre vienen. `foto` es la URL pública en Supabase Storage del banco
+de fotos, o `null` si el producto todavía no tiene una (ver
+`docs/superpowers/specs/2026-09-23-banco-fotos-design.md`).
 
 `facetas.precio` solo aparece cuando `productos` no está vacío, y describe el
 rango de **los productos devueltos**, no del universo completo.
@@ -289,7 +292,8 @@ campo `sin_resultados`. La consulta no calzó con el catálogo.
       "categoria": "Computadores",
       "precio": 489.0,
       "moneda": "US",
-      "stock": 4
+      "stock": 4,
+      "foto": null
     }
   }
 }
@@ -400,12 +404,14 @@ segmento de path: `/product/HP001PRO14`.
   "tipo": "Physical",
   "precio": 703.42,
   "moneda": "US",
-  "stock": 12
+  "stock": 12,
+  "foto": "https://proyecto.supabase.co/storage/v1/object/public/fotos-productos/hp/8a5z2lt.jpg"
 }
 ```
 
 Frente a lo que devuelve `/search`, agrega `subcategorias` (arreglo, puede venir
-vacío) y `tipo`, y trae la descripción íntegra sin truncar.
+vacío) y `tipo`, y trae la descripción íntegra sin truncar. `foto` sigue la
+misma regla que en `/search`.
 
 **Dos causas distintas de `404`**, distinguibles solo por `detail`:
 

@@ -45,6 +45,7 @@ const PRODUCT_KEYS = [
   'precio',
   'moneda',
   'stock',
+  'foto',
 ];
 
 function makeReq(query: Record<string, string>): VercelRequest {

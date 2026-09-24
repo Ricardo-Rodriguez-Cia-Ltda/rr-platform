@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { CatalogUnavailableError } from '@rr/providers/catalog';
 import { resetPriceCachesForTests } from '@rr/providers/price-cache';
+import { _resetFotosForTests, guardarIndice, indiceVacio } from '@rr/providers/fotos/indice';
 import type { NormalizedProduct } from '@rr/domain/product';
 import { ProviderError } from '@rr/domain/types';
 
@@ -86,6 +87,7 @@ describe('GET /search', () => {
         ['DE1', { price: 1500, currency: 'us', inStock: 2 }],
       ]),
     );
+    _resetFotosForTests();
   });
 
   afterEach(() => {
@@ -351,6 +353,20 @@ describe('GET /search', () => {
 
     expect(res.statusCode).toBe(409);
     expect(res.body.total).toBe(26);
+  });
+
+  it('cada producto trae la foto del indice, o null', async () => {
+    const indice = indiceVacio();
+    // makeProduct usa mpn "MPN-<sku>" -> clave "mpnhp1|hp"
+    indice.fotos['mpnhp1|hp'] = { url: 'https://storage/hp/mpnhp1.jpg', fuente: 'intcomex', obtenidaEn: 'x' };
+    guardarIndice(indice);
+
+    const res = makeRes();
+    await handler(makeReq({ q: 'notebook' }, AUTH), res);
+
+    expect(res.statusCode).toBe(200);
+    const fotos = Object.fromEntries(res.body.productos.map((p: { sku: string; foto: unknown }) => [p.sku, p.foto]));
+    expect(fotos).toEqual({ HP1: 'https://storage/hp/mpnhp1.jpg', HP2: null, DE1: null });
   });
 });
 
