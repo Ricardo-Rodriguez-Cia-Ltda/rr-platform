@@ -35,7 +35,17 @@ export function mapaFotosIntcomex(items: ItemExtendido[]): Map<string, string> {
 export async function fotosIntcomex(): Promise<Map<string, string>> {
   const res = await fetchIws('downloadextendedcatalog', { format: 'json', locale: 'es' });
   if (!res.ok) throw new Error(`Intcomex respondio HTTP ${res.status} al bajar el catalogo extendido`);
-  const data = (await res.json()) as unknown;
+  let data: unknown;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error('El catalogo extendido de Intcomex no es JSON valido');
+  }
   if (!Array.isArray(data)) throw new Error('El catalogo extendido de Intcomex no es un arreglo');
-  return mapaFotosIntcomex(data as ItemExtendido[]);
+  // Vacio o sin ninguna imagen usable es Intcomex caido, no "sin fotos": si
+  // no, el orquestador descartaria miles de productos por 30 dias.
+  if (data.length === 0) throw new Error('El catalogo extendido de Intcomex vino vacio');
+  const mapa = mapaFotosIntcomex(data as ItemExtendido[]);
+  if (mapa.size === 0) throw new Error('El catalogo extendido de Intcomex no trajo ninguna imagen usable');
+  return mapa;
 }
