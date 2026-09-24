@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 import type { NormalizedProduct } from '@rr/domain/product';
 import {
@@ -60,6 +60,74 @@ async function descargar(url: string): Promise<Descarga | null> {
 // primera corrida dura horas; dos a la vez duplicarian llamadas a Icecat.
 let enCurso = false;
 
+// Candado entre procesos: npm run fotos y el servidor de oficina comparten el
+// indice; si corren a la vez uno pisa lo que guarda el otro.
+const CANDADO = 'fotos.lock';
+const CANDADO_VENCE_MS = 12 * 3600 * 1000;
+
+function pidVivo(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: existe pero es de otro usuario.
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
+function leerCandado(ruta: string): { pid: number; inicio: string } | null {
+  try {
+    const datos = JSON.parse(readFileSync(ruta, 'utf8')) as { pid?: unknown; inicio?: unknown };
+    if (typeof datos.pid !== 'number' || typeof datos.inicio !== 'string') return null;
+    return { pid: datos.pid, inicio: datos.inicio };
+  } catch {
+    return null;
+  }
+}
+
+export function tomarCandado(dir: string): boolean {
+  const ruta = join(dir, CANDADO);
+  mkdirSync(dir, { recursive: true });
+  for (let intento = 0; intento < 2; intento += 1) {
+    try {
+      const fd = openSync(ruta, 'wx');
+      try {
+        writeSync(fd, JSON.stringify({ pid: process.pid, inicio: new Date().toISOString() }));
+      } finally {
+        closeSync(fd);
+      }
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+    const actual = leerCandado(ruta);
+    // Ilegible, de un proceso muerto o de hace mas de 12h: vencido, se retoma una vez.
+    const vencido = !actual || !pidVivo(actual.pid)
+      || !(Date.now() - Date.parse(actual.inicio) < CANDADO_VENCE_MS);
+    if (!vencido || intento > 0) {
+      console.log(`[fotos] otra corrida en curso (pid ${actual?.pid ?? '?'}); se omite`);
+      return false;
+    }
+    try {
+      unlinkSync(ruta);
+    } catch {
+      // Otro proceso lo retomo primero: el segundo intento lo resuelve.
+    }
+  }
+  return false;
+}
+
+export function soltarCandado(dir: string): void {
+  const ruta = join(dir, CANDADO);
+  // Solo se borra el propio: uno ajeno (o retomado por otro) se respeta.
+  if (leerCandado(ruta)?.pid !== process.pid) return;
+  try {
+    unlinkSync(ruta);
+  } catch {
+    // Ya no estaba.
+  }
+}
+
 export async function correrBancoFotos(
   catalogos: Record<string, NormalizedProduct[]>,
   opciones: { limite?: number } = {},
@@ -72,13 +140,15 @@ export async function correrBancoFotos(
   const key = process.env.SUPABASE_SERVICE_KEY;
   if (!url || !key) throw new Error('Faltan SUPABASE_URL o SUPABASE_SERVICE_KEY para el banco de fotos');
 
+  const dir = cacheDir();
+  // Despues de validar credenciales: ningun camino sale con el candado tomado.
+  if (!tomarCandado(dir)) return null;
   enCurso = true;
   try {
     const storage = crearStorage({ url, key });
     // Si el storage no responde se corta aca, antes de tocar el indice.
     await storage.asegurarBucket();
 
-    const dir = cacheDir();
     const stock = skusConStock(dir, Object.keys(catalogos));
     const productos = productosDesdeCatalogos(catalogos, (prov, sku) => stock.has(`${prov}:${sku}`));
     const indice = leerIndice();
@@ -107,5 +177,6 @@ export async function correrBancoFotos(
     return resumen;
   } finally {
     enCurso = false;
+    soltarCandado(dir);
   }
 }
