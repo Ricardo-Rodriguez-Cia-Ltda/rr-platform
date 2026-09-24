@@ -142,8 +142,11 @@ candado para que nunca corran dos a la vez.
 ### Lista de faltantes: `cache/fotos-faltantes.csv`
 
 Columnas: clave, MPN, marca, nombre, proveedores, con stock, motivo. Orden:
-primero lo que tiene stock según los `prices-{proveedor}.json` del cache de
-precios, después lo que venden más mayoristas, después el resto.
+primero lo que tiene stock, después lo que venden más mayoristas, después el
+resto. El stock sale de `tecnoglobal-precios.json` (el `stockDisp` de todo el
+catálogo de Tecnoglobal) más los `prices-{proveedor}.json` del cache de
+precios. El volcado de Tecnoglobal se suma porque los caches de precios solo
+guardan lo que se cotizó en las últimas 24 horas.
 
 ### La API
 

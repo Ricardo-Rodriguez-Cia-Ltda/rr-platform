@@ -16,4 +16,22 @@ describe('skusConStock', () => {
     const s = skusConStock(dir, ['intcomex', 'ingram', 'tecnoglobal']);
     expect([...s]).toEqual(['intcomex:I1']);
   });
+
+  it('agrega el stock del volcado de precios de Tecnoglobal', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stock-tg-'));
+    writeFileSync(join(dir, 'tecnoglobal-precios.json'), JSON.stringify({
+      productos: [
+        { codigoTg: 'TG1', stockDisp: 5, precio: 10 },
+        { codigoTg: 'TG2', stockDisp: 0, precio: 10 },
+      ],
+      obtenidaEn: '2026-09-24T00:00:00.000Z',
+    }));
+    expect([...skusConStock(dir, ['tecnoglobal'])]).toEqual(['tecnoglobal:TG1']);
+  });
+
+  it('un volcado de Tecnoglobal corrupto se ignora', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stock-tg-'));
+    writeFileSync(join(dir, 'tecnoglobal-precios.json'), '{corrupto');
+    expect(skusConStock(dir, ['tecnoglobal']).size).toBe(0);
+  });
 });

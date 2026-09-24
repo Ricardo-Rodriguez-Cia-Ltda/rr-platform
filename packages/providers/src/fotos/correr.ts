@@ -27,6 +27,22 @@ export function skusConStock(dir: string, proveedores: string[]): Set<string> {
       // Sin cache de precios para ese proveedor: sin datos de stock, no es error.
     }
   }
+  // El cache de precios solo tiene lo cotizado en las ultimas 24h; el volcado
+  // de Tecnoglobal trae el stock de todo su catalogo.
+  if (proveedores.includes('tecnoglobal')) {
+    try {
+      const raw = JSON.parse(readFileSync(join(dir, 'tecnoglobal-precios.json'), 'utf8')) as {
+        productos?: Array<{ codigoTg?: unknown; stockDisp?: unknown }>;
+      };
+      for (const p of raw.productos ?? []) {
+        if (typeof p?.codigoTg === 'string' && typeof p.stockDisp === 'number' && p.stockDisp > 0) {
+          out.add(`tecnoglobal:${p.codigoTg}`);
+        }
+      }
+    } catch {
+      // Sin volcado de Tecnoglobal: sin datos de stock, no es error.
+    }
+  }
   return out;
 }
 
