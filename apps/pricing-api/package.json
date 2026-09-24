@@ -11,6 +11,7 @@
   "scripts": {
     "serve": "tsx --conditions=development --env-file=../../.env.local server.ts",
     "check": "tsx --conditions=development --env-file=../../.env.local scripts/check.ts",
-    "docs:vocabulario": "tsx --conditions=development --env-file=../../.env.local scripts/docs-vocabulario.ts"
+    "docs:vocabulario": "tsx --conditions=development --env-file=../../.env.local scripts/docs-vocabulario.ts",
+    "fotos": "tsx --conditions=development --env-file=../../.env.local scripts/banco-fotos.ts"
   }
 }
