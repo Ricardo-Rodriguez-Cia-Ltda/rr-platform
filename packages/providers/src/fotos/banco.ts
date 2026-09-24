@@ -105,7 +105,11 @@ export async function actualizarBancoFotos(deps: DepsBanco): Promise<ResumenBanc
     .filter((p) => !indice.fotos[p.clave])
     .filter((p) => {
       const previo = indice.sinFoto[p.clave];
-      return !previo || inicio - new Date(previo.intentadoEn).getTime() >= REINTENTO_MS;
+      if (!previo) return true;
+      const transcurrido = inicio - new Date(previo.intentadoEn).getTime();
+      // Una fecha que no se puede interpretar (NaN) se trata como vencida: mejor
+      // reintentar de mas que dejar una clave bloqueada para siempre.
+      return Number.isNaN(transcurrido) || transcurrido >= REINTENTO_MS;
     })
     .sort(prioridad);
   if (deps.limite !== undefined) pendientes = pendientes.slice(0, deps.limite);
@@ -146,9 +150,10 @@ export async function actualizarBancoFotos(deps: DepsBanco): Promise<ResumenBanc
         motivoIcecat = r.motivo;
       }
     }
+    // Con Intcomex caido ningun veredicto de "sin foto" es confiable: puede
+    // tener foto alla. No se descarta por 30 dias por una corrida a medias.
+    if (resumen.intcomexCaido) return { tipo: 'pendiente' };
     if (hayCandidata) return { tipo: 'sin_foto', motivo: 'descarga_fallida' };
-    // Con Intcomex caido, "no encontrado" no es cierto: puede tener foto alla.
-    if (resumen.intcomexCaido && motivoIcecat === 'no_encontrado') return { tipo: 'pendiente' };
     return { tipo: 'sin_foto', motivo: motivoIcecat };
   };
 
@@ -169,18 +174,29 @@ export async function actualizarBancoFotos(deps: DepsBanco): Promise<ResumenBanc
   };
 
   let siguiente = 0;
+  let abortado = false;
+  let primerError: unknown;
   const trabajador = async (): Promise<void> => {
-    while (siguiente < pendientes.length) {
+    while (!abortado && siguiente < pendientes.length) {
       const p = pendientes[siguiente++];
-      registrar(p, await resolver(p));
+      try {
+        registrar(p, await resolver(p));
+      } catch (error) {
+        // Un fallo del storage termina la corrida: no tiene sentido seguir
+        // gastando red en fotos que no se van a poder guardar. Se avisa a los
+        // demas trabajadores para que no tomen items nuevos, pero se deja que
+        // el item en vuelo de cada uno termine antes de guardar y relanzar.
+        if (!abortado) primerError = error;
+        abortado = true;
+        throw error;
+      }
     }
   };
 
-  try {
-    await Promise.all(Array.from({ length: deps.concurrencia ?? 4 }, trabajador));
-  } catch (error) {
+  await Promise.allSettled(Array.from({ length: deps.concurrencia ?? 4 }, trabajador));
+  if (primerError) {
     deps.guardar(indice);
-    throw error;
+    throw primerError;
   }
   if (resumen.procesados % GUARDAR_CADA !== 0 || resumen.procesados === 0) deps.guardar(indice);
   return resumen;

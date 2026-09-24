@@ -78,6 +78,14 @@ describe('actualizarBancoFotos', () => {
     expect(d.indice.sinFoto['b2|hp'].intentadoEn).toBe(AHORA.toISOString());
   });
 
+  it('reintenta si intentadoEn no se puede interpretar como fecha', async () => {
+    const icecat = vi.fn(async () => ({ motivo: 'no_encontrado' as const }));
+    const d = deps({ productos: [prod('a1|hp')], icecat });
+    d.indice.sinFoto['a1|hp'] = { motivo: 'no_encontrado', intentadoEn: 'basura' };
+    await actualizarBancoFotos(d);
+    expect(icecat).toHaveBeenCalledTimes(1);
+  });
+
   it('registra el motivo: no_encontrado, icecat_full y descarga_fallida', async () => {
     const d = deps({
       productos: [prod('a1|hp'), prod('b2|cisco'), prod('c3|hp')],
@@ -113,6 +121,17 @@ describe('actualizarBancoFotos', () => {
     expect(r.intcomexCaido).toBe(true);
     expect(d.indice.fotos['a1|hp'].fuente).toBe('icecat');
     expect(d.indice.sinFoto['b2|hp']).toBeUndefined();
+    expect(r.pendientes).toBe(1);
+  });
+
+  it('Intcomex caido: icecat_full tambien queda pendiente, no se descarta por 30 dias', async () => {
+    const d = deps({
+      productos: [prod('a1|hp')],
+      fotosIntcomex: async () => { throw new Error('Intcomex caido'); },
+      icecat: async () => ({ motivo: 'icecat_full' }),
+    });
+    const r = await actualizarBancoFotos(d);
+    expect(d.indice.sinFoto['a1|hp']).toBeUndefined();
     expect(r.pendientes).toBe(1);
   });
 
@@ -152,6 +171,29 @@ describe('actualizarBancoFotos', () => {
     });
     await expect(actualizarBancoFotos(d)).rejects.toThrow(/500/);
     expect(d.guardar).toHaveBeenCalled();
+  });
+
+  it('si el storage falla, los demas workers paran de tomar items nuevos y se guarda una sola vez', async () => {
+    let subidas = 0;
+    const subir = vi.fn(async () => {
+      subidas++;
+      if (subidas === 1) throw new Error('HTTP 500');
+      return 'https://storage/ok';
+    });
+    const descargar = vi.fn(async () => JPG);
+    const productos = Array.from({ length: 20 }, (_, i) => prod(`m${i}|hp`));
+    const d = deps({
+      productos,
+      icecat: async () => ({ url: 'https://icecat/x.jpg' }),
+      descargar,
+      subir,
+      concurrencia: 4,
+    });
+    await expect(actualizarBancoFotos(d)).rejects.toThrow(/500/);
+    // Solo los items ya en vuelo al momento del fallo llegan a descargar/subir;
+    // no se toman items nuevos despues del aborto.
+    expect(descargar.mock.calls.length).toBeLessThanOrEqual(4);
+    expect(d.guardar).toHaveBeenCalledTimes(1);
   });
 });
 
