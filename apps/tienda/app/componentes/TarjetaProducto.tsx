@@ -4,7 +4,7 @@ import { BotonAgregar } from './BotonAgregar.js';
 
 /**
  * La tarjeta: arriba la foto del banco cuando existe; si no, la misma caja
- * neutral con marca y part number. El nombre del catalogo se lee como lo que
+ * con el logo de la tienda. El nombre del catalogo se lee como lo que
  * ya era (identificador + specs + resto) y cada pieza ocupa su lugar: marca
  * y disponibilidad arriba, el equipo al medio, el identificador y el precio
  * abajo. La caja cuadrada siempre esta: pareja la grilla cuando la cobertura
@@ -23,8 +23,8 @@ export function TarjetaProducto({ producto }: { producto: ProductoTienda }) {
         </div>
       ) : (
         <div className="foto vacia" aria-hidden="true">
-          <span className="vacia-marca">{producto.marca ?? 'Sin marca'}</span>
-          <span className="vacia-mpn">{producto.mpn ?? producto.sku}</span>
+          <span className="sigla">Dr</span>
+          <span className="nombre-tienda">Computación</span>
         </div>
       )}
 

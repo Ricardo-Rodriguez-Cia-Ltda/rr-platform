@@ -165,12 +165,12 @@ toda foto sale `null` y queda un error en el log.
   de catálogo vienen sobre blanco), con `<img loading="lazy">` y `alt` con el
   nombre del producto. Se usa `<img>` y no `next/image` para no depender de la
   optimización de imágenes de Vercel ni configurar dominios remotos.
-- Sin foto, la tarjeta muestra una caja neutra con marca y part number (tono
-  hundido, tipografía de datos en mayúsculas para la marca y en regular para
-  el MPN), igual tamaño que la foto. Mantiene la grilla pareja cuando la
-  cobertura de fotos es parcial. Decidida por el usuario el 2026-09-24 al ver
-  la grilla con cobertura ~50%. El comentario de `TarjetaProducto` se
-  actualiza en consecuencia.
+- Sin foto, la tarjeta muestra la misma caja, en tono hundido, con el logo de
+  la tienda (el sello "Dr" de la cabecera, en grande, y "Computación"). Igual
+  tamaño que la foto, así la grilla queda pareja con cobertura parcial.
+  Decidido por el usuario el 2026-09-24 al ver la grilla con ~50% de
+  cobertura: el ~50% restante queda con el logo, sin carga manual ni Icecat
+  Full por ahora.
 
 El bot de WhatsApp no cambia en esta fase.
 
