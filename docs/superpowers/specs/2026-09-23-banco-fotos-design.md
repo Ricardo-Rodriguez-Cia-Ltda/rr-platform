@@ -169,8 +169,8 @@ toda foto sale `null` y queda un error en el log.
   hundido, tipografía de datos en mayúsculas para la marca y en regular para
   el MPN), igual tamaño que la foto. Mantiene la grilla pareja cuando la
   cobertura de fotos es parcial. Decidida por el usuario el 2026-09-24 al ver
-  la grilla con cobertura ~50%. El comentario de `ficha.ts` y el de
-  `TarjetaProducto` se actualizan en consecuencia.
+  la grilla con cobertura ~50%. El comentario de `TarjetaProducto` se
+  actualiza en consecuencia.
 
 El bot de WhatsApp no cambia en esta fase.
 
