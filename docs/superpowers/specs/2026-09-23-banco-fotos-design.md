@@ -195,15 +195,15 @@ El bot de WhatsApp no cambia en esta fase.
 - Verificación real: corrida sobre una muestra de 200 claves, revisando el
   bucket y la tienda local, antes de lanzar la masiva.
 
-## Dependencias externas (las resuelve el usuario)
+## Dependencias externas (resueltas)
 
-1. **Cuenta de Icecat Open** (gratis) y su usuario en `ICECAT_USER` del
-   `.env.local` de la oficina. Sin ella, el banco funciona solo con Intcomex
-   (~21%).
-2. **Condiciones de uso de Icecat Open** para uso comercial y atribución. Si
-   exigen atribución visible, se agrega en el pie de la tienda.
-3. **Bucket `fotos-productos`** en el proyecto Supabase existente: lo crea el
-   script si no existe, con la service key; solo requiere visto bueno.
+1. **Cuenta de Icecat Open:** usuario `pyxis.latam`, creada el 2026-09-24 y
+   probada contra la muestra (no exige token ni IP permitida). Va en
+   `ICECAT_USER`; sin la variable, el banco funciona solo con Intcomex (~21%).
+2. **Atribución a Icecat:** el usuario decidió el 2026-09-24 que no se muestra
+   en la tienda.
+3. **Bucket `fotos-productos`** en el proyecto Supabase existente: aprobado el
+   2026-09-24. Lo crea el script si no existe, con la service key.
 
 ## Fuera de alcance
 
