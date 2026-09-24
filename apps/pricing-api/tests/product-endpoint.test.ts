@@ -1,6 +1,10 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { CatalogUnavailableError } from '@rr/providers/catalog';
+import { _resetFotosForTests, guardarIndice, indiceVacio } from '@rr/providers/fotos/indice';
 import type { NormalizedProduct } from '@rr/domain/product';
 import { ProviderError } from '@rr/domain/types';
 
@@ -165,6 +169,25 @@ describe('GET /product/{sku}', () => {
     expect(consoleErrorSpy).toHaveBeenCalled();
 
     consoleErrorSpy.mockRestore();
+  });
+
+  it('la respuesta incluye la foto del indice, o null', async () => {
+    vi.stubEnv('CATALOG_CACHE_DIR', mkdtempSync(join(tmpdir(), 'product-fotos-')));
+    _resetFotosForTests();
+
+    let res = makeRes();
+    await productHandler(makeReq({ sku: 'HP1' }, AUTH), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.foto).toBeNull();
+
+    const indice = indiceVacio();
+    indice.fotos['2n6g5lt|hp'] = { url: 'https://storage/hp/2n6g5lt.jpg', fuente: 'icecat', obtenidaEn: 'x' };
+    guardarIndice(indice);
+    _resetFotosForTests();
+
+    res = makeRes();
+    await productHandler(makeReq({ sku: 'HP1' }, AUTH), res);
+    expect(res.body.foto).toBe('https://storage/hp/2n6g5lt.jpg');
   });
 });
 

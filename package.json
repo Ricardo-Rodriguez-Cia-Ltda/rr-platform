@@ -13,6 +13,7 @@
     "check": "npm run check -w @rr/pricing-api",
     "docs:vocabulario": "npm run docs:vocabulario -w @rr/pricing-api",
     "serve": "npm run serve -w @rr/pricing-api",
+    "fotos": "npm run fotos -w @rr/pricing-api --",
     "kapso:functions": "npm run deploy:functions -w @rr/kapso-agent",
     "kapso:workflow": "npm run deploy:workflow -w @rr/kapso-agent"
   },

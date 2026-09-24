@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { isAuthorized } from '@rr/http/auth';
 import { CatalogUnavailableError, getCatalog } from '@rr/providers/catalog';
+import { fotoDe } from '@rr/providers/fotos/indice';
 import type { Provider } from '@rr/domain/types';
 import { ProviderError } from '@rr/domain/types';
 import { resolveOrRespond } from './guards.js';
@@ -76,6 +77,7 @@ export function createProductHandler(provider: Provider): Handler {
       precio: price.price,
       moneda: price.currency,
       stock: price.inStock,
+      foto: fotoDe(product),
     });
   };
 }

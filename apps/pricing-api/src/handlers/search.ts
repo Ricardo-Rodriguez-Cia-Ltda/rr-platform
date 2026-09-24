@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { isAuthorized } from '@rr/http/auth';
 import { CatalogUnavailableError, getCatalog } from '@rr/providers/catalog';
 import { getPriceCache, type CachedPrice } from '@rr/providers/price-cache';
+import { fotoDe } from '@rr/providers/fotos/indice';
 import { search, computeFacets, tokenize } from '@rr/domain/search';
 import type { NormalizedProduct } from '@rr/domain/product';
 import type { PriceInfo, Provider } from '@rr/domain/types';
@@ -34,6 +35,7 @@ interface Cotizado {
   precio: number;
   moneda: string;
   stock: number | null;
+  foto: string | null;
 }
 
 function cheapest(productos: Cotizado[]): Cotizado {
@@ -185,6 +187,7 @@ export function createSearchHandler(provider: Provider): Handler {
           precio: price.price,
           moneda: price.currency,
           stock: price.inStock,
+          foto: fotoDe(p),
         };
         evaluados.push(quote);
 

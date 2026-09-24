@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PROVIDERS } from '@rr/providers';
 import { normalizeProduct as normalizeIngram } from '@rr/providers/ingram';
 import { normalizeProduct as normalizeIntcomex } from '@rr/providers/intcomex';
@@ -45,6 +48,7 @@ const PRODUCT_KEYS = [
   'precio',
   'moneda',
   'stock',
+  'foto',
 ];
 
 function makeReq(query: Record<string, string>): VercelRequest {
@@ -71,6 +75,8 @@ const NAMES = Object.keys(PROVIDERS);
 
 beforeEach(() => {
   vi.stubEnv('API_SECRET_KEY', 'test-secret');
+  // Aislado del cache real: el indice de fotos se lee de CATALOG_CACHE_DIR.
+  vi.stubEnv('CATALOG_CACHE_DIR', mkdtempSync(join(tmpdir(), 'parity-cache-')));
   getCatalogMock.mockReset().mockReturnValue([PRODUCT]);
   for (const provider of Object.values(PROVIDERS)) {
     vi.spyOn(provider, 'isConfigured').mockReturnValue(true);

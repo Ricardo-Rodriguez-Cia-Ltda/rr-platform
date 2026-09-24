@@ -15,6 +15,8 @@ export interface ProductoTienda {
   precioClp: number;
   precioFmt: string;
   disponible: boolean;
+  /** URL publica de la foto del banco (Supabase Storage), o null: la tarjeta cae a la ficha. */
+  foto: string | null;
 }
 export interface ResultadoBusqueda {
   productos: ProductoTienda[]; total: number; parcial: boolean;
@@ -131,6 +133,9 @@ export async function buscarCatalogo(params: {
           precioClp,
           precioFmt: formatCLP(precioClp),
           disponible: Number(p.stock ?? 0) > 0,
+          // Solo https: la URL termina en un <img src>, y cualquier otra cosa
+          // que llegue por la API (http, javascript:) no se pinta.
+          foto: typeof p.foto === 'string' && p.foto.startsWith('https://') ? p.foto : null,
         };
       }),
   };

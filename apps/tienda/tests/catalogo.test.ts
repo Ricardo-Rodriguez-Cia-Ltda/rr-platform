@@ -44,7 +44,7 @@ describe('buscarCatalogo', () => {
     expect(json).not.toContain('"precio":');
     expect(json).not.toContain('USD');
     for (const p of r!.productos) {
-      expect(Object.keys(p).sort()).toEqual(['categoria', 'disponible', 'marca', 'mpn', 'nombre', 'precioClp', 'precioFmt', 'precioNetoClp', 'sku']);
+      expect(Object.keys(p).sort()).toEqual(['categoria', 'disponible', 'foto', 'marca', 'mpn', 'nombre', 'precioClp', 'precioFmt', 'precioNetoClp', 'sku']);
     }
   });
   it('lee las facetas en la forma real {valor,n} y saca los nombres', async () => {
@@ -140,6 +140,23 @@ describe('buscarCatalogo', () => {
     }), { status: 200 })));
     const r = await buscarCatalogo({ q: 'test' });
     expect(r?.productos.map((p) => p.sku)).toEqual(['INT-1']);
+  });
+});
+
+describe('foto', () => {
+  it('pasa solo URLs https; lo demas queda null', async () => {
+    conEnv();
+    const productos = [
+      { ...RESPUESTA.productos[0], sku: 'F1', foto: 'https://proyecto.supabase.co/storage/v1/object/public/fotos-productos/hp/x100.jpg' },
+      { ...RESPUESTA.productos[0], sku: 'F2', foto: 'javascript:alert(1)' },
+      { ...RESPUESTA.productos[0], sku: 'F3', foto: 'http://inseguro/x.jpg' },
+      { ...RESPUESTA.productos[0], sku: 'F4' },
+    ];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...RESPUESTA, productos }), { status: 200 })));
+    const r = await buscarCatalogo({ q: 'notebook' });
+    expect(r?.productos.map((p) => p.foto)).toEqual([
+      'https://proyecto.supabase.co/storage/v1/object/public/fotos-productos/hp/x100.jpg', null, null, null,
+    ]);
   });
 });
 

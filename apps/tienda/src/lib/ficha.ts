@@ -6,7 +6,9 @@
  *
  * Mostrarlos crudos da un parrafo ilegible; esta funcion los separa en lo que
  * ya eran: un identificador, un punado de datos medibles, y el resto. La tienda
- * no tiene fotos — la ficha ES la imagen del producto.
+ * tiene fotos para cerca de la mitad del catalogo (banco de fotos, ver
+ * docs/superpowers/specs/2026-09-23-banco-fotos-design.md); para el resto, la
+ * ficha sigue siendo la imagen del producto.
  *
  * Todo lo que no calza con un patron conocido cae al detalle en vez de
  * inventarse: mas vale una ficha corta que una ficha equivocada.

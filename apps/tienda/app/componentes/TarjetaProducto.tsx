@@ -3,16 +3,31 @@ import { leerFicha } from '../../src/lib/ficha.js';
 import { BotonAgregar } from './BotonAgregar.js';
 
 /**
- * La ficha: sin fotos, el dato es la imagen. El nombre del catalogo se lee
- * como lo que ya era (identificador + specs + resto) y cada pieza ocupa su
- * lugar en la lectura: marca y disponibilidad arriba, el equipo al medio, el
- * identificador y el precio abajo, separados por la linea del pie.
+ * La tarjeta: arriba la foto del banco cuando existe; si no, la misma caja
+ * con el logo de la tienda. El nombre del catalogo se lee como lo que
+ * ya era (identificador + specs + resto) y cada pieza ocupa su lugar: marca
+ * y disponibilidad arriba, el equipo al medio, el identificador y el precio
+ * abajo. La caja cuadrada siempre esta: pareja la grilla cuando la cobertura
+ * de fotos es parcial.
  */
 export function TarjetaProducto({ producto }: { producto: ProductoTienda }) {
   const ficha = leerFicha(producto.nombre, producto.marca);
 
   return (
     <article className="ficha">
+      {producto.foto ? (
+        <div className="foto">
+          {/* <img> y no next/image: las fotos ya vienen a 500-640 px desde el
+              banco y asi no dependemos de la optimizacion de Vercel. */}
+          <img src={producto.foto} alt={ficha.titulo || producto.nombre} loading="lazy" decoding="async" />
+        </div>
+      ) : (
+        <div className="foto vacia" aria-hidden="true">
+          <span className="sigla">Dr</span>
+          <span className="nombre-tienda">Computación</span>
+        </div>
+      )}
+
       <div className="encabezado">
         <span className="marca-prod">{producto.marca ?? 'Sin marca'}</span>
         <span className={producto.disponible ? 'estado hay' : 'estado no'}>

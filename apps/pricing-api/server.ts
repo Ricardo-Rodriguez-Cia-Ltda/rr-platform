@@ -4,10 +4,11 @@ import { fileURLToPath } from 'node:url';
 // catalogos se comparten y bajarlos de nuevo cuesta cuota en Tecnoglobal.
 process.env.CATALOG_CACHE_DIR ??= fileURLToPath(new URL('../../cache', import.meta.url));
 
-import { loadCatalog } from '@rr/providers/catalog';
+import { getCatalog, loadCatalog } from '@rr/providers/catalog';
 import { PROVIDERS } from '@rr/providers';
 import { QUOTA_MESSAGE } from '@rr/providers/tecnoglobal';
 import { configuredProviders, refreshAll } from '@rr/domain/refresh';
+import { correrBancoFotos } from '@rr/providers/fotos/correr';
 import { createApp } from './src/app.js';
 
 const port = Number(process.env.PORT ?? 3000);
@@ -52,7 +53,16 @@ function refresh(): void {
   if (pending.length > 0) {
     console.log(`[catalog] sin credenciales, no se refrescan: ${pending.join(', ')}`);
   }
-  void refreshAll(names, loadCatalog, retry);
+  void refreshAll(names, loadCatalog, retry).then(() => {
+    // El banco de fotos va despues del refresco y en segundo plano: nunca
+    // retrasa ni tumba al servidor. Usa los catalogos que hayan quedado en
+    // memoria; un proveedor caido simplemente no aporta claves esta vez.
+    const catalogos: Record<string, ReturnType<typeof getCatalog>> = {};
+    for (const n of names) {
+      try { catalogos[n] = getCatalog(n); } catch { /* sin catalogo todavia */ }
+    }
+    correrBancoFotos(catalogos).catch((error) => console.error('[fotos] la corrida fallo', error));
+  });
 }
 
 refresh();

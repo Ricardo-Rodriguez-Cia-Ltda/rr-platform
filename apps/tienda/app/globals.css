@@ -250,7 +250,10 @@ main { max-width: var(--ancho); margin: 0 auto; padding: 34px 22px 72px; }
 
 /* Grilla que no son tres columnas iguales: la primera ficha manda. */
 .grilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 14px; }
-.grilla.destacada { grid-template-columns: minmax(0, 1.35fr) repeat(auto-fill, minmax(230px, 1fr)); }
+/* La primera columna necesita minimo propio: con minmax(0, …) auto-fill reparte
+   el ancho dando 230px a las demas y a la primera le quedaba el resto (~160px),
+   que cortaba el boton Agregar. */
+.grilla.destacada { grid-template-columns: minmax(300px, 1.35fr) repeat(auto-fill, minmax(230px, 1fr)); }
 
 /* ---- ficha: sin borde; se sostiene con superficie, aire y sombra ---- */
 .ficha {
@@ -262,6 +265,34 @@ main { max-width: var(--ancho); margin: 0 auto; padding: 34px 22px 72px; }
   position: relative;
 }
 .ficha:hover { box-shadow: var(--sombra-3); }
+/* Foto del banco: caja cuadrada con fondo blanco fijo (las fotos de catalogo
+   vienen sobre blanco, tambien en tema oscuro) y contain para no recortar. */
+.ficha .foto {
+  aspect-ratio: 1 / 1; max-width: 100%;
+  background: #fff; border-radius: var(--r-elemento);
+  display: grid; place-items: center; overflow: hidden;
+}
+.ficha .foto img { width: 100%; height: 100%; object-fit: contain; padding: 14px; }
+/* Sin foto: la misma caja, en tono hundido, con el logo de la tienda (el sello
+   "Dr" de la cabecera, en grande). Mantiene la grilla pareja cuando la
+   cobertura de fotos es parcial. */
+.ficha .foto.vacia {
+  background: var(--hundido);
+  place-content: center; text-align: center; gap: 10px;
+}
+.ficha .foto.vacia .sigla {
+  font-family: var(--font-datos), monospace;
+  font-size: 26px; font-weight: 600; letter-spacing: 0.02em;
+  color: var(--gris-claro);
+  border: 2px solid var(--gris-claro); border-radius: 9px;
+  padding: 4px 11px;
+  justify-self: center;
+}
+.ficha .foto.vacia .nombre-tienda {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 14px; font-weight: 600; letter-spacing: -0.01em;
+  color: var(--gris-claro);
+}
 .ficha .encabezado { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .ficha .marca-prod {
   font-family: var(--font-datos), monospace;
