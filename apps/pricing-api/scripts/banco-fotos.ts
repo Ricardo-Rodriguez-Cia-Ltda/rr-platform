@@ -26,4 +26,10 @@ for (const nombre of configuredProviders(PROVIDERS)) {
   }
 }
 
-await correrBancoFotos(catalogos, { limite });
+try {
+  await correrBancoFotos(catalogos, { limite });
+} catch (error) {
+  // Una linea clara en vez de un stack sin capturar.
+  console.error('[fotos] la corrida se corto:', error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+}
