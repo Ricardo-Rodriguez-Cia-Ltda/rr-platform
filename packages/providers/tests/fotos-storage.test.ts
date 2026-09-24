@@ -18,6 +18,7 @@ describe('crearStorage', () => {
     expect(h.apikey).toBe('service-key');
     expect(h['x-upsert']).toBe('true');
     expect(h['content-type']).toBe('image/jpeg');
+    expect(h['cache-control']).toBe('max-age=31536000');
   });
 
   it('una subida rechazada lanza con el status', async () => {

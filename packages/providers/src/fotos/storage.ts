@@ -48,7 +48,11 @@ export function crearStorage(cfg: {
         try {
           res = await f(`${base}/storage/v1/object/${bucket}/${ruta}`, {
             method: 'POST',
-            headers: { ...auth, 'content-type': contentType, 'x-upsert': 'true' },
+            headers: {
+              ...auth, 'content-type': contentType, 'x-upsert': 'true',
+              // Las fotos no cambian en esta fase: cache largo en la CDN.
+              'cache-control': 'max-age=31536000',
+            },
             body: bytes,
             signal: AbortSignal.timeout(TIMEOUT_MS),
           });
