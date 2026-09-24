@@ -145,28 +145,39 @@ export async function correrBancoFotos(
   if (!tomarCandado(dir)) return null;
   enCurso = true;
   try {
+    const stock = skusConStock(dir, Object.keys(catalogos));
+    const productos = productosDesdeCatalogos(catalogos, (prov, sku) => stock.has(`${prov}:${sku}`));
+    // Sin catalogos no hay nada que priorizar: no se pisa la lista ni el indice.
+    if (productos.length === 0) {
+      console.log('[fotos] sin catalogos cargados; nada que hacer');
+      return null;
+    }
+
     const storage = crearStorage({ url, key });
     // Si el storage no responde se corta aca, antes de tocar el indice.
     await storage.asegurarBucket();
 
-    const stock = skusConStock(dir, Object.keys(catalogos));
-    const productos = productosDesdeCatalogos(catalogos, (prov, sku) => stock.has(`${prov}:${sku}`));
     const indice = leerIndice();
     const usuario = process.env.ICECAT_USER?.trim();
     if (!usuario) console.log('[fotos] sin ICECAT_USER: solo se usan fotos de Intcomex');
 
-    const resumen = await actualizarBancoFotos({
-      productos,
-      indice,
-      guardar: (i) => guardarIndice(i),
-      fotosIntcomex,
-      icecat: usuario ? crearIcecat(usuario) : null,
-      descargar,
-      subir: (ruta, bytes, tipo) => storage.subir(ruta, bytes, tipo),
-      limite: opciones.limite,
-    });
-
-    writeFileSync(join(dir, 'fotos-faltantes.csv'), csvFaltantes(productos, indice));
+    let resumen: ResumenBanco;
+    try {
+      resumen = await actualizarBancoFotos({
+        productos,
+        indice,
+        guardar: (i) => guardarIndice(i),
+        fotosIntcomex,
+        icecat: usuario ? crearIcecat(usuario) : null,
+        descargar,
+        subir: (ruta, bytes, tipo) => storage.subir(ruta, bytes, tipo),
+        limite: opciones.limite,
+      });
+    } finally {
+      // El indice se muta en el lugar: aun si la corrida se corta, la lista
+      // refleja lo avanzado.
+      writeFileSync(join(dir, 'fotos-faltantes.csv'), csvFaltantes(productos, indice));
+    }
     const conFoto = Object.keys(indice.fotos).length;
     console.log(
       `[fotos] ${resumen.procesados} procesados · nuevas intcomex ${resumen.nuevas.intcomex}, icecat ${resumen.nuevas.icecat}` +
