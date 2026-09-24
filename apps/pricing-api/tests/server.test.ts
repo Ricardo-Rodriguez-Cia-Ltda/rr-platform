@@ -1,6 +1,10 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { connect, type AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { resetPriceCachesForTests } from '@rr/providers/price-cache';
 
 const getPriceMock = vi.fn();
 
@@ -44,6 +48,14 @@ const RESULT = {
   currency: 'US',
   inStock: 203,
 };
+
+// search escribe el cache de precios en disco: aislado para no meter HP1 en
+// el cache real del repo (cache/prices-intcomex.json). Va en un beforeEach de
+// nivel superior porque cada describe hace unstubAllEnvs.
+beforeEach(() => {
+  vi.stubEnv('CATALOG_CACHE_DIR', mkdtempSync(join(tmpdir(), 'server-cache-')));
+  resetPriceCachesForTests();
+});
 
 let server: Server;
 let base: string;
