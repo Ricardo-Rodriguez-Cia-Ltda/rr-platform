@@ -262,6 +262,14 @@ main { max-width: var(--ancho); margin: 0 auto; padding: 34px 22px 72px; }
   position: relative;
 }
 .ficha:hover { box-shadow: var(--sombra-3); }
+/* Foto del banco: caja cuadrada con fondo blanco fijo (las fotos de catalogo
+   vienen sobre blanco, tambien en tema oscuro) y contain para no recortar. */
+.ficha .foto {
+  aspect-ratio: 1 / 1; max-width: 100%;
+  background: #fff; border-radius: var(--r-elemento);
+  display: grid; place-items: center; overflow: hidden;
+}
+.ficha .foto img { width: 100%; height: 100%; object-fit: contain; padding: 14px; }
 .ficha .encabezado { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .ficha .marca-prod {
   font-family: var(--font-datos), monospace;
