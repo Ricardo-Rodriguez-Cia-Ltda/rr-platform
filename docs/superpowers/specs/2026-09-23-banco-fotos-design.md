@@ -165,9 +165,12 @@ toda foto sale `null` y queda un error en el log.
   de catálogo vienen sobre blanco), con `<img loading="lazy">` y `alt` con el
   nombre del producto. Se usa `<img>` y no `next/image` para no depender de la
   optimización de imágenes de Vercel ni configurar dominios remotos.
-- Sin foto, la tarjeta queda exactamente como hoy. El comentario de
-  `ficha.ts` y el de `TarjetaProducto` se actualizan: la ficha pasa a ser el
-  respaldo de la foto, no su reemplazo.
+- Sin foto, la tarjeta muestra una caja neutra con marca y part number (tono
+  hundido, tipografía de datos en mayúsculas para la marca y en regular para
+  el MPN), igual tamaño que la foto. Mantiene la grilla pareja cuando la
+  cobertura de fotos es parcial. Decidida por el usuario el 2026-09-24 al ver
+  la grilla con cobertura ~50%. El comentario de `ficha.ts` y el de
+  `TarjetaProducto` se actualizan en consecuencia.
 
 El bot de WhatsApp no cambia en esta fase.
 

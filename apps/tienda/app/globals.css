@@ -270,6 +270,23 @@ main { max-width: var(--ancho); margin: 0 auto; padding: 34px 22px 72px; }
   display: grid; place-items: center; overflow: hidden;
 }
 .ficha .foto img { width: 100%; height: 100%; object-fit: contain; padding: 14px; }
+/* Sin foto: la misma caja, en tono hundido, con marca y part number. Mantiene
+   la grilla pareja cuando la cobertura de fotos es parcial. */
+.ficha .foto.vacia {
+  background: var(--hundido);
+  place-content: center; text-align: center; gap: 6px;
+  padding: 14px;
+}
+.ficha .foto.vacia .vacia-marca {
+  font-family: var(--font-datos), monospace;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--gris-claro);
+}
+.ficha .foto.vacia .vacia-mpn {
+  font-family: var(--font-datos), monospace;
+  font-size: 15px; color: var(--gris);
+  overflow-wrap: anywhere;
+}
 .ficha .encabezado { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .ficha .marca-prod {
   font-family: var(--font-datos), monospace;
