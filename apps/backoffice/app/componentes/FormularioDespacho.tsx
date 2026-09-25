@@ -1,6 +1,6 @@
 'use client';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { mensajeError } from '../../src/lib/errores-api.js';
 
 type Pendiente = { poId: string; clave: string; nombre: string; pendiente: number; recibida: number };
@@ -15,7 +15,9 @@ export function FormularioDespacho({ quoteId, version, pendientes, facturacion, 
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState('');
 
-  async function crear(form: FormData) {
+  async function crear(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
     const lineas = pendientes
       .map((p) => ({ po_id: p.poId, mpn: p.clave, cantidad: Number(form.get(`cant-${p.poId}-${p.clave}`) ?? 0) }))
       .filter((l) => l.cantidad > 0);
@@ -37,7 +39,10 @@ export function FormularioDespacho({ quoteId, version, pendientes, facturacion, 
   return (
     <details className="crear-despacho">
       <summary>Crear despacho</summary>
-      <form className="formulario" action={crear}>
+      {/* onSubmit en vez de action={fn}: un form action de React 19 resetea
+          los campos no controlados apenas termina, aunque la peticion haya
+          fallado, y el usuario pierde lo que escribio. */}
+      <form className="formulario" onSubmit={crear}>
         <table className="lineas">
           <thead><tr><th>Producto</th><th>Recibido</th><th>Por asignar</th><th>En este despacho</th></tr></thead>
           <tbody>

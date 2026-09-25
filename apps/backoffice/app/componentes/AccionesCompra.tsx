@@ -1,6 +1,6 @@
 'use client';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { mensajeError } from '../../src/lib/errores-api.js';
 
 type Linea = { clave: string; nombre: string; cantidad: number; recibida: number };
@@ -36,16 +36,21 @@ export function AccionesCompra({ poId, estado, modalidad, lineas }: { poId: stri
     router.refresh();
   }
 
-  function registrar(form: FormData) {
+  async function registrar(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
     const datos: Record<string, string> = { po_id: poId };
     for (const [k, v] of form.entries()) if (String(v).trim()) datos[k] = String(v);
-    void correr('/api/compras/registrar', datos);
+    await correr('/api/compras/registrar', datos);
   }
 
   return (
     <div className="acciones">
       {estado === 'por_comprar' ? (
-        <form className="formulario" action={registrar}>
+        // onSubmit en vez de action={fn}: un form action de React 19 resetea
+        // los campos no controlados apenas termina, aunque la peticion haya
+        // fallado, y el usuario pierde lo que escribio.
+        <form className="formulario" onSubmit={registrar}>
           <label>Modalidad
             <select name="modalidad" required defaultValue="">
               <option value="" disabled>Elegir…</option>
