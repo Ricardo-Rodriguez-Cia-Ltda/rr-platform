@@ -244,6 +244,61 @@ describe('POST /api/pago/webhook', () => {
     expect(mensajes[0]).toContain('rechazado');
   });
 
+  it('pago rechazado: el aviso explica el motivo y, con el link vigente, invita a reintentar', async () => {
+    const mensajes: string[] = [];
+    routeFetch({
+      mensajes,
+      pago: [{ ...PAGO, expira_at: new Date(Date.now() + 2 * 3600_000).toISOString() }],
+      mpPago: {
+        id: PAYMENT_ID, status: 'rejected', status_detail: 'cc_rejected_insufficient_amount',
+        external_reference: QUOTE, transaction_amount: 219725,
+      },
+    });
+    const res = makeRes();
+    await createWebhookHandler()(makeReq(), res, ENV);
+    expect(res.statusCode).toBe(200);
+    expect(mensajes[0]).toContain('cupo suficiente');
+    expect(mensajes[0]).toContain('mismo link');
+  });
+
+  it('pago rechazado con el link por vencer: no ofrece reintentar con el mismo link', async () => {
+    const mensajes: string[] = [];
+    routeFetch({
+      mensajes,
+      // Vence en 20 min: el link de Mercado Pago muere 15 min antes, asi que
+      // al cliente le quedarian 5 -- menos que el piso para reintentar.
+      pago: [{ ...PAGO, expira_at: new Date(Date.now() + 20 * 60_000).toISOString() }],
+      mpPago: {
+        id: PAYMENT_ID, status: 'rejected', status_detail: 'cc_rejected_call_for_authorize',
+        external_reference: QUOTE, transaction_amount: 219725,
+      },
+    });
+    const res = makeRes();
+    await createWebhookHandler()(makeReq(), res, ENV);
+    expect(mensajes[0]).toContain('Tu banco pidió autorizar el pago');
+    expect(mensajes[0]).not.toContain('mismo link');
+    expect(mensajes[0]).toContain('venció');
+  });
+
+  it('tercer rechazo del mismo pedido: alerta interna una vez; el segundo no alerta', async () => {
+    const expira = new Date(Date.now() + 2 * 3600_000).toISOString();
+    const rechazo = { id: PAYMENT_ID, status: 'rejected', status_detail: 'cc_rejected_high_risk', external_reference: QUOTE, transaction_amount: 219725 };
+
+    const alertasSegundo: string[] = [];
+    routeFetch({ pago: [{ ...PAGO, expira_at: expira, intentos_rechazados: 1 }], mpPago: rechazo });
+    await createWebhookHandler(async (asunto) => { alertasSegundo.push(asunto); })(makeReq(), makeRes(), ENV);
+    expect(alertasSegundo).toHaveLength(0);
+
+    const alertas: { asunto: string; detalle: string }[] = [];
+    routeFetch({ pago: [{ ...PAGO, expira_at: expira, intentos_rechazados: 2 }], mpPago: rechazo });
+    await createWebhookHandler(async (asunto, detalle) => { alertas.push({ asunto, detalle }); })(makeReq(), makeRes(), ENV);
+    expect(alertas).toHaveLength(1);
+    expect(alertas[0].asunto).toContain('3 rechazos');
+    expect(alertas[0].detalle).toContain(QUOTE);
+    expect(alertas[0].detalle).toContain('56941757584');
+    expect(alertas[0].detalle).toContain('cc_rejected_high_risk');
+  });
+
   it('segunda notificacion de un pago rechazado con el mismo id: no repite el aviso ni la escritura', async () => {
     // Mercado Pago reenvia habitualmente mas de una notificacion por el mismo
     // pago (una al crearse, otra al actualizarse). La fila ya trae
