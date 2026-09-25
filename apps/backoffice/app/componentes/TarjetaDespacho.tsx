@@ -29,6 +29,11 @@ export function TarjetaDespacho({ despacho: d, pedido }: { despacho: Despacho; p
         id={d.id} estado={d.estado} modalidad={d.modalidad} numeroSeguimiento={d.numero_seguimiento}
         costo={d.costo_clp} cobrado={d.cobrado_clp} cobroPagado={d.cobro_pagado}
         mensaje={mensajeCliente(d, { numeroCotizacion: pedido.numeroCotizacion, contacto: d.contacto_nombre })}
+        datos={{
+          direccion: d.direccion, comuna: d.comuna, ciudad: d.ciudad,
+          contacto_nombre: d.contacto_nombre, contacto_telefono: d.contacto_telefono,
+          fecha_programada: d.fecha_programada, responsable: d.responsable, nota: d.nota,
+        }}
       />
     </div>
   );

@@ -27,7 +27,13 @@ function Tarjeta({ c }: { c: CompraVista }) {
       <ul className="items">
         {c.lineas.map((l) => <li key={l.clave}>{l.nombre} · {l.recibida}/{l.cantidad} recibidos</li>)}
       </ul>
-      <AccionesCompra poId={f.po_id} estado={estado} modalidad={f.modalidad_compra ?? null} lineas={c.lineas} />
+      <AccionesCompra
+        poId={f.po_id} estado={estado} modalidad={f.modalidad_compra ?? null} lineas={c.lineas}
+        datos={{
+          numero_pedido_mayorista: f.numero_pedido_mayorista ?? null, llegada_estimada: f.llegada_estimada ?? null,
+          guia_mayorista: f.guia_mayorista ?? null, nota_compra: f.nota_compra ?? null,
+        }}
+      />
     </div>
   );
 }

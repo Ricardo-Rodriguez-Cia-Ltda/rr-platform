@@ -33,6 +33,30 @@ describe('cargarVistaCompras', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })));
     expect(await cargarVistaCompras('2026-09-25')).toBeNull();
   });
+  it('recibidas, por despachar: sale la OC cuyas lineas ya estan todas asignadas a despachos no anulados', async () => {
+    vi.stubEnv('SUPABASE_URL', 'https://supabase.test'); vi.stubEnv('SUPABASE_SERVICE_KEY', 'clave');
+    const recibidas = [
+      { po_id: 'oc-a', quote_id: 'qa', quote_version: '1', proveedor: 'intcomex', razon_social: 'Acme', telefono: '569', estado_negocio: 'pagado', estado_compra: 'recibida', modalidad_compra: 'retiro', llegada_estimada: null, created_at: '2026-09-25T10:00:00Z', lineas: [{ mpn: 'A', cantidad: 2 }] },
+      { po_id: 'oc-b', quote_id: 'qb', quote_version: '1', proveedor: 'intcomex', razon_social: 'Beta', telefono: '570', estado_negocio: 'pagado', estado_compra: 'recibida', modalidad_compra: 'retiro', llegada_estimada: null, created_at: '2026-09-25T10:00:00Z', lineas: [{ mpn: 'B', cantidad: 2 }] },
+    ];
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = String(url);
+      urls.push(u);
+      if (u.includes('/pedidos?')) return new Response(JSON.stringify(recibidas));
+      if (u.includes('/recepciones?')) return new Response(JSON.stringify([{ po_id: 'oc-a', mpn: 'A', cantidad: 2 }, { po_id: 'oc-b', mpn: 'B', cantidad: 2 }]));
+      // oc-a: 2 de 2 asignadas (en dos despachos); oc-b: solo 1 de 2.
+      if (u.includes('/despacho_lineas?')) return new Response(JSON.stringify([
+        { po_id: 'oc-a', mpn: 'A', cantidad: 1 }, { po_id: 'oc-a', mpn: 'A', cantidad: 1 }, { po_id: 'oc-b', mpn: 'B', cantidad: 1 },
+      ]));
+      return new Response(JSON.stringify([]));
+    }));
+    const v = await cargarVistaCompras('2026-09-25');
+    expect(v?.recibidas.map((c) => c.fila.po_id)).toEqual(['oc-b']);
+    const consulta = urls.find((u) => u.includes('/despacho_lineas?')) ?? '';
+    expect(consulta).toContain('despachos!inner(estado)');
+    expect(consulta).toContain('despachos.estado=neq.anulado');
+  });
   it('combina lineas repetidas del mismo mpn en una OC antes de calcular lo recibido', async () => {
     vi.stubEnv('SUPABASE_URL', 'https://supabase.test'); vi.stubEnv('SUPABASE_SERVICE_KEY', 'clave');
     const pedidoRepetido = [

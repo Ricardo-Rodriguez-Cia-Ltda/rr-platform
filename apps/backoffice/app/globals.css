@@ -298,3 +298,7 @@ h2 { font-size: 15px; margin: 22px 0 10px; color: var(--gris); font-weight: 600;
 .badge.recibida, .badge.entregada_al_cliente { background: var(--ok-suave); color: var(--ok); }
 .badge.anulada { background: var(--fondo); color: var(--gris); }
 @media (max-width: 640px) { .fila-recepcion { grid-template-columns: 1fr 70px; } .fila-recepcion button { grid-column: 1 / -1; } }
+
+/* Desplegable "Editar datos" de compras y despachos. */
+details.editar summary { cursor: pointer; color: var(--azul); font-weight: 600; font-size: 13px; margin: 4px 0; }
+details.editar[open] summary { margin-bottom: 8px; }

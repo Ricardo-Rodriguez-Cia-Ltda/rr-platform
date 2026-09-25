@@ -10,6 +10,13 @@ const SIGUIENTE: Record<string, { hacia: string; label: string }> = {
   directo_cliente: { hacia: 'directo_al_cliente', label: 'Despachado directo al cliente' },
 };
 const RECIBE = ['comprada', 'por_retirar', 'en_camino', 'recibida_parcial'];
+// Mismos estados que acepta /api/compras/registrar para corregir datos.
+const EDITABLES = ['comprada', 'por_retirar', 'en_camino', 'directo_al_cliente', 'recibida_parcial'];
+
+export interface DatosCompra {
+  numero_pedido_mayorista: string | null; llegada_estimada: string | null;
+  guia_mayorista: string | null; nota_compra: string | null;
+}
 const AVISO_ESTADO_NO_ACTUALIZADO = 'La recepción quedó registrada, pero el estado de la compra no se actualizó. Recarga en un momento.';
 
 async function enviar(ruta: string, body: unknown): Promise<{ error: string | null; aviso: string | null }> {
@@ -21,7 +28,7 @@ async function enviar(ruta: string, body: unknown): Promise<{ error: string | nu
   return { error: mensajeError(data), aviso: null };
 }
 
-export function AccionesCompra({ poId, estado, modalidad, lineas }: { poId: string; estado: string; modalidad: string | null; lineas: Linea[] }) {
+export function AccionesCompra({ poId, estado, modalidad, lineas, datos }: { poId: string; estado: string; modalidad: string | null; lineas: Linea[]; datos: DatosCompra }) {
   const router = useRouter();
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState('');
@@ -42,6 +49,15 @@ export function AccionesCompra({ poId, estado, modalidad, lineas }: { poId: stri
     const datos: Record<string, string> = { po_id: poId };
     for (const [k, v] of form.entries()) if (String(v).trim()) datos[k] = String(v);
     await correr('/api/compras/registrar', datos);
+  }
+
+  // Se mandan los cuatro campos siempre: uno vacio borra el dato.
+  async function corregir(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const cambio: Record<string, string> = { po_id: poId };
+    for (const k of ['numero_pedido_mayorista', 'llegada_estimada', 'guia_mayorista', 'nota_compra']) cambio[k] = String(form.get(k) ?? '').trim();
+    await correr('/api/compras/registrar', cambio);
   }
 
   return (
@@ -91,6 +107,19 @@ export function AccionesCompra({ poId, estado, modalidad, lineas }: { poId: stri
             </form>
           ))}
         </div>
+      ) : null}
+
+      {EDITABLES.includes(estado) ? (
+        <details className="editar">
+          <summary>Editar datos de la compra</summary>
+          <form className="formulario" onSubmit={corregir}>
+            <label>N° pedido del mayorista<input name="numero_pedido_mayorista" required defaultValue={datos.numero_pedido_mayorista ?? ''} /></label>
+            <label>Llegada estimada<input name="llegada_estimada" type="date" defaultValue={datos.llegada_estimada ?? ''} /></label>
+            <label>Guía del mayorista<input name="guia_mayorista" defaultValue={datos.guia_mayorista ?? ''} /></label>
+            <label className="ancho">Nota<input name="nota_compra" defaultValue={datos.nota_compra ?? ''} /></label>
+            <button disabled={ocupado}>Guardar cambios</button>
+          </form>
+        </details>
       ) : null}
 
       {error ? <span className="aviso-error">{error}</span> : null}
