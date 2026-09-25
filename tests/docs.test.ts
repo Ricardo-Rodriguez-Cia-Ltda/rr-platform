@@ -255,6 +255,9 @@ describe('docs/sql/2026-09-25-despachos.sql', () => {
       expect(sql).toContain(`alter table ${t} enable row level security`);
     }
   });
+  it('revoca el execute de crear_despacho a public, anon y authenticated', () => {
+    expect(sql).toContain('revoke execute on function crear_despacho(jsonb, jsonb) from public, anon, authenticated;');
+  });
 });
 
 describe('openapi.yaml es internamente consistente', () => {

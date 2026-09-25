@@ -111,3 +111,9 @@ begin
   return d;
 end;
 $$;
+
+-- Defensa en profundidad: la RPC solo la debe llamar el backoffice con la
+-- service key. anon/authenticated no tienen credenciales en produccion, pero
+-- si algun dia se exponen (p.ej. auth de Supabase para otro cliente), esta
+-- revocacion evita que puedan invocarla igual.
+revoke execute on function crear_despacho(jsonb, jsonb) from public, anon, authenticated;
