@@ -264,3 +264,30 @@ a:focus-visible, button:focus-visible, summary:focus-visible {
 @media (prefers-reduced-motion: no-preference) {
   .chips a, .docs a, .botonera button, .barra-vistas a { transition: background 0.15s, color 0.15s, border-color 0.15s; }
 }
+
+/* ---- compras y despachos ---- */
+h2 { font-size: 15px; margin: 22px 0 10px; color: var(--gris); font-weight: 600; }
+.tarjeta.compra, .tarjeta.despacho { display: block; }
+.items { margin: 8px 0; padding-left: 18px; font-size: 13px; }
+.acciones { margin-top: 10px; display: grid; gap: 10px; }
+.formulario { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; align-items: end; }
+.formulario label { display: grid; gap: 4px; font-size: 12px; color: var(--gris); }
+.formulario label.ancho { grid-column: 1 / -1; }
+.formulario label.check { display: flex; align-items: center; gap: 6px; }
+.formulario input, .formulario select { font: inherit; font-size: 14px; padding: 7px 9px; border: 1px solid var(--borde); border-radius: 8px; background: #fff; color: var(--tinta); }
+.formulario .lineas { grid-column: 1 / -1; }
+.formulario .lineas input { width: 72px; text-align: right; }
+.formulario.compacto { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.formulario button, .fila-recepcion button { font: inherit; font-size: 13px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--azul); background: var(--azul); color: #fff; cursor: pointer; }
+.formulario button.secundario, .botonera button.secundario { background: transparent; color: var(--azul); }
+.recepcion { display: grid; gap: 6px; }
+.fila-recepcion { display: grid; grid-template-columns: 1fr 80px auto; gap: 8px; align-items: center; font-size: 13px; }
+.fila-recepcion input { font: inherit; padding: 6px 8px; border: 1px solid var(--borde); border-radius: 8px; }
+.crear-despacho summary { cursor: pointer; color: var(--azul); font-weight: 600; font-size: 13px; margin: 6px 0; }
+.aviso-ok { color: var(--ok); font-size: 13px; }
+.badge.por_comprar, .badge.por_preparar, .badge.fallido { background: var(--alerta-suave); color: var(--alerta); }
+.badge.comprada, .badge.por_retirar, .badge.en_camino, .badge.directo_al_cliente, .badge.recibida_parcial,
+.badge.listo, .badge.en_ruta { background: var(--azul-suave); color: var(--azul); }
+.badge.recibida, .badge.entregada_al_cliente { background: var(--ok-suave); color: var(--ok); }
+.badge.anulada { background: var(--fondo); color: var(--gris); }
+@media (max-width: 640px) { .fila-recepcion { grid-template-columns: 1fr 70px; } .fila-recepcion button { grid-column: 1 / -1; } }
