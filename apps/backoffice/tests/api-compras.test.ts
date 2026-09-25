@@ -147,9 +147,18 @@ describe('POST /api/compras/transicion', () => {
 });
 
 describe('POST /api/compras/recepcion', () => {
+  // Simula postgres real: antes del insert (supabasePost aun no se llamo), el
+  // GET a /recepciones devuelve lo que ya habia; despues del insert (la
+  // relectura que hace la ruta para evitar la carrera), devuelve eso mas la
+  // fila recien creada.
   const conDatos = (estado: string, recibidas: unknown[]) => {
-    supabaseGet.mockImplementation(async (ruta: string) =>
-      ruta.startsWith('/pedidos') ? [{ ...OC, estado_compra: estado, modalidad_compra: 'retiro' }] : recibidas);
+    supabaseGet.mockImplementation(async (ruta: string) => {
+      if (ruta.startsWith('/pedidos')) return [{ ...OC, estado_compra: estado, modalidad_compra: 'retiro' }];
+      const creadas = supabasePost.mock.calls
+        .filter((c) => c[0] === '/recepciones')
+        .map((c) => c[1] as { mpn: string; cantidad: number });
+      return [...recibidas, ...creadas.map((c) => ({ mpn: c.mpn, cantidad: c.cantidad }))];
+    });
   };
   it('registra la recepcion y pasa a recibida_parcial', async () => {
     conDatos('por_retirar', []);
@@ -159,7 +168,8 @@ describe('POST /api/compras/recepcion', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ estado: 'recibida_parcial' });
     expect(supabasePost.mock.calls[0]).toEqual(['/recepciones', { po_id: 'oc-1', mpn: 'A', cantidad: 2, nota: null }]);
-    expect(supabasePatch.mock.calls[0][0]).toContain('estado_compra=eq.por_retirar');
+    expect(supabasePatch.mock.calls[0][0]).toContain('estado_compra=in.(comprada,por_retirar,en_camino,recibida_parcial)');
+    expect(supabasePatch.mock.calls[0][0]).toContain('po_id=eq.oc-1');
   });
   it('completa la compra: recibida', async () => {
     conDatos('recibida_parcial', [{ mpn: 'A', cantidad: 2 }]);
@@ -178,8 +188,13 @@ describe('POST /api/compras/recepcion', () => {
   });
   it('mpn repetido en la misma OC se suma al calcular lo comprado', async () => {
     const OC_REPETIDO = { ...OC, lineas: [{ mpn: 'A', cantidad: 1 }, { mpn: 'A', cantidad: 1 }] };
-    supabaseGet.mockImplementation(async (ruta: string) =>
-      ruta.startsWith('/pedidos') ? [{ ...OC_REPETIDO, estado_compra: 'por_retirar', modalidad_compra: 'retiro' }] : []);
+    supabaseGet.mockImplementation(async (ruta: string) => {
+      if (ruta.startsWith('/pedidos')) return [{ ...OC_REPETIDO, estado_compra: 'por_retirar', modalidad_compra: 'retiro' }];
+      const creadas = supabasePost.mock.calls
+        .filter((c) => c[0] === '/recepciones')
+        .map((c) => c[1] as { mpn: string; cantidad: number });
+      return creadas.map((c) => ({ mpn: c.mpn, cantidad: c.cantidad }));
+    });
     supabasePost.mockResolvedValue([{ id: 3 }]);
     supabasePatch.mockResolvedValue([{}]);
     const res = await recepcion(req({ po_id: 'oc-1', mpn: 'A', cantidad: 2 }));
@@ -196,5 +211,41 @@ describe('POST /api/compras/recepcion', () => {
     expect(await res.json()).toMatchObject({ ok: true, estado: 'por_retirar', aviso: 'estado_no_actualizado' });
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
+  });
+  it('carrera: la relectura fresca manda por sobre la lectura stale y llega a recibida', async () => {
+    // La lectura previa al insert (antes de que otra recepcion concurrente
+    // terminara B) solo ve A con 1 de 2. La relectura de despues del insert
+    // ya ve la recepcion propia de A mas la de B que llego mientras tanto.
+    supabaseGet.mockImplementation(async (ruta: string) => {
+      if (ruta.startsWith('/pedidos')) return [{ ...OC, estado_compra: 'por_retirar', modalidad_compra: 'retiro' }];
+      const yaSePosteo = supabasePost.mock.calls.some((c) => c[0] === '/recepciones');
+      return yaSePosteo
+        ? [{ mpn: 'A', cantidad: 1 }, { mpn: 'A', cantidad: 1 }, { mpn: 'B', cantidad: 1 }]
+        : [{ mpn: 'A', cantidad: 1 }];
+    });
+    supabasePost.mockResolvedValue([{ id: 9 }]);
+    supabasePatch.mockResolvedValue([{}]);
+    const res = await recepcion(req({ po_id: 'oc-1', mpn: 'A', cantidad: 1 }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ estado: 'recibida' });
+    expect(supabasePatch.mock.calls[0][0]).toContain('estado_compra=in.(comprada,por_retirar,en_camino,recibida_parcial)');
+    expect(supabasePatch.mock.calls[0][1]).toEqual({ estado_compra: 'recibida' });
+  });
+  it('si la relectura fresca falla, usa el valor calculado localmente', async () => {
+    conDatos('por_retirar', []);
+    supabasePost.mockResolvedValue([{ id: 5 }]);
+    supabasePatch.mockResolvedValue([{}]);
+    let llamadas = 0;
+    const original = supabaseGet.getMockImplementation()!;
+    supabaseGet.mockImplementation(async (ruta: string) => {
+      if (!ruta.startsWith('/pedidos')) {
+        llamadas += 1;
+        if (llamadas === 2) return null; // la relectura post-insert falla
+      }
+      return original(ruta);
+    });
+    const res = await recepcion(req({ po_id: 'oc-1', mpn: 'A', cantidad: 2 }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ estado: 'recibida_parcial' });
   });
 });
