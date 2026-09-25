@@ -1,5 +1,6 @@
 import { supabaseGet, supabasePatch } from '../../../../src/lib/supabase.js';
 import { ESTADOS_COMPRA_EDITABLES, MODALIDADES_COMPRA, type EstadoCompra, type ModalidadCompra } from '../../../../src/lib/compras.js';
+import { ocConDespachos } from '../../../../src/lib/datos-pedido.js';
 
 const json = (payload: unknown, status = 200) =>
   new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } });
@@ -39,8 +40,17 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   if (!ESTADOS_COMPRA_EDITABLES.includes(actual)) return json({ error: 'compra_cerrada', estado: actual }, 409);
+  const cambiaADirecto = actual === 'comprada' && modalidad === 'directo_cliente';
   if (modalidad && actual === 'comprada') datos.modalidad_compra = modalidad;
   if (Object.keys(datos).length === 0) return json({ ok: true, estado: actual });
+
+  // El mayorista despachando directo al cliente saca la OC del plan de
+  // despachos: si un despacho ya tomo lineas de ahi, quedaria varado.
+  if (cambiaADirecto) {
+    const conDespachos = await ocConDespachos(poId);
+    if (conDespachos === null) return json({ error: 'upstream' }, 503);
+    if (conDespachos) return json({ error: 'oc_con_despachos' }, 409);
+  }
   const res = await supabasePatch(`/pedidos?po_id=eq.${encodeURIComponent(poId)}&estado_compra=eq.${actual}`, datos);
   if (res === null) return json({ error: 'upstream' }, 503);
   if (res.length === 0) return json({ error: 'transicion_invalida', desde: actual }, 409);

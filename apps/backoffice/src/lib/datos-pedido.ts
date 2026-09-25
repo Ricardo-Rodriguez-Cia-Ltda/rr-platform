@@ -63,3 +63,15 @@ export async function registrarEvento(despachoId: number, desde: string | null, 
   const ok = await supabasePost('/despacho_eventos', { despacho_id: despachoId, desde, hacia, nota });
   if (ok === null) console.error('[despachos] no se pudo registrar el evento', { despachoId, desde, hacia });
 }
+
+// true si algun despacho NO anulado ya tiene lineas de esta orden de compra;
+// null si no se pudo leer. Se usa antes de anular una OC o pasarla a
+// directo_cliente: si un despacho ya tomo lineas de ahi, esa escritura la
+// dejaria varada sin poder llegar nunca a `listo`.
+export async function ocConDespachos(poId: string): Promise<boolean | null> {
+  const filas = await supabaseGet(
+    `/despacho_lineas?po_id=eq.${encodeURIComponent(poId)}&select=despacho_id,despachos!inner(estado)&despachos.estado=neq.anulado&limit=1`,
+  );
+  if (filas === null) return null;
+  return filas.length > 0;
+}

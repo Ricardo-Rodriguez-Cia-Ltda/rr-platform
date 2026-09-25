@@ -43,6 +43,39 @@ describe('POST /api/compras/registrar', () => {
     expect((await registrar(req({ po_id: 'oc-1', modalidad: 'retiro', numero_pedido_mayorista: '1' }))).status).toBe(404);
     expect((await registrar(req({ po_id: 'oc-1', modalidad: 'avion' }))).status).toBe(400);
   });
+  it('cambiar a directo_cliente con un despacho usando la OC -> 409, sin PATCH', async () => {
+    supabaseGet.mockImplementation(async (ruta: string) =>
+      ruta.startsWith('/pedidos') ? [{ ...OC, estado_compra: 'comprada', modalidad_compra: 'retiro' }] : [{ despacho_id: 1 }]);
+    const res = await registrar(req({ po_id: 'oc-1', modalidad: 'directo_cliente' }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe('oc_con_despachos');
+    expect(supabasePatch).not.toHaveBeenCalled();
+  });
+  it('cambiar a directo_cliente sin despachos -> 200 y consulta despacho_lineas del po correcto', async () => {
+    supabaseGet.mockImplementation(async (ruta: string) =>
+      ruta.startsWith('/pedidos') ? [{ ...OC, estado_compra: 'comprada', modalidad_compra: 'retiro' }] : []);
+    supabasePatch.mockResolvedValue([{}]);
+    const res = await registrar(req({ po_id: 'oc-1', modalidad: 'directo_cliente' }));
+    expect(res.status).toBe(200);
+    const rutaLineas = supabaseGet.mock.calls.map((c) => c[0]).find((r: string) => r.startsWith('/despacho_lineas'));
+    expect(rutaLineas).toContain('po_id=eq.oc-1');
+    expect(rutaLineas).toContain('despachos.estado=neq.anulado');
+  });
+  it('editar solo guia_mayorista (sin cambiar modalidad) no consulta despacho_lineas', async () => {
+    supabaseGet.mockImplementation(async (ruta: string) =>
+      ruta.startsWith('/pedidos') ? [{ ...OC, estado_compra: 'en_camino', modalidad_compra: 'despacho_mayorista' }] : []);
+    supabasePatch.mockResolvedValue([{}]);
+    const res = await registrar(req({ po_id: 'oc-1', guia_mayorista: 'G-1' }));
+    expect(res.status).toBe(200);
+    expect(supabaseGet.mock.calls.some((c) => String(c[0]).startsWith('/despacho_lineas'))).toBe(false);
+  });
+  it('si la lectura de despacho_lineas falla, 503 y sin PATCH', async () => {
+    supabaseGet.mockImplementation(async (ruta: string) =>
+      ruta.startsWith('/pedidos') ? [{ ...OC, estado_compra: 'comprada', modalidad_compra: 'retiro' }] : null);
+    const res = await registrar(req({ po_id: 'oc-1', modalidad: 'directo_cliente' }));
+    expect(res.status).toBe(503);
+    expect(supabasePatch).not.toHaveBeenCalled();
+  });
 });
 
 describe('POST /api/compras/transicion', () => {
@@ -69,6 +102,47 @@ describe('POST /api/compras/transicion', () => {
     supabaseGet.mockResolvedValue([{ ...OC, estado_compra: 'comprada', modalidad_compra: 'retiro' }]);
     supabasePatch.mockResolvedValue([]);
     expect((await transicion(req({ po_id: 'oc-1', hacia: 'por_retirar' }))).status).toBe(409);
+  });
+  it('anular con un despacho activo usando la OC -> 409, sin PATCH', async () => {
+    supabaseGet.mockImplementation(async (ruta: string) =>
+      ruta.startsWith('/pedidos') ? [{ ...OC, estado_compra: 'comprada', modalidad_compra: 'retiro' }] : [{ despacho_id: 1 }]);
+    const res = await transicion(req({ po_id: 'oc-1', hacia: 'anulada' }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe('oc_con_despachos');
+    expect(supabasePatch).not.toHaveBeenCalled();
+  });
+  it('anular sin despachos usando la OC -> 200', async () => {
+    supabaseGet.mockImplementation(async (ruta: string) =>
+      ruta.startsWith('/pedidos') ? [{ ...OC, estado_compra: 'comprada', modalidad_compra: 'retiro' }] : []);
+    supabasePatch.mockResolvedValue([{}]);
+    const res = await transicion(req({ po_id: 'oc-1', hacia: 'anulada' }));
+    expect(res.status).toBe(200);
+    const rutaLineas = supabaseGet.mock.calls.map((c) => c[0]).find((r: string) => r.startsWith('/despacho_lineas'));
+    expect(rutaLineas).toContain('po_id=eq.oc-1');
+    expect(rutaLineas).toContain('despachos.estado=neq.anulado');
+  });
+  it('directo_al_cliente con un despacho activo usando la OC -> 409, sin PATCH', async () => {
+    supabaseGet.mockImplementation(async (ruta: string) =>
+      ruta.startsWith('/pedidos') ? [{ ...OC, estado_compra: 'comprada', modalidad_compra: 'directo_cliente' }] : [{ despacho_id: 1 }]);
+    const res = await transicion(req({ po_id: 'oc-1', hacia: 'directo_al_cliente' }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe('oc_con_despachos');
+    expect(supabasePatch).not.toHaveBeenCalled();
+  });
+  it('si la lectura de despacho_lineas falla al anular, 503 y sin PATCH', async () => {
+    supabaseGet.mockImplementation(async (ruta: string) =>
+      ruta.startsWith('/pedidos') ? [{ ...OC, estado_compra: 'comprada', modalidad_compra: 'retiro' }] : null);
+    const res = await transicion(req({ po_id: 'oc-1', hacia: 'anulada' }));
+    expect(res.status).toBe(503);
+    expect(supabasePatch).not.toHaveBeenCalled();
+  });
+  it('transiciones que no anulan ni van a directo_al_cliente no consultan despacho_lineas', async () => {
+    supabaseGet.mockImplementation(async (ruta: string) =>
+      ruta.startsWith('/pedidos') ? [{ ...OC, estado_compra: 'comprada', modalidad_compra: 'retiro' }] : []);
+    supabasePatch.mockResolvedValue([{}]);
+    const res = await transicion(req({ po_id: 'oc-1', hacia: 'por_retirar' }));
+    expect(res.status).toBe(200);
+    expect(supabaseGet.mock.calls.some((c) => String(c[0]).startsWith('/despacho_lineas'))).toBe(false);
   });
 });
 

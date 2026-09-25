@@ -17,6 +17,7 @@ describe('mensajeError', () => {
     expect(mensajeError({ error: 'no_admite_recepcion' })).toBe('Esta compra no admite recepciones en su estado actual.');
     expect(mensajeError({ error: 'faltan_datos' })).toBe('Faltan la modalidad y el número de pedido del mayorista.');
     expect(mensajeError({ error: 'upstream' })).toBe('No se pudo conectar con la base. Intenta de nuevo.');
+    expect(mensajeError({ error: 'oc_con_despachos' })).toBe('Esta compra ya tiene productos asignados a un despacho. Anula ese despacho primero.');
   });
   it('excede_comprado agrega el pendiente cuando viene', () => {
     expect(mensajeError({ error: 'excede_comprado', pendiente: 3 })).toBe('No se puede recibir más de lo comprado. Quedan 3 por recibir.');

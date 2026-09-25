@@ -1,6 +1,7 @@
 import { supabaseGet, supabasePatch } from '../../../../src/lib/supabase.js';
 import { ESTADOS_COMPRA, transicionCompraValida, type EstadoCompra, type ModalidadCompra } from '../../../../src/lib/compras.js';
 import { evaluarPedidoEntregado } from '../../../../src/lib/entrega.js';
+import { ocConDespachos } from '../../../../src/lib/datos-pedido.js';
 
 const json = (payload: unknown, status = 200) =>
   new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } });
@@ -21,6 +22,14 @@ export async function POST(req: Request): Promise<Response> {
   if (f.estado_compra === hacia) return json({ ok: true, estado: hacia });
   if (!transicionCompraValida(f.estado_compra, hacia, f.modalidad_compra)) {
     return json({ error: 'transicion_invalida', desde: f.estado_compra }, 409);
+  }
+
+  // Anular o mandar directo al cliente saca la OC entera del plan de
+  // despachos: si un despacho ya tomo lineas de ahi, quedaria varado.
+  if (hacia === 'anulada' || hacia === 'directo_al_cliente') {
+    const conDespachos = await ocConDespachos(poId);
+    if (conDespachos === null) return json({ error: 'upstream' }, 503);
+    if (conDespachos) return json({ error: 'oc_con_despachos' }, 409);
   }
 
   const res = await supabasePatch(

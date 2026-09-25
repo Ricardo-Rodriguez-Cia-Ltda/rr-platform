@@ -19,6 +19,7 @@ const MENSAJES: Record<string, string> = {
   no_admite_recepcion: 'Esta compra no admite recepciones en su estado actual.',
   faltan_datos: 'Faltan la modalidad y el número de pedido del mayorista.',
   upstream: 'No se pudo conectar con la base. Intenta de nuevo.',
+  oc_con_despachos: 'Esta compra ya tiene productos asignados a un despacho. Anula ese despacho primero.',
 };
 
 export const MENSAJE_GENERICO = 'No se pudo guardar. Intenta de nuevo.';
