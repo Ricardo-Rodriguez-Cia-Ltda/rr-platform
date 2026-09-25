@@ -48,7 +48,145 @@
   }
   export function agruparCoincidencias(porProveedor: Array<{ proveedor: string; matches: ScoredProduct[] }>): GrupoBusqueda[];
   export type Ganador = WinningOffer & { producto: NormalizedProduct };
-  export function elegirGanador(grupo: GrupoBusqueda, precios: Record<string, Map<string, PriceInfo>>): Ganador | null {
+  export function elegirGanador(grupo: GrupoBusqueda, precios: Record<string, Map<string, PriceInfo>>): Ganador | null;
+  ```
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// apps/pricing-api/tests/busqueda-multi.test.ts
+import { describe, expect, it } from 'vitest';
+import type { NormalizedProduct } from '@rr/domain/product';
+import type { PriceInfo } from '@rr/domain/types';
+import { agruparCoincidencias, elegirGanador } from '../src/handlers/busqueda-multi.js';
+
+function prod(sku: string, mpn: string | null, marca: string | null, nombre = sku): NormalizedProduct {
+  return { sku, mpn, nombre, marca, categoria: 'Componentes', subcategorias: [], tipo: null };
+}
+const precio = (price: number, inStock: number | null): PriceInfo => ({ price, currency: 'USD', inStock });
+
+describe('agruparCoincidencias', () => {
+  it('junta el mismo producto de dos mayoristas aunque el MPN venga escrito distinto', () => {
+    const grupos = agruparCoincidencias([
+      { proveedor: 'intcomex', matches: [{ product: prod('I1', 'BX8071514100F', 'Intel'), score: 5 }] },
+      { proveedor: 'ingram', matches: [{ product: prod('G1', 'BX80715-14100F', 'INTEL CORP'), score: 7 }] },
+    ]);
+    expect(grupos).toHaveLength(1);
+    expect(grupos[0].score).toBe(7);
+    expect(Object.keys(grupos[0].porProveedor).sort()).toEqual(['ingram', 'intcomex']);
+    expect(grupos[0].representante.sku).toBe('I1');
+  });
+
+  it('sin clave solo entra desde Intcomex, cada uno como grupo propio', () => {
+    const grupos = agruparCoincidencias([
+      { proveedor: 'intcomex', matches: [{ product: prod('I1', null, 'HP'), score: 3 }, { product: prod('I2', null, null), score: 2 }] },
+      { proveedor: 'tecnoglobal', matches: [{ product: prod('T1', null, 'HP'), score: 9 }] },
+    ]);
+    expect(grupos.map((g) => g.representante.sku)).toEqual(['I1', 'I2']);
+  });
+
+  it('ordena por puntaje; en empate respeta el orden de llegada', () => {
+    const grupos = agruparCoincidencias([
+      { proveedor: 'intcomex', matches: [{ product: prod('I1', 'A1', 'HP'), score: 2 }, { product: prod('I2', 'B2', 'HP'), score: 2 }] },
+      { proveedor: 'ingram', matches: [{ product: prod('G3', 'C3', 'HP'), score: 5 }] },
+    ]);
+    expect(grupos.map((g) => g.representante.sku)).toEqual(['G3', 'I1', 'I2']);
+  });
+});
+
+describe('elegirGanador', () => {
+  const grupo = agruparCoincidencias([
+    { proveedor: 'intcomex', matches: [{ product: prod('I1', 'BX8071514100F', 'Intel'), score: 5 }] },
+    { proveedor: 'ingram', matches: [{ product: prod('G1', 'BX8071514100F', 'Intel'), score: 5 }] },
+  ])[0];
+
+  it('caso real: Ingram con stock gana a Intcomex sin stock', () => {
+    const g = elegirGanador(grupo, { intcomex: new Map([['I1', precio(169.23, 0)]]), ingram: new Map([['G1', precio(93.49, 16)]]) });
+    expect(g).toMatchObject({ proveedor: 'ingram', sku: 'G1', precio: 93.49, stock: 16, criterio: 'mas_barato_con_stock' });
+    expect(g?.producto.sku).toBe('G1');
+  });
+
+  it('con stock en los dos gana el mas barato; un mayorista sin precio no participa', () => {
+    expect(elegirGanador(grupo, { intcomex: new Map([['I1', precio(90, 3)]]), ingram: new Map([['G1', precio(93, 16)]]) })?.proveedor).toBe('intcomex');
+    expect(elegirGanador(grupo, { intcomex: new Map([['I1', precio(169, 0)]]), ingram: new Map() })?.proveedor).toBe('intcomex');
+    expect(elegirGanador(grupo, { intcomex: new Map(), ingram: new Map() })).toBeNull();
+  });
+
+  it('un precio no positivo no compite', () => {
+    expect(elegirGanador(grupo, { intcomex: new Map([['I1', precio(0, 5)]]), ingram: new Map([['G1', precio(93, 0)]]) })?.proveedor).toBe('ingram');
+  });
+
+  it('dentro de un mayorista toma su SKU mas barato', () => {
+    const dos = agruparCoincidencias([{ proveedor: 'intcomex', matches: [
+      { product: prod('I1', 'X1', 'HP'), score: 1 }, { product: prod('I2', 'X-1', 'HP'), score: 1 },
+    ] }])[0];
+    expect(elegirGanador(dos, { intcomex: new Map([['I1', precio(20, 5)], ['I2', precio(18, 5)]]) })?.sku).toBe('I2');
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npx vitest run apps/pricing-api/tests/busqueda-multi.test.ts`
+Expected: FAIL — el módulo no existe.
+
+- [ ] **Step 3: Implement**
+
+En `packages/providers/src/comparator.ts`, cambiar `function pickBest(` por `export function pickBest(` y `function cheapest(` por `export function cheapest(` (sin otro cambio).
+
+```ts
+// apps/pricing-api/src/handlers/busqueda-multi.ts
+import { unionKey, type NormalizedProduct } from '@rr/domain/product';
+import type { ScoredProduct } from '@rr/domain/search';
+import type { PriceInfo } from '@rr/domain/types';
+import { cheapest, pickBest, type Offer, type WinningOffer } from '@rr/providers/comparator';
+
+// Piezas puras de la busqueda en los tres mayoristas. Ver
+// docs/superpowers/specs/2026-09-25-busqueda-multi-proveedor-design.md.
+
+export interface GrupoBusqueda {
+  clave: string;
+  score: number;
+  porProveedor: Record<string, NormalizedProduct[]>;
+  /** Producto que representa al grupo en facetas: el de Intcomex si hay; si no, el de mayor puntaje. */
+  representante: NormalizedProduct;
+}
+
+export function agruparCoincidencias(porProveedor: Array<{ proveedor: string; matches: ScoredProduct[] }>): GrupoBusqueda[] {
+  const grupos = new Map<string, GrupoBusqueda & { mejorScoreRep: number; repDeIntcomex: boolean; orden: number }>();
+  let orden = 0;
+  for (const { proveedor, matches } of porProveedor) {
+    for (const { product, score } of matches) {
+      let clave = unionKey(product);
+      if (!clave) {
+        // Sin clave no se puede comparar; la cotizacion solo sabe resolverlo
+        // por SKU de Intcomex, asi que los demas mayoristas no lo aportan.
+        if (proveedor !== 'intcomex') continue;
+        clave = `sku:intcomex:${product.sku}`;
+      }
+      let g = grupos.get(clave);
+      if (!g) {
+        g = { clave, score, porProveedor: {}, representante: product, mejorScoreRep: score, repDeIntcomex: proveedor === 'intcomex', orden: orden++ };
+        grupos.set(clave, g);
+      }
+      (g.porProveedor[proveedor] ??= []).push(product);
+      g.score = Math.max(g.score, score);
+      const esIntcomex = proveedor === 'intcomex';
+      if ((esIntcomex && !g.repDeIntcomex) || (!g.repDeIntcomex && score > g.mejorScoreRep)) {
+        g.representante = product;
+        g.mejorScoreRep = score;
+        g.repDeIntcomex = esIntcomex;
+      }
+    }
+  }
+  return [...grupos.values()]
+    .sort((a, b) => b.score - a.score || a.orden - b.orden)
+    .map(({ clave, score, porProveedor, representante }) => ({ clave, score, porProveedor, representante }));
+}
+
+export type Ganador = WinningOffer & { producto: NormalizedProduct };
+
+export function elegirGanador(grupo: GrupoBusqueda, precios: Record<string, Map<string, PriceInfo>>): Ganador | null {
   const ofertas: Offer[] = [];
   const productoDe = new Map<string, NormalizedProduct>();
   for (const [proveedor, productos] of Object.entries(grupo.porProveedor)) {
