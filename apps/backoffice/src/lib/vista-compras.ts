@@ -42,10 +42,20 @@ export async function cargarVistaCompras(hoy: string = hoySantiago()): Promise<V
   if (recepciones === null) return null;
   const cots = await supabaseGet(`/cotizaciones?select=quote_id,version,numero&quote_id=in.(${enLista(pedidos.map((p) => p.quote_id))})`);
   if (cots === null) return null;
+  // Lo ya asignado a despachos vivos: una OC recibida cuyas lineas estan
+  // todas asignadas ya no esta "por despachar".
+  const asignadas = await supabaseGet(
+    `/despacho_lineas?select=po_id,mpn,cantidad,despachos!inner(estado)&despachos.estado=neq.anulado&po_id=in.(${enLista(pedidos.map((p) => p.po_id))})`,
+  );
+  if (asignadas === null) return null;
 
   const recibido = new Map<string, number>();
   for (const r of recepciones as Array<{ po_id: string; mpn: string; cantidad: number }>) {
     recibido.set(`${r.po_id}|${r.mpn}`, (recibido.get(`${r.po_id}|${r.mpn}`) ?? 0) + Number(r.cantidad));
+  }
+  const asignado = new Map<string, number>();
+  for (const a of asignadas as Array<{ po_id: string; mpn: string; cantidad: number }>) {
+    asignado.set(`${a.po_id}|${a.mpn}`, (asignado.get(`${a.po_id}|${a.mpn}`) ?? 0) + Number(a.cantidad));
   }
   const numero = new Map((cots as Array<{ quote_id: string; version: string; numero: number | null }>).map((c) => [`${c.quote_id}:${c.version}`, c.numero]));
 
@@ -63,7 +73,8 @@ export async function cargarVistaCompras(hoy: string = hoySantiago()): Promise<V
   return {
     porComprar: vistas.filter((c) => estado(c) === 'por_comprar'),
     enCurso: vistas.filter((c) => ['comprada', 'por_retirar', 'en_camino', 'directo_al_cliente', 'recibida_parcial'].includes(estado(c))),
-    recibidas: vistas.filter((c) => estado(c) === 'recibida'),
+    recibidas: vistas.filter((c) => estado(c) === 'recibida'
+      && c.lineas.some((l) => (asignado.get(`${c.fila.po_id}|${l.clave}`) ?? 0) < l.cantidad)),
     atrasadas: vistas.filter((c) => c.atrasada).length,
   };
 }

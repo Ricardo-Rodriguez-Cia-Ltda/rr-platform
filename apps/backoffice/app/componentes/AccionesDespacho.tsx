@@ -1,6 +1,6 @@
 'use client';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { mensajeError } from '../../src/lib/errores-api.js';
 
 type Transicion = { hacia: string; label: string; peligro?: boolean };
@@ -15,9 +15,17 @@ function transiciones(estado: string, modalidad: string): Transicion[] {
   }
 }
 
-export function AccionesDespacho({ id, estado, modalidad, numeroSeguimiento, costo, cobrado, cobroPagado, mensaje }: {
+export interface DatosDespacho {
+  direccion: string | null; comuna: string | null; ciudad: string | null;
+  contacto_nombre: string | null; contacto_telefono: string | null;
+  fecha_programada: string | null; responsable: string | null; nota: string | null;
+}
+const CAMPOS_DATOS = ['direccion', 'comuna', 'ciudad', 'contacto_nombre', 'contacto_telefono', 'fecha_programada', 'responsable', 'nota'] as const;
+
+export function AccionesDespacho({ id, estado, modalidad, numeroSeguimiento, costo, cobrado, cobroPagado, mensaje, datos }: {
   id: number; estado: string; modalidad: string; numeroSeguimiento: string | null;
   costo: number | null; cobrado: number | null; cobroPagado: boolean; mensaje: string | null;
+  datos: DatosDespacho;
 }) {
   const router = useRouter();
   const [ocupado, setOcupado] = useState(false);
@@ -44,7 +52,11 @@ export function AccionesDespacho({ id, estado, modalidad, numeroSeguimiento, cos
     catch { setAviso(''); setTextoManual(mensaje); }
   }
 
-  function guardar(form: FormData) {
+  // onSubmit en vez de action={fn}: un form action de React 19 resetea los
+  // campos no controlados aunque la peticion falle.
+  async function guardar(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
     const cambio: Record<string, unknown> = { id };
     for (const k of ['numero_seguimiento', 'costo_clp', 'cobrado_clp', 'responsable', 'fecha_programada', 'nota']) {
       if (!form.has(k)) continue;
@@ -52,7 +64,16 @@ export function AccionesDespacho({ id, estado, modalidad, numeroSeguimiento, cos
       cambio[k] = k.endsWith('_clp') ? (v ? Number(v) : null) : v;
     }
     cambio.cobro_pagado = form.get('cobro_pagado') === 'on';
-    void post('/api/despachos/editar', cambio);
+    await post('/api/despachos/editar', cambio);
+  }
+
+  // Se mandan todos los campos: uno vacio borra el dato.
+  async function editarDatos(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const cambio: Record<string, unknown> = { id };
+    for (const k of CAMPOS_DATOS) if (form.has(k)) cambio[k] = String(form.get(k) ?? '').trim();
+    await post('/api/despachos/editar', cambio);
   }
 
   const cerrado = estado === 'entregado' || estado === 'anulado';
@@ -67,13 +88,33 @@ export function AccionesDespacho({ id, estado, modalidad, numeroSeguimiento, cos
         ))}
         {mensaje ? <button disabled={ocupado} className="secundario" onClick={copiar}>Copiar mensaje</button> : null}
       </div>
-      <form className="formulario compacto" action={guardar}>
+      <form className="formulario compacto" onSubmit={guardar}>
         {!cerrado && modalidad === 'courier' ? <label>N° seguimiento<input name="numero_seguimiento" defaultValue={numeroSeguimiento ?? ''} /></label> : null}
         <label>Costo (CLP)<input name="costo_clp" type="number" min={0} defaultValue={costo ?? ''} /></label>
         <label>Cobrado (CLP)<input name="cobrado_clp" type="number" min={0} defaultValue={cobrado ?? ''} /></label>
         <label className="check"><input name="cobro_pagado" type="checkbox" defaultChecked={cobroPagado} /> Envío pagado</label>
         <button disabled={ocupado} className="secundario">Guardar</button>
       </form>
+      {!cerrado ? (
+        <details className="editar">
+          <summary>Editar datos del despacho</summary>
+          <form className="formulario" onSubmit={editarDatos}>
+            {modalidad !== 'retiro_oficina' ? (
+              <>
+                <label className="ancho">Dirección<input name="direccion" defaultValue={datos.direccion ?? ''} /></label>
+                <label>Comuna<input name="comuna" defaultValue={datos.comuna ?? ''} /></label>
+                <label>Ciudad<input name="ciudad" defaultValue={datos.ciudad ?? ''} /></label>
+              </>
+            ) : null}
+            <label>Contacto<input name="contacto_nombre" defaultValue={datos.contacto_nombre ?? ''} /></label>
+            <label>Teléfono<input name="contacto_telefono" defaultValue={datos.contacto_telefono ?? ''} /></label>
+            <label>Fecha programada<input name="fecha_programada" type="date" defaultValue={datos.fecha_programada ?? ''} /></label>
+            <label>Responsable<input name="responsable" defaultValue={datos.responsable ?? ''} /></label>
+            <label className="ancho">Nota<input name="nota" defaultValue={datos.nota ?? ''} /></label>
+            <button disabled={ocupado}>Guardar cambios</button>
+          </form>
+        </details>
+      ) : null}
       {aviso ? <span className={aviso === 'Mensaje copiado' ? 'aviso-ok' : 'aviso-error'}>{aviso}</span> : null}
       {textoManual ? (
         <div className="copiar-manual">

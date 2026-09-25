@@ -17,7 +17,8 @@ export function FormularioDespacho({ quoteId, version, pendientes, facturacion, 
 
   async function crear(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const form = new FormData(e.currentTarget);
+    const el = e.currentTarget;
+    const form = new FormData(el);
     const lineas = pendientes
       .map((p) => ({ po_id: p.poId, mpn: p.clave, cantidad: Number(form.get(`cant-${p.poId}-${p.clave}`) ?? 0) }))
       .filter((l) => l.cantidad > 0);
@@ -32,6 +33,11 @@ export function FormularioDespacho({ quoteId, version, pendientes, facturacion, 
     if (!res?.ok) {
       const data = await res?.json().catch(() => ({})) ?? {};
       setError(mensajeError(data));
+    } else {
+      // Solo tras crear con exito: si falla, lo escrito se conserva para
+      // corregirlo. Sin esto, costo, cobro y nota del despacho recien creado
+      // quedaban escritos para el siguiente del mismo pedido.
+      el.reset();
     }
     router.refresh();
   }
