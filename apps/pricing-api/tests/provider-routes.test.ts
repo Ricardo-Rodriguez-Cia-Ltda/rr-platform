@@ -101,10 +101,10 @@ afterEach(() => {
 describe('rutas /api/{proveedor}/...', () => {
   // El alias /api/search ya no es un espejo de /api/intcomex/search: compara
   // los tres mayoristas y agrega `proveedor` al ganador. Con solo Intcomex
-  // configurado en este test, tecnoglobal e ingram fallan por credenciales
-  // (capturado por cotizarLote como `incompleto`), asi que el alias devuelve
-  // el mismo producto que la ruta de Intcomex mas `proveedor` y `parcial`.
-  it('el alias /api/search compara los tres mayoristas y agrega proveedor + parcial sobre lo que ya da /api/intcomex/search', async () => {
+  // configurado en este test, tecnoglobal e ingram se dejan fuera (sin
+  // credenciales no se consultan), asi que el alias devuelve el mismo
+  // producto que la ruta de Intcomex mas `proveedor`, sin `parcial`.
+  it('el alias /api/search compara los mayoristas configurados y agrega proveedor sobre lo que ya da /api/intcomex/search', async () => {
     const resAlias = makeRes();
     await aliasSearch(makeReq({ q: 'probook' }, AUTH), resAlias);
 
@@ -120,7 +120,6 @@ describe('rutas /api/{proveedor}/...', () => {
     expect(resAlias.statusCode).toBe(resByRoute.statusCode);
     expect(resAlias.body).toEqual({
       ...resByRoute.body,
-      parcial: true,
       productos: resByRoute.body.productos.map((p: any) => ({ ...p, proveedor: 'intcomex' })),
     });
   });

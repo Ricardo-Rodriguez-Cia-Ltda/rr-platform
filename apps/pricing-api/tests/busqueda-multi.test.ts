@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { NormalizedProduct } from '@rr/domain/product';
 import type { PriceInfo } from '@rr/domain/types';
-import { agruparCoincidencias, elegirGanador } from '../src/handlers/busqueda-multi.js';
+import { agruparCoincidencias, completarGrupos, elegirGanador } from '../src/handlers/busqueda-multi.js';
 
 function prod(sku: string, mpn: string | null, marca: string | null, nombre = sku): NormalizedProduct {
   return { sku, mpn, nombre, marca, categoria: 'Componentes', subcategorias: [], tipo: null };
@@ -64,5 +64,24 @@ describe('elegirGanador', () => {
       { product: prod('I1', 'X1', 'HP'), score: 1 }, { product: prod('I2', 'X-1', 'HP'), score: 1 },
     ] }])[0];
     expect(elegirGanador(dos, { intcomex: new Map([['I1', precio(20, 5)], ['I2', precio(18, 5)]]) })?.sku).toBe('I2');
+  });
+});
+
+describe('completarGrupos', () => {
+  it('suma todo producto del catalogo con la misma clave y deja igual los grupos sin clave', () => {
+    const grupos = agruparCoincidencias([
+      { proveedor: 'ingram', matches: [{ product: prod('G1', 'BX8071514100F', 'INTEL CORP'), score: 5 }] },
+      { proveedor: 'intcomex', matches: [{ product: prod('I9', null, 'HP'), score: 1 }] },
+    ]);
+    const completos = completarGrupos(grupos, [
+      { proveedor: 'intcomex', catalogo: [prod('I1', 'BX80715-14100F', 'Intel'), prod('I9', null, 'HP')] },
+      { proveedor: 'ingram', catalogo: [prod('G1', 'BX8071514100F', 'INTEL CORP'), prod('G2', 'BX8071514100F', 'Intel')] },
+    ]);
+    expect(completos[0].porProveedor.intcomex.map((p) => p.sku)).toEqual(['I1']);
+    expect(completos[0].porProveedor.ingram.map((p) => p.sku)).toEqual(['G1', 'G2']);
+    expect(completos[0].representante.sku).toBe('I1');
+    expect(completos[1]).toBe(grupos[1]);
+    // El grupo original no se toca.
+    expect(Object.keys(grupos[0].porProveedor)).toEqual(['ingram']);
   });
 });

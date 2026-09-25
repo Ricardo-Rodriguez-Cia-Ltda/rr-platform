@@ -24,8 +24,8 @@ function conLimite<T>(promesa: Promise<T>, deadline: number): Promise<T> {
 // Cotiza los SKU de UN mayorista para la busqueda: cache fresco primero, lo
 // pendiente en vivo en lotes paralelos cortados por un mismo limite de reloj,
 // y lo que falle se rescata del cache utilizable. Misma politica que el
-// handler de un mayorista (ver search.ts), sin la sonda: aca se cotizan los
-// candidatos de los tres mayoristas a la vez.
+// handler de un mayorista (ver search.ts). La sonda vive en search-multi.ts:
+// cada ronda llama a esta funcion una vez por mayorista.
 export async function cotizarLote(provider: Provider, skus: string[], deadline: number): Promise<ResultadoLote> {
   const unicos = [...new Set(skus)];
   const precios = new Map<string, PriceInfo>();

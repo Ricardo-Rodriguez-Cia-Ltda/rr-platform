@@ -65,7 +65,58 @@ describe('GET /search (tres mayoristas)', () => {
     expect(r.statusCode).toBe(200);
     expect(r.body.total).toBe(1);
     expect(r.body.productos).toHaveLength(1);
-    expect(r.body.productos[0]).toMatchObject({ sku: 'G1', proveedor: 'ingram', precio: 93.49, stock: 16, moneda: 'USD' });
+    // Lo que se cobra es del ganador; lo descriptivo, del representante (Intcomex).
+    expect(r.body.productos[0]).toMatchObject({
+      sku: 'G1', proveedor: 'ingram', precio: 93.49, stock: 16, moneda: 'USD',
+      nombre: 'Intel Core i5 14100F', marca: 'Intel', categoria: 'Procesadores', mpn: 'BX8071514100F',
+    });
+  });
+
+  it('completa el grupo con la misma clave aunque el otro mayorista no calce por texto ni categoria', async () => {
+    catalogos.intcomex = [prod('I1', 'CF258A', 'Toner negro 58A', 'HP', 'Toner')];
+    catalogos.ingram = [prod('G1', 'CF258A', 'HP 58A BLACK LJ CARTRIDGE', 'HP INC', 'Supplies & Accessories')];
+    const ingram = proveedor('ingram', { G1: P(40, 5) });
+    const h = createMultiSearchHandler({ intcomex: proveedor('intcomex', { I1: P(50, 3) }), ingram });
+    const r = res();
+    await h(req({ q: 'toner', categoria: 'Toner', solo_con_stock: 'true' }), r);
+    expect(r.statusCode).toBe(200);
+    expect(r.body.total).toBe(1);
+    expect(r.body.productos[0]).toMatchObject({ sku: 'G1', proveedor: 'ingram', precio: 40, nombre: 'Toner negro 58A', categoria: 'Toner' });
+    expect(ingram.getPrices).toHaveBeenCalledWith(['G1']);
+  });
+
+  it('no cotiza la segunda ronda si la sonda ya junta el limite', async () => {
+    catalogos.intcomex = Array.from({ length: 80 }, (_, i) => prod(`I${i}`, `M${i}`, `Toner ${i}`, 'HP', 'Toner'));
+    const precios = Object.fromEntries(catalogos.intcomex.map((p) => [p.sku, P(10, 5)]));
+    const intcomex = proveedor('intcomex', precios);
+    const r = res();
+    await createMultiSearchHandler({ intcomex })(req({ q: 'toner', marca: 'HP', solo_con_stock: 'true', limite: '10' }), r);
+    expect(r.body.productos).toHaveLength(10);
+    expect(r.body.evaluados).toBe(50);
+    expect(vi.mocked(intcomex.getPrices).mock.calls.flatMap(([skus]) => skus)).toHaveLength(50);
+  });
+
+  it('cotiza la segunda ronda si la sonda no junta el limite', async () => {
+    catalogos.intcomex = Array.from({ length: 80 }, (_, i) => prod(`I${i}`, `M${i}`, `Toner ${i}`, 'HP', 'Toner'));
+    // Los 50 primeros no tienen stock; recien en la segunda ronda aparecen.
+    const precios = Object.fromEntries(catalogos.intcomex.map((p, i) => [p.sku, P(10, i < 50 ? 0 : 5)]));
+    const intcomex = proveedor('intcomex', precios);
+    const r = res();
+    await createMultiSearchHandler({ intcomex })(req({ q: 'toner', marca: 'HP', solo_con_stock: 'true', limite: '10' }), r);
+    expect(r.body.productos).toHaveLength(10);
+    expect(r.body.evaluados).toBe(80);
+    expect(vi.mocked(intcomex.getPrices).mock.calls.flatMap(([skus]) => skus)).toHaveLength(80);
+  });
+
+  it('ignora mayoristas sin configurar', async () => {
+    catalogos.intcomex = [prod('I1', 'A1', 'Toner negro', 'HP', 'Toner')];
+    catalogos.ingram = [prod('G1', 'A1', 'Toner negro', 'HP', 'Toner')];
+    const ingram = { ...proveedor('ingram', { G1: P(1, 9) }), isConfigured: () => false } as Provider;
+    const r = res();
+    await createMultiSearchHandler({ intcomex: proveedor('intcomex', { I1: P(50, 3) }), ingram })(req({ q: 'toner' }), r);
+    expect(r.body.productos[0].proveedor).toBe('intcomex');
+    expect(r.body.parcial).toBeUndefined();
+    expect(ingram.getPrices).not.toHaveBeenCalled();
   });
 
   it('aplica solo_con_stock y precio_max al ganador', async () => {

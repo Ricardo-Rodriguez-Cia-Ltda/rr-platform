@@ -3,13 +3,25 @@ import { fotoDe } from '@rr/providers/fotos/indice';
 import { computeFacets, search } from '@rr/domain/search';
 import type { NormalizedProduct } from '@rr/domain/product';
 import type { PriceInfo, Provider } from '@rr/domain/types';
-import { agruparCoincidencias, elegirGanador } from './busqueda-multi.js';
+import { agruparCoincidencias, completarGrupos, elegirGanador, type GrupoBusqueda } from './busqueda-multi.js';
 import { cotizarLote } from './cotizar-lote.js';
 import {
-  MAX_CANDIDATOS_CON_FILTROS, MAX_CANDIDATOS_SIN_FILTROS, PRESUPUESTO_MS, UMBRAL_AMBIGUEDAD,
+  MAX_CANDIDATOS_CON_FILTROS, MAX_CANDIDATOS_SIN_FILTROS, UMBRAL_AMBIGUEDAD,
   explainEmpty, leerParametrosBusqueda, type Cotizado,
 } from './search.js';
 import type { Handler } from './types.js';
+
+// Presupuesto de reloj de /search, contado desde que llega el pedido (no desde
+// que se termino de buscar en los catalogos). Es menor que los 20 s del
+// handler de un mayorista porque la tienda aborta su fetch a los 21 s
+// (apps/tienda/src/lib/catalogo.ts) y entre medio esta el salto del tunel:
+// con 18 s la respuesta parcial alcanza a llegar en vez de un "sin resultados".
+export const PRESUPUESTO_BUSQUEDA_MULTI_MS = 18000;
+
+// Grupos que se cotizan en la sonda. Si con ellos ya se junta `limite`, el
+// resto de los candidatos no se cotiza: Ingram comparte su cuota con la
+// cotizacion (/mejor-precio) y no conviene gastarla de mas.
+export const GRUPOS_SONDA = MAX_CANDIDATOS_SIN_FILTROS;
 
 function catalogoDe(nombre: string): NormalizedProduct[] | null {
   try {
@@ -25,11 +37,13 @@ function catalogoDe(nombre: string): NormalizedProduct[] | null {
 // docs/superpowers/specs/2026-09-25-busqueda-multi-proveedor-design.md.
 export function createMultiSearchHandler(providers: Record<string, Provider>): Handler {
   return async function handler(req, res): Promise<void> {
+    const deadline = Date.now() + PRESUPUESTO_BUSQUEDA_MULTI_MS;
     const params = leerParametrosBusqueda(req, res);
     if (!params) return;
     const { q, marca, categoria, subcategoria, onlyWithStock, maxPrice, limit } = params;
 
     const cargados = Object.values(providers)
+      .filter((provider) => provider.isConfigured())
       .map((provider) => ({ provider, catalogo: catalogoDe(provider.name) }))
       .filter((c): c is { provider: Provider; catalogo: NormalizedProduct[] } => c.catalogo !== null);
     if (cargados.length === 0) {
@@ -53,47 +67,87 @@ export function createMultiSearchHandler(providers: Record<string, Provider>): H
     }
 
     const hayFiltros = onlyWithStock || Number.isFinite(maxPrice);
-    const candidatos = grupos.slice(0, hayFiltros ? MAX_CANDIDATOS_CON_FILTROS : MAX_CANDIDATOS_SIN_FILTROS);
-
-    const skusDe: Record<string, string[]> = {};
-    for (const g of candidatos) {
-      for (const [proveedor, productos] of Object.entries(g.porProveedor)) {
-        (skusDe[proveedor] ??= []).push(...productos.map((p) => p.sku));
-      }
-    }
-    const deadline = Date.now() + PRESUPUESTO_MS;
-    const lotes = await Promise.all(
-      cargados.map(async ({ provider }) => ({ nombre: provider.name, ...(await cotizarLote(provider, skusDe[provider.name] ?? [], deadline)) })),
+    const candidatos = completarGrupos(
+      grupos.slice(0, hayFiltros ? MAX_CANDIDATOS_CON_FILTROS : MAX_CANDIDATOS_SIN_FILTROS),
+      cargados.map(({ provider, catalogo }) => ({ proveedor: provider.name, catalogo })),
     );
-    const precios: Record<string, Map<string, PriceInfo>> = Object.fromEntries(lotes.map((l) => [l.nombre, l.precios]));
-    const parcial = lotes.some((l) => l.incompleto);
-    const maxAgeMs = Math.max(0, ...lotes.map((l) => l.maxAgeMs));
+
+    const precios: Record<string, Map<string, PriceInfo>> = Object.fromEntries(cargados.map(({ provider }) => [provider.name, new Map()]));
+    let parcial = false;
+    let maxAgeMs = 0;
+    const conSkus = new Set<string>();
+    const respondieron = new Set<string>();
+
+    // Una ronda cotiza los SKU de sus grupos en los tres mayoristas a la vez,
+    // con el mismo limite de reloj para todas las rondas.
+    const cotizarRonda = async (ronda: GrupoBusqueda[]): Promise<void> => {
+      const skusDe: Record<string, string[]> = {};
+      for (const g of ronda) {
+        for (const [proveedor, productos] of Object.entries(g.porProveedor)) {
+          (skusDe[proveedor] ??= []).push(...productos.map((p) => p.sku));
+        }
+      }
+      const lotes = await Promise.all(
+        cargados.map(async ({ provider }) => ({ nombre: provider.name, ...(await cotizarLote(provider, skusDe[provider.name] ?? [], deadline)) })),
+      );
+      for (const l of lotes) {
+        for (const [sku, p] of l.precios) precios[l.nombre].set(sku, p);
+        if (l.incompleto) parcial = true;
+        maxAgeMs = Math.max(maxAgeMs, l.maxAgeMs);
+        if ((skusDe[l.nombre] ?? []).length > 0) {
+          conSkus.add(l.nombre);
+          if (!l.fallaTotal) respondieron.add(l.nombre);
+        }
+      }
+    };
 
     const evaluados: Cotizado[] = [];
     const productos: Cotizado[] = [];
-    for (const g of candidatos) {
-      const ganador = elegirGanador(g, precios);
-      if (!ganador) continue;
-      const cotizado: Cotizado = {
-        sku: ganador.sku,
-        mpn: ganador.producto.mpn,
-        nombre: ganador.producto.nombre,
-        marca: ganador.producto.marca,
-        categoria: ganador.producto.categoria,
-        precio: ganador.precio,
-        moneda: ganador.moneda,
-        stock: ganador.stock,
-        foto: fotoDe(ganador.producto),
-        proveedor: ganador.proveedor,
-      };
-      evaluados.push(cotizado);
-      if (cotizado.precio > maxPrice) continue;
-      if (onlyWithStock && (cotizado.stock ?? 0) <= 0) continue;
-      if (productos.length < limit) productos.push(cotizado);
+    const procesar = (ronda: GrupoBusqueda[]): void => {
+      for (const g of ronda) {
+        const ganador = elegirGanador(g, precios);
+        if (!ganador) continue;
+        // Lo descriptivo sale del representante (Intcomex si esta): sus nombres
+        // y categorias son los que entienden la tienda y explainEmpty. Lo que
+        // se cobra sale del ganador.
+        const rep = g.representante;
+        const cotizado: Cotizado = {
+          sku: ganador.sku,
+          mpn: rep.mpn,
+          nombre: rep.nombre,
+          marca: rep.marca,
+          categoria: rep.categoria,
+          precio: ganador.precio,
+          moneda: ganador.moneda,
+          stock: ganador.stock,
+          foto: fotoDe(rep),
+          proveedor: ganador.proveedor,
+        };
+        evaluados.push(cotizado);
+        if (cotizado.precio > maxPrice) continue;
+        if (onlyWithStock && (cotizado.stock ?? 0) <= 0) continue;
+        if (productos.length < limit) productos.push(cotizado);
+      }
+    };
+
+    // Sonda: los primeros grupos van solos. Solo si no juntan `limite`, queda
+    // tiempo y hay mas candidatos, se cotiza el resto en una segunda ronda.
+    const sonda = candidatos.slice(0, GRUPOS_SONDA);
+    const resto = candidatos.slice(GRUPOS_SONDA);
+    await cotizarRonda(sonda);
+    procesar(sonda);
+    if (productos.length < limit && resto.length > 0) {
+      if (Date.now() < deadline) {
+        await cotizarRonda(resto);
+        procesar(resto);
+      } else {
+        // Quedaron candidatos sin mirar: no se puede afirmar que no haya.
+        parcial = true;
+      }
     }
 
     // Nada para mostrar y ningun mayorista respondio: el mismo 502 de hoy.
-    if (evaluados.length === 0 && candidatos.length > 0 && lotes.filter((l) => (skusDe[l.nombre] ?? []).length > 0).every((l) => l.fallaTotal)) {
+    if (evaluados.length === 0 && candidatos.length > 0 && [...conSkus].every((p) => !respondieron.has(p))) {
       res.status(502).json({ error: 'upstream', detail: 'Ningun mayorista respondio a tiempo' });
       return;
     }
