@@ -187,6 +187,12 @@ cada producto muestra un solo ganador, elegido con el **mismo criterio que
 más barato con stock desconocido; recién al final, más barato sin stock). El
 campo `proveedor` en cada producto dice cuál mayorista ganó.
 
+El texto y los filtros (`q`, `marca`, `categoria`, `subcategoria`) deciden
+**qué productos** aparecen. El precio de cada uno, en cambio, compara **todo**
+lo que los mayoristas venden con la misma clave (MPN + marca), aunque en su
+catálogo tenga otro nombre u otra categoría, igual que `/mejor-precio`. Solo
+participan los mayoristas con credenciales configuradas.
+
 ### Parámetros (query string)
 
 | Parámetro | Tipo | Req. | Default | Notas |
@@ -240,9 +246,12 @@ Los tres contadores significan cosas distintas y se confunden con facilidad:
 - **`productos`** — los que además pasaron `precio_max` y `solo_con_stock`.
   Como máximo `limite`.
 
-Campos de cada producto: `mpn`, `nombre`, `marca`, `categoria` y `stock` pueden
-ser `null` (el catálogo del mayorista ganador no siempre los trae). `sku`,
-`precio` y `moneda` siempre vienen, y son del **mayorista ganador**: dos
+Campos de cada producto: `mpn`, `nombre`, `marca`, `categoria` y `foto` salen
+del producto que representa al grupo (el de Intcomex si lo vende; si no, el
+del mayorista que mejor calzó con la búsqueda), así que no cambian cuando
+cambia el ganador. Pueden ser `null`, igual que `stock`. `sku`, `precio`,
+`moneda` y `stock` son del **mayorista ganador**; `sku`, `precio` y `moneda`
+siempre vienen: dos
 llamadas al mismo producto pueden devolver un `sku` distinto si cambió quién
 tiene el mejor precio. `proveedor` es el nombre del mayorista ganador
 (`intcomex`, `tecnoglobal` o `ingram`) — campo que **solo informa `/search`**,
@@ -334,13 +343,17 @@ ofrecía una mochila a quien buscó un notebook.
 ### `parcial`
 
 Cotizar es ir al mayorista, y con filtros activos la API recorre hasta 300
-candidatos. El primer lote va solo, como sonda; si no basta, el resto se cotiza
-**en una ronda paralela**, así que el peor caso honesto son ~2 lotes de reloj
-(~15 s con el mayorista lento, 2-3 s en un día normal). Hay además un
-presupuesto de **20 segundos**: si la sonda sola ya proyecta pasarse, la ronda
-no se lanza, la respuesta trae `parcial: true` y el recorrido queda a medias —
-lo mismo si un lote de la ronda falla. `evaluados` dice cuántos alcanzó a
-cotizar.
+candidatos. Los primeros 50 productos van solos, como sonda, cotizados en los
+tres mayoristas a la vez; si no bastan para juntar `limite`, el resto se
+cotiza **en una segunda ronda**, con sus lotes en paralelo. Las dos rondas
+comparten un presupuesto de **18 segundos** contados desde que llega el pedido
+(la tienda corta a los 21 s): un lote que no responde a tiempo se rescata del
+caché si se puede, y si no queda tiempo para la segunda ronda no se lanza. En
+esos casos, o si un mayorista falla, la respuesta trae `parcial: true` y el
+recorrido queda a medias. `evaluados` dice cuántos alcanzó a cotizar.
+
+En `/{proveedor}/search` (un solo mayorista) la sonda es el primer lote y el
+presupuesto es de 20 segundos.
 
 Una respuesta `parcial` no es un error, y sobre todo no autoriza a afirmar que
 algo no existe: solo se sabe de los `evaluados`.

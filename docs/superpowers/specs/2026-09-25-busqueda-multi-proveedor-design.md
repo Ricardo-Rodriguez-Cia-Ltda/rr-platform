@@ -52,7 +52,12 @@ ejemplo del Lenovo 10NQ0017CS sigue con el precio de Intcomex).
    mayor puntaje).
 5. El umbral de "demasiado amplio" (más de 25 grupos sin filtros) y los topes
    de candidatos (50 sin filtros, 300 con filtros) se aplican sobre grupos.
-6. Si ningún mayorista tiene catálogo cargado: 503 `catalogo_no_disponible`.
+6. Tras el corte, cada grupo con clave se **completa** con todos los productos
+   de cada catálogo que tengan esa misma clave, calcen o no con el texto o la
+   categoría (lo mismo que hace `compareByKey` al cotizar). Un índice por clave
+   se arma una vez por catálogo. Los grupos sin clave de Intcomex quedan igual.
+7. Solo participan los mayoristas configurados (`isConfigured()`). Si ninguno
+   tiene catálogo cargado: 503 `catalogo_no_disponible`.
 
 ### Precios
 
@@ -62,10 +67,16 @@ ejemplo del Lenovo 10NQ0017CS sigue con el precio de Intcomex).
   `maxSkusPerBatch` **en paralelo**; si un lote falla o no alcanza a responder
   antes del límite, se rescata del caché utilizable (24 h) y lo que ni ahí
   está queda sin precio y marca la búsqueda como `parcial`.
-- Los tres mayoristas se cotizan en paralelo con un solo límite de reloj:
-  20 s desde que empezó la cotización (el mismo presupuesto de hoy).
-- Tecnoglobal no gasta llamadas (su `getPrices` usa el volcado local); Ingram
-  gasta una llamada por cada 50 SKU.
+- Sonda: primero se cotizan los 50 primeros grupos (una ronda en los tres
+  mayoristas a la vez). Solo si no juntan `limite`, hay más candidatos y
+  queda tiempo, se cotiza el resto en una segunda ronda. Si no queda tiempo,
+  la respuesta sale `parcial`.
+- Las dos rondas comparten un solo límite de reloj: 18 s desde que llega el
+  pedido (la tienda aborta a los 21 s y está el salto del túnel).
+- Tecnoglobal: con 5 SKU o menos cotiza en vivo uno por uno (~1,5 s cada
+  uno); con más lee el volcado local, que si está vencido (1 h) dispara una
+  descarga completa con cuota limitada. Ingram gasta una llamada por cada
+  50 SKU, de la misma cuota que usa `/mejor-precio`.
 
 ### Ganador por producto
 
@@ -75,8 +86,9 @@ ejemplo del Lenovo 10NQ0017CS sigue con el precio de Intcomex).
   stock; si ninguno tiene stock informado, el más barato con stock
   desconocido; si todos tienen stock 0, el más barato.
 - El producto devuelto usa el SKU, precio, moneda y stock del ganador, y suma
-  el campo `proveedor`. Nombre, marca y categoría salen del producto del
-  mayorista ganador; `foto` se resuelve por la clave como hoy.
+  el campo `proveedor`. Nombre, marca, categoría, MPN y `foto` salen del
+  representante del grupo (Intcomex si está): sus nombres y categorías son
+  los que entienden la tienda y `explainEmpty`.
 - Los filtros `precio_max` y `solo_con_stock` se aplican al ganador, igual que
   hoy se aplican al precio de Intcomex.
 
