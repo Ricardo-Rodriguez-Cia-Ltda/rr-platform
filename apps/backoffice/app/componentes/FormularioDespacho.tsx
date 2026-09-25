@@ -1,6 +1,7 @@
 'use client';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { mensajeError } from '../../src/lib/errores-api.js';
 
 type Pendiente = { poId: string; clave: string; nombre: string; pendiente: number; recibida: number };
 
@@ -28,7 +29,7 @@ export function FormularioDespacho({ quoteId, version, pendientes, facturacion, 
     setOcupado(false);
     if (!res?.ok) {
       const data = await res?.json().catch(() => ({})) ?? {};
-      setError(String(data.detalle ?? data.error ?? 'No se pudo crear el despacho.'));
+      setError(mensajeError(data));
     }
     router.refresh();
   }

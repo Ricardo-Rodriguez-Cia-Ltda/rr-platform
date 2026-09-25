@@ -1,6 +1,7 @@
 'use client';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { mensajeError } from '../../src/lib/errores-api.js';
 
 type Transicion = { hacia: string; label: string; peligro?: boolean };
 function transiciones(estado: string, modalidad: string): Transicion[] {
@@ -28,7 +29,7 @@ export function AccionesDespacho({ id, estado, modalidad, numeroSeguimiento, cos
     setOcupado(false);
     if (!res?.ok) {
       const data = await res?.json().catch(() => ({})) ?? {};
-      setAviso(Array.isArray(data.faltan) ? `Falta recibir: ${data.faltan.join(', ')}` : String(data.detalle ?? data.error ?? 'No se pudo guardar.'));
+      setAviso(mensajeError(data));
     }
     router.refresh();
   }

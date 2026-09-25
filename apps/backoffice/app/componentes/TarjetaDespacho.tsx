@@ -11,7 +11,7 @@ export function TarjetaDespacho({ despacho: d, pedido }: { despacho: Despacho; p
   const seguimiento = courier && d.numero_seguimiento ? courier.urlSeguimiento(d.numero_seguimiento) : null;
   const nombre = (poId: string, mpn: string) => pedido.resumen.find((r) => r.poId === poId && r.clave === mpn)?.nombre ?? mpn;
   return (
-    <div className="tarjeta despacho">
+    <div className="tarjeta despacho" id={`despacho-${d.id}`}>
       <header>
         <span><b>Despacho N° {d.id}</b> · {pedido.cliente}{pedido.numeroCotizacion ? ` · Pedido N° ${pedido.numeroCotizacion}` : ''}</span>
         <span className={`badge ${d.estado}`}>{d.estado.replace('_', ' ')}</span>

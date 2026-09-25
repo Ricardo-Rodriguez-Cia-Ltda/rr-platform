@@ -1,6 +1,7 @@
 'use client';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { mensajeError } from '../../src/lib/errores-api.js';
 
 type Linea = { clave: string; nombre: string; cantidad: number; recibida: number };
 const SIGUIENTE: Record<string, { hacia: string; label: string }> = {
@@ -9,24 +10,29 @@ const SIGUIENTE: Record<string, { hacia: string; label: string }> = {
   directo_cliente: { hacia: 'directo_al_cliente', label: 'Despachado directo al cliente' },
 };
 const RECIBE = ['comprada', 'por_retirar', 'en_camino', 'recibida_parcial'];
+const AVISO_ESTADO_NO_ACTUALIZADO = 'La recepción quedó registrada, pero el estado de la compra no se actualizó. Recarga en un momento.';
 
-async function enviar(ruta: string, body: unknown): Promise<string | null> {
+async function enviar(ruta: string, body: unknown): Promise<{ error: string | null; aviso: string | null }> {
   const res = await fetch(ruta, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).catch(() => null);
-  if (res?.ok) return null;
   const data = await res?.json().catch(() => ({})) ?? {};
-  return String(data.detalle ?? data.error ?? 'No se pudo guardar. Intenta de nuevo.');
+  if (res?.ok) {
+    return { error: null, aviso: data.aviso === 'estado_no_actualizado' ? AVISO_ESTADO_NO_ACTUALIZADO : null };
+  }
+  return { error: mensajeError(data), aviso: null };
 }
 
 export function AccionesCompra({ poId, estado, modalidad, lineas }: { poId: string; estado: string; modalidad: string | null; lineas: Linea[] }) {
   const router = useRouter();
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState('');
+  const [aviso, setAviso] = useState('');
 
   async function correr(ruta: string, body: unknown) {
-    setOcupado(true); setError('');
-    const e = await enviar(ruta, body);
+    setOcupado(true); setError(''); setAviso('');
+    const r = await enviar(ruta, body);
     setOcupado(false);
-    if (e) setError(e);
+    if (r.error) setError(r.error);
+    else if (r.aviso) setAviso(r.aviso);
     router.refresh();
   }
 
@@ -83,6 +89,7 @@ export function AccionesCompra({ poId, estado, modalidad, lineas }: { poId: stri
       ) : null}
 
       {error ? <span className="aviso-error">{error}</span> : null}
+      {aviso ? <span className="aviso-ok">{aviso}</span> : null}
     </div>
   );
 }
