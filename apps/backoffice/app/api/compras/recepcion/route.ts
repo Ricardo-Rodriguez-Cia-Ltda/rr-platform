@@ -43,7 +43,13 @@ export async function POST(req: Request): Promise<Response> {
   if (nuevo !== f.estado_compra) {
     // Condicional: si otra recepcion ya lo movio, su escritura manda; la
     // recepcion quedo registrada igual.
-    await supabasePatch(`/pedidos?po_id=eq.${encodeURIComponent(poId)}&estado_compra=eq.${f.estado_compra}`, { estado_compra: nuevo });
+    const res = await supabasePatch(`/pedidos?po_id=eq.${encodeURIComponent(poId)}&estado_compra=eq.${f.estado_compra}`, { estado_compra: nuevo });
+    if (res === null) {
+      // La recepcion ya quedo registrada; reintentar duplicaria la fila. No
+      // se devuelve 503: se avisa que el estado de la OC no se pudo mover.
+      console.error('[compras] recepcion registrada pero no se pudo actualizar el estado', { poId, nuevo });
+      return json({ ok: true, estado: f.estado_compra, aviso: 'estado_no_actualizado' });
+    }
   }
   return json({ ok: true, estado: nuevo });
 }

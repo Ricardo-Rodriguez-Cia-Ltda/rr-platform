@@ -112,4 +112,15 @@ describe('POST /api/compras/recepcion', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ estado: 'recibida' });
   });
+  it('la recepcion queda registrada aunque el PATCH de estado falle: 200 con aviso y estado previo', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    conDatos('por_retirar', []);
+    supabasePost.mockResolvedValue([{ id: 4 }]);
+    supabasePatch.mockResolvedValue(null);
+    const res = await recepcion(req({ po_id: 'oc-1', mpn: 'A', cantidad: 2 }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, estado: 'por_retirar', aviso: 'estado_no_actualizado' });
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
 });
