@@ -239,6 +239,24 @@ describe('docs/api sigue el codigo: constantes citadas', () => {
   });
 });
 
+describe('docs/sql/2026-09-25-despachos.sql', () => {
+  const sql = readFileSync('docs/sql/2026-09-25-despachos.sql', 'utf8');
+  it('declara las columnas de compra, las cuatro tablas y la funcion crear_despacho', () => {
+    for (const trozo of [
+      'estado_compra', 'modalidad_compra', 'numero_pedido_mayorista', 'comprada_at',
+      'llegada_estimada', 'guia_mayorista', 'nota_compra',
+      'create table if not exists recepciones', 'create table if not exists despachos',
+      'create table if not exists despacho_lineas', 'create table if not exists despacho_eventos',
+      'create or replace function crear_despacho',
+    ]) expect(sql).toContain(trozo);
+  });
+  it('activa RLS en las tablas nuevas', () => {
+    for (const t of ['recepciones', 'despachos', 'despacho_lineas', 'despacho_eventos']) {
+      expect(sql).toContain(`alter table ${t} enable row level security`);
+    }
+  });
+});
+
 describe('openapi.yaml es internamente consistente', () => {
   // Un $ref a un schema que no existe no rompe ningun test de texto, pero
   // deja la especificacion sin poder generar cliente ni renderizarse.
