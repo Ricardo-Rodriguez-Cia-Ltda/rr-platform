@@ -42,16 +42,27 @@ export function lineasDePedido(filas: FilaPedido[]): LineaCompra[] {
     // Una orden de compra anulada no tiene nada que entregar.
     if (f.estado_compra === 'anulada') continue;
     const directo = f.modalidad_compra === 'directo_cliente';
+    // Si el mismo mpn aparece dos veces en la misma OC, se combinan en una
+    // sola linea (sumando cantidad, con el nombre de la primera aparicion).
+    const porClave = new Map<string, LineaCompra>();
     (f.lineas ?? []).forEach((l, i) => {
-      out.push({
-        poId: f.po_id,
-        clave: claveLinea(l, i),
-        nombre: l.nombre ?? l.mpn ?? 'Producto',
-        cantidad: Number(l.cantidad ?? 0),
-        directo,
-        entregadaDirecto: f.estado_compra === 'entregada_al_cliente',
-      });
+      const clave = claveLinea(l, i);
+      const cantidad = Number(l.cantidad ?? 0);
+      const existente = porClave.get(clave);
+      if (existente) {
+        existente.cantidad += cantidad;
+      } else {
+        porClave.set(clave, {
+          poId: f.po_id,
+          clave,
+          nombre: l.nombre ?? l.mpn ?? 'Producto',
+          cantidad,
+          directo,
+          entregadaDirecto: f.estado_compra === 'entregada_al_cliente',
+        });
+      }
     });
+    out.push(...porClave.values());
   }
   return out;
 }
@@ -86,6 +97,11 @@ export function resumirLineas(lineas: LineaCompra[], recepciones: Recepcion[], d
 
 export function validarAsignacion(resumen: ResumenLinea[], pedidas: DespachoLinea[]): string | null {
   if (pedidas.length === 0) return 'El despacho no tiene productos';
+  // Se valida cada cantidad antes de sumar, para no dejar pasar una negativa
+  // compensada por otra positiva del mismo mpn.
+  for (const p of pedidas) {
+    if (!Number.isInteger(p.cantidad) || p.cantidad <= 0) return `Cantidad inválida para ${p.mpn}`;
+  }
   const pedido = new Map<string, number>();
   for (const p of pedidas) pedido.set(k(p.po_id, p.mpn), (pedido.get(k(p.po_id, p.mpn)) ?? 0) + p.cantidad);
   for (const [clave, cantidad] of pedido) {

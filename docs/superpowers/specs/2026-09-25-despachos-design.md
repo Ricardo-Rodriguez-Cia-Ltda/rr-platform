@@ -98,8 +98,11 @@ por_comprar ──► comprada ──┬─► por_retirar ──► recibida
   con `directo_cliente`, a `directo_al_cliente`.
 - `recibida_parcial` y `recibida` no se eligen a mano: se calculan con las
   recepciones (abajo).
-- `anulada` desde cualquier estado anterior a `recibida` o
-  `entregada_al_cliente`.
+- `anulada` solo antes de la primera recepción (desde `por_comprar`,
+  `comprada`, `por_retirar`, `en_camino` o `directo_al_cliente`). Una orden
+  anulada sale entera del plan de despachos, así que con parte ya recibida no
+  se anula; cerrar una recepción parcial cuyo resto no va a llegar queda para
+  una etapa posterior.
 - **Atrasada** no es un estado: es `llegada_estimada < hoy` sin estar
   `recibida` ni `entregada_al_cliente`. La vista la muestra como alerta.
 
@@ -162,10 +165,14 @@ por_preparar ──► listo ──► en_ruta ──► entregado
   `numero_seguimiento`.
 - `entregado`: el cliente lo recibió o lo retiró.
 - `fallido`: no se pudo entregar; se reprograma volviendo a `listo`.
+- `fallido` también puede pasar a `anulado` si no se va a reprogramar.
 - `anulado`: libera sus líneas para otro despacho.
 - Con `retiro_oficina`, `listo` pasa directo a `entregado` (no hay ruta).
 
 **Cantidades por línea** (`po_id` + `mpn`) dentro de un pedido:
+
+Si una misma orden de compra trae el mismo `mpn` en dos líneas, se suman como
+una sola.
 
 - *comprada*: la `cantidad` de la línea en `pedidos.lineas`.
 - *recibida*: suma de `recepciones`.

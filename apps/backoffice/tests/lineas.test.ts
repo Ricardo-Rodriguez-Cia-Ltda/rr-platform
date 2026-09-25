@@ -44,6 +44,28 @@ describe('claveLinea y lineasDePedido', () => {
   });
 });
 
+describe('lineasDePedido con mpn repetido', () => {
+  it('combina lineas del mismo mpn en una OC, sumando cantidad y usando el primer nombre', () => {
+    const lineas = lineasDePedido([
+      fila('oc-dup', [{ mpn: 'A', nombre: 'Toner A', cantidad: 1 }, { mpn: 'A', nombre: 'Toner A (otro)', cantidad: 1 }]),
+    ]);
+    expect(lineas).toEqual([
+      { poId: 'oc-dup', clave: 'A', nombre: 'Toner A', cantidad: 2, directo: false, entregadaDirecto: false },
+    ]);
+  });
+
+  it('con mpn repetido, el pedido no esta completo hasta que se entregue todo lo sumado', () => {
+    const lineas = lineasDePedido([fila('oc-dup', [{ mpn: 'A', cantidad: 1 }, { mpn: 'A', cantidad: 1 }])]);
+    const parcial = [despacho(1, 'entregado', [{ po_id: 'oc-dup', mpn: 'A', cantidad: 1 }])];
+    expect(pedidoCompletamenteEntregado(resumirLineas(lineas, [], parcial))).toBe(false);
+  });
+
+  it('con mpn repetido, se puede asignar la cantidad combinada', () => {
+    const resumen = resumirLineas(lineasDePedido([fila('oc-dup', [{ mpn: 'A', cantidad: 1 }, { mpn: 'A', cantidad: 1 }])]), [], []);
+    expect(validarAsignacion(resumen, [{ po_id: 'oc-dup', mpn: 'A', cantidad: 2 }])).toBeNull();
+  });
+});
+
 describe('resumirLineas', () => {
   it('cuenta recibido, asignado, en mano y entregado; los anulados no cuentan', () => {
     const r = resumirLineas(
@@ -78,6 +100,14 @@ describe('validarAsignacion', () => {
   it('rechaza lineas que el mayorista despacha directo al cliente', () => {
     const r = resumirLineas(lineasDePedido([fila('oc-dir', [{ mpn: 'C', nombre: 'Toner C', cantidad: 1 }], { modalidad_compra: 'directo_cliente', estado_compra: 'directo_al_cliente' })]), [], []);
     expect(validarAsignacion(r, [{ po_id: 'oc-dir', mpn: 'C', cantidad: 1 }])).toMatch(/directo al cliente/);
+  });
+  it('rechaza cantidad invalida (no entera o <= 0) antes de sumar', () => {
+    expect(validarAsignacion(resumen(), [{ po_id: 'oc-int', mpn: 'A', cantidad: 0 }])).toBe('Cantidad inválida para A');
+    expect(validarAsignacion(resumen(), [{ po_id: 'oc-int', mpn: 'A', cantidad: -1 }])).toBe('Cantidad inválida para A');
+    expect(validarAsignacion(resumen(), [{ po_id: 'oc-int', mpn: 'A', cantidad: 1.5 }])).toBe('Cantidad inválida para A');
+    expect(validarAsignacion(resumen(), [
+      { po_id: 'oc-int', mpn: 'A', cantidad: 5 }, { po_id: 'oc-int', mpn: 'A', cantidad: -4 },
+    ])).toBe('Cantidad inválida para A');
   });
 });
 
