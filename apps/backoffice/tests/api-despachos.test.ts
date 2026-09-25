@@ -52,6 +52,10 @@ describe('POST /api/despachos', () => {
     expect((await crear(req({ ...cuerpo, courier: undefined }))).status).toBe(400);
     expect((await crear(req({ ...cuerpo, lineas: [{ po_id: 'oc-1', mpn: 'A', cantidad: 1.5 }] }))).status).toBe(400);
   });
+  it('400 con una clave de prototipo como courier (no es un courier valido)', async () => {
+    expect((await crear(req({ ...cuerpo, courier: 'constructor' }))).status).toBe(400);
+    expect(supabaseRpc).not.toHaveBeenCalled();
+  });
 });
 
 describe('POST /api/despachos/transicion', () => {
@@ -109,6 +113,13 @@ describe('POST /api/despachos/editar', () => {
     const res = await editar(req({ id: 5, courier: 'starken' }));
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe('courier_sin_modalidad');
+    expect(supabasePatch).not.toHaveBeenCalled();
+  });
+  it('400 con una clave de prototipo como courier (no es un courier valido)', async () => {
+    cargarDespacho.mockResolvedValue(DESPACHO);
+    const res = await editar(req({ id: 5, courier: 'constructor' }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('courier_invalido');
     expect(supabasePatch).not.toHaveBeenCalled();
   });
   it('el PATCH de campos mientras-abierto filtra por estado no cerrado (evita la carrera); solo-siempre no filtra', async () => {

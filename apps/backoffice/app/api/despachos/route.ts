@@ -17,7 +17,7 @@ export async function POST(req: Request): Promise<Response> {
   const courier = texto(b?.courier) as CourierId | '';
   const lineas = Array.isArray(b?.lineas) ? (b!.lineas as DespachoLinea[]) : [];
   if (!quoteId || !version || !MODALIDADES_DESPACHO.includes(modalidad)) return json({ error: 'cuerpo_invalido' }, 400);
-  if (modalidad === 'courier' && !(courier && courier in COURIERS)) return json({ error: 'falta_courier' }, 400);
+  if (modalidad === 'courier' && !(courier && Object.hasOwn(COURIERS, courier))) return json({ error: 'falta_courier' }, 400);
   if (lineas.some((l) => !texto(l?.po_id) || !texto(l?.mpn) || !Number.isInteger(l?.cantidad) || l.cantidad <= 0)) {
     return json({ error: 'lineas_invalidas' }, 400);
   }

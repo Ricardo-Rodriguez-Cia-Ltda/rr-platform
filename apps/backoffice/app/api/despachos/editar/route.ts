@@ -32,7 +32,7 @@ export async function POST(req: Request): Promise<Response> {
     }
     const t = typeof v === 'string' && v.trim() ? v.trim() : null;
     if (campo === 'fecha_programada' && t && !FECHA.test(t)) return json({ error: 'fecha_invalida' }, 400);
-    if (campo === 'courier' && t && !(t in COURIERS)) return json({ error: 'courier_invalido' }, 400);
+    if (campo === 'courier' && t && !Object.hasOwn(COURIERS, t)) return json({ error: 'courier_invalido' }, 400);
     cambio[campo] = t;
   }
   if (Object.keys(cambio).length === 0) return json({ error: 'sin_cambios' }, 400);
