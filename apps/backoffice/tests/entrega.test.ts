@@ -27,6 +27,17 @@ describe('evaluarPedidoEntregado', () => {
     expect(await evaluarPedidoEntregado('q', '1')).toBe(false);
     expect(supabasePatch).not.toHaveBeenCalled();
   });
+  it('si el PATCH final falla, devuelve false y loguea el error', async () => {
+    cargarDatosPedido.mockResolvedValue({ filas: [FILA], recepciones: [], despachos: [despacho('entregado', 2)] });
+    supabasePatch.mockResolvedValue(null);
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(await evaluarPedidoEntregado('q', '1')).toBe(false);
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
   it('si el pedido no esta pagado o no se pudo leer, no escribe', async () => {
     cargarDatosPedido.mockResolvedValue({ filas: [{ ...FILA, estado_negocio: 'entregado' }], recepciones: [], despachos: [despacho('entregado', 2)] });
     expect(await evaluarPedidoEntregado('q', '1')).toBe(false);
