@@ -40,12 +40,23 @@ export async function POST(req: Request): Promise<Response> {
   const d = await cargarDespacho(id);
   if (d === null) return json({ error: 'upstream' }, 503);
   if (d === undefined) return json({ error: 'despacho_no_encontrado' }, 404);
+  const tocaAbierto = Object.keys(cambio).some((c) => (MIENTRAS_ABIERTO as readonly string[]).includes(c));
+  if ('courier' in cambio && cambio.courier !== null && d.modalidad !== 'courier') {
+    return json({ error: 'courier_sin_modalidad' }, 409);
+  }
   const cerrado = d.estado === 'entregado' || d.estado === 'anulado';
-  if (cerrado && Object.keys(cambio).some((c) => (MIENTRAS_ABIERTO as readonly string[]).includes(c))) {
+  if (cerrado && tocaAbierto) {
     return json({ error: 'despacho_cerrado', estado: d.estado }, 409);
   }
 
-  const res = await supabasePatch(`/despachos?id=eq.${id}`, { ...cambio, updated_at: new Date().toISOString() });
+  // Si se tocan campos "mientras abierto", el PATCH filtra tambien por
+  // estado no cerrado: entre la lectura y la escritura el despacho pudo
+  // pasar a entregado/anulado por otra transicion (carrera).
+  const filtro = tocaAbierto
+    ? `/despachos?id=eq.${id}&estado=not.in.(entregado,anulado)`
+    : `/despachos?id=eq.${id}`;
+  const res = await supabasePatch(filtro, { ...cambio, updated_at: new Date().toISOString() });
   if (res === null) return json({ error: 'upstream' }, 503);
+  if (tocaAbierto && res.length === 0) return json({ error: 'despacho_cerrado' }, 409);
   return json({ ok: true });
 }

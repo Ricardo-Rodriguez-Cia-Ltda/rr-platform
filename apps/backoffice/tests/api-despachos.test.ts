@@ -104,4 +104,26 @@ describe('POST /api/despachos/editar', () => {
     expect((await editar(req({ id: 5, costo_clp: -1 }))).status).toBe(400);
     expect((await editar(req({ id: 5, fecha_programada: 'mañana' }))).status).toBe(400);
   });
+  it('409 si se asigna courier a un despacho que no es modalidad courier', async () => {
+    cargarDespacho.mockResolvedValue({ ...DESPACHO, modalidad: 'propio', courier: null });
+    const res = await editar(req({ id: 5, courier: 'starken' }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe('courier_sin_modalidad');
+    expect(supabasePatch).not.toHaveBeenCalled();
+  });
+  it('el PATCH de campos mientras-abierto filtra por estado no cerrado (evita la carrera); solo-siempre no filtra', async () => {
+    cargarDespacho.mockResolvedValue(DESPACHO);
+    supabasePatch.mockResolvedValue([{}]);
+    expect((await editar(req({ id: 5, direccion: 'X' }))).status).toBe(200);
+    expect(supabasePatch.mock.calls[0][0]).toContain('estado=not.in.(entregado,anulado)');
+
+    supabasePatch.mockResolvedValue([]);
+    const res = await editar(req({ id: 5, direccion: 'X' }));
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe('despacho_cerrado');
+
+    supabasePatch.mockResolvedValue([{}]);
+    expect((await editar(req({ id: 5, cobro_pagado: true }))).status).toBe(200);
+    expect(supabasePatch.mock.calls[2][0]).not.toContain('estado=');
+  });
 });
