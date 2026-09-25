@@ -19,6 +19,15 @@ export interface FilaPedido {
   estado: string; estado_negocio?: EstadoNegocio;
   pagado_at?: string | null; entregado_at?: string | null;
   created_at: string; neto_grupo_clp: number | null;
+  // Modulo de compras (docs/sql/2026-09-25-despachos.sql). Opcionales: una
+  // consulta sin estas columnas (pre-ALTER) sigue tipando.
+  estado_compra?: import('./compras.js').EstadoCompra;
+  modalidad_compra?: import('./compras.js').ModalidadCompra | null;
+  numero_pedido_mayorista?: string | null;
+  comprada_at?: string | null;
+  llegada_estimada?: string | null;
+  guia_mayorista?: string | null;
+  nota_compra?: string | null;
   lineas: Array<{ nombre?: string | null; mpn?: string | null; cantidad?: number; precio_unitario_clp?: number; subtotal_neto_clp?: number }>;
 }
 
