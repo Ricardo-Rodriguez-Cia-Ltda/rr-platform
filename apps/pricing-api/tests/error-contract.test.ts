@@ -43,7 +43,9 @@ vi.mock('@rr/providers/intcomex', () => ({
   getPrices: (skus: string[]) => getPricesMock(skus),
 }));
 
-const { default: searchHandler } = await import('../api/search.js');
+const { createSearchHandler } = await import('../src/handlers/search.js');
+const { PROVIDERS } = await import('@rr/providers');
+const searchHandler = createSearchHandler(PROVIDERS.intcomex);
 const { default: productHandler } = await import('../api/product.js');
 const { default: facetasHandler } = await import('../api/facetas.js');
 const { default: priceHandler } = await import('../api/price.js');

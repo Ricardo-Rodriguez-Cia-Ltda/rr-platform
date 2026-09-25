@@ -32,7 +32,9 @@ vi.mock('@rr/providers/intcomex', () => ({
   },
 }));
 
-const { default: handler } = await import('../api/search.js');
+const { createSearchHandler } = await import('../src/handlers/search.js');
+const { PROVIDERS } = await import('@rr/providers');
+const handler = createSearchHandler(PROVIDERS.intcomex);
 
 function makeProduct(
   sku: string,

@@ -10,13 +10,13 @@ import { ProviderError } from '@rr/domain/types';
 import { resolveOrRespond } from './guards.js';
 import { firstString, type Handler } from './types.js';
 
-const UMBRAL_AMBIGUEDAD = 25;
-const LIMITE_POR_DEFECTO = 10;
+export const UMBRAL_AMBIGUEDAD = 25;
+export const LIMITE_POR_DEFECTO = 10;
 // Sin filtros, el orden por relevancia ya deja arriba lo que sirve: un lote basta.
-const MAX_CANDIDATOS_SIN_FILTROS = 50;
+export const MAX_CANDIDATOS_SIN_FILTROS = 50;
 // Con filtros hay que buscar mas abajo: precio y stock solo se conocen al
 // cotizar, y en el catalogo real apenas el 27% de los productos tiene stock.
-const MAX_CANDIDATOS_CON_FILTROS = 300;
+export const MAX_CANDIDATOS_CON_FILTROS = 300;
 // Techo de reloj, ademas del techo de candidatos. Quien llama es un agente en
 // una conversacion de WhatsApp: el usuario acepto explicitamente ~10-15s si la
 // respuesta trae productos, pero no una espera abierta. Como el resto de los
@@ -24,9 +24,9 @@ const MAX_CANDIDATOS_CON_FILTROS = 300;
 // gasta como maximo en sonda + ronda (~2 lotes). Si solo la sonda ya proyecta
 // pasarse (lote > mitad del presupuesto), no se lanza la ronda y la respuesta
 // sale `parcial` — eso paso el 2026-08-31 con el mayorista a ~7s por lote.
-const PRESUPUESTO_MS = 20000;
+export const PRESUPUESTO_MS = 20000;
 
-interface Cotizado {
+export interface Cotizado {
   sku: string;
   mpn: string | null;
   nombre: string | null;
@@ -36,6 +36,18 @@ interface Cotizado {
   moneda: string;
   stock: number | null;
   foto: string | null;
+  /** Mayorista ganador; solo lo informa /search, que compara los tres. */
+  proveedor?: string;
+}
+
+export interface ParametrosBusqueda {
+  q: string;
+  marca?: string;
+  categoria?: string;
+  subcategoria?: string;
+  onlyWithStock: boolean;
+  maxPrice: number;
+  limit: number;
 }
 
 function cheapest(productos: Cotizado[]): Cotizado {
@@ -62,7 +74,7 @@ function alternativeFrom(productos: Cotizado[]): Cotizado {
   return cheapest(productos.filter((p) => p.categoria === dominante));
 }
 
-function explainEmpty(
+export function explainEmpty(
   evaluados: Cotizado[],
   onlyWithStock: boolean,
   truncado: boolean,
@@ -84,59 +96,73 @@ function explainEmpty(
   };
 }
 
+/**
+ * Valida metodo, api key y parametros; si algo falla, ya respondio y devuelve null.
+ */
+export function leerParametrosBusqueda(
+  req: VercelRequest,
+  res: VercelResponse,
+): ParametrosBusqueda | null {
+  if (req.method && req.method !== 'GET') {
+    res.status(405).json({ error: 'method_not_allowed', detail: 'Use GET' });
+    return null;
+  }
+  if (!isAuthorized(firstString(req.headers['x-api-key']), process.env.API_SECRET_KEY)) {
+    res.status(401).json({ error: 'unauthorized', detail: 'Missing or invalid x-api-key header' });
+    return null;
+  }
+
+  const q = firstString(req.query.q)?.trim();
+  if (!q) {
+    res.status(400).json({ error: 'bad_request', detail: 'El parametro q es obligatorio' });
+    return null;
+  }
+  if (tokenize(q).length === 0) {
+    res.status(400).json({ error: 'bad_request', detail: 'q no contiene terminos buscables' });
+    return null;
+  }
+
+  const marca = firstString(req.query.marca);
+  const categoria = firstString(req.query.categoria);
+  const subcategoria = firstString(req.query.subcategoria);
+  const onlyWithStock = firstString(req.query.solo_con_stock) === 'true';
+
+  const rawMaxPrice = firstString(req.query.precio_max);
+  let maxPrice = Number.POSITIVE_INFINITY;
+  if (rawMaxPrice !== undefined && rawMaxPrice.trim() !== '') {
+    const n = Number(rawMaxPrice);
+    if (!Number.isFinite(n) || n <= 0) {
+      res.status(400).json({
+        error: 'bad_request',
+        detail: 'precio_max debe ser un numero mayor a 0',
+      });
+      return null;
+    }
+    maxPrice = n;
+  }
+
+  const rawLimit = firstString(req.query.limite);
+  let limit = LIMITE_POR_DEFECTO;
+  if (rawLimit !== undefined) {
+    const n = Number(rawLimit);
+    if (!Number.isInteger(n) || n < 0) {
+      res.status(400).json({
+        error: 'bad_request',
+        detail: 'limite debe ser un entero mayor o igual a 0',
+      });
+      return null;
+    }
+    limit = n;
+  }
+
+  return { q, marca, categoria, subcategoria, onlyWithStock, maxPrice, limit };
+}
+
 export function createSearchHandler(provider: Provider): Handler {
   return async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
-    if (req.method && req.method !== 'GET') {
-      res.status(405).json({ error: 'method_not_allowed', detail: 'Use GET' });
-      return;
-    }
-    if (!isAuthorized(firstString(req.headers['x-api-key']), process.env.API_SECRET_KEY)) {
-      res.status(401).json({ error: 'unauthorized', detail: 'Missing or invalid x-api-key header' });
-      return;
-    }
-
-    const q = firstString(req.query.q)?.trim();
-    if (!q) {
-      res.status(400).json({ error: 'bad_request', detail: 'El parametro q es obligatorio' });
-      return;
-    }
-    if (tokenize(q).length === 0) {
-      res.status(400).json({ error: 'bad_request', detail: 'q no contiene terminos buscables' });
-      return;
-    }
-
-    const marca = firstString(req.query.marca);
-    const categoria = firstString(req.query.categoria);
-    const subcategoria = firstString(req.query.subcategoria);
-    const onlyWithStock = firstString(req.query.solo_con_stock) === 'true';
-
-    const rawMaxPrice = firstString(req.query.precio_max);
-    let maxPrice = Number.POSITIVE_INFINITY;
-    if (rawMaxPrice !== undefined && rawMaxPrice.trim() !== '') {
-      const n = Number(rawMaxPrice);
-      if (!Number.isFinite(n) || n <= 0) {
-        res.status(400).json({
-          error: 'bad_request',
-          detail: 'precio_max debe ser un numero mayor a 0',
-        });
-        return;
-      }
-      maxPrice = n;
-    }
-
-    const rawLimit = firstString(req.query.limite);
-    let limit = LIMITE_POR_DEFECTO;
-    if (rawLimit !== undefined) {
-      const n = Number(rawLimit);
-      if (!Number.isInteger(n) || n < 0) {
-        res.status(400).json({
-          error: 'bad_request',
-          detail: 'limite debe ser un entero mayor o igual a 0',
-        });
-        return;
-      }
-      limit = n;
-    }
+    const params = leerParametrosBusqueda(req, res);
+    if (!params) return;
+    const { q, marca, categoria, subcategoria, onlyWithStock, maxPrice, limit } = params;
 
     let catalog;
     try {
