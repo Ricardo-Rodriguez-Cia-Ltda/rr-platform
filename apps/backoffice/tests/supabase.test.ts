@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { supabaseGet, supabasePatch } from '../src/lib/supabase.js';
+import { supabaseGet, supabasePatch, supabasePost, supabaseRpc } from '../src/lib/supabase.js';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
@@ -46,5 +46,41 @@ describe('supabasePatch', () => {
     expect((init.headers as Record<string, string>).Prefer).toBe('return=representation');
     vi.stubGlobal('fetch', vi.fn(async () => new Response('x', { status: 400 })));
     expect(await supabasePatch('/pedidos?quote_id=eq.q', {})).toBeNull();
+  });
+});
+
+describe('supabasePost y supabaseRpc', () => {
+  it('POST inserta con return=representation y devuelve las filas', async () => {
+    vi.stubEnv('SUPABASE_URL', 'https://supabase.test');
+    vi.stubEnv('SUPABASE_SERVICE_KEY', 'clave');
+    const f = vi.fn(async () => new Response(JSON.stringify([{ id: 1 }]), { status: 201 }));
+    vi.stubGlobal('fetch', f);
+    expect(await supabasePost('/recepciones', { po_id: 'oc-1' })).toEqual([{ id: 1 }]);
+    const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('https://supabase.test/rest/v1/recepciones');
+    expect(init.method).toBe('POST');
+    expect((init.headers as Record<string, string>).Prefer).toBe('return=representation');
+    expect(JSON.parse(String(init.body))).toEqual({ po_id: 'oc-1' });
+  });
+
+  it('RPC llama /rpc/<fn> y devuelve el cuerpo tal cual', async () => {
+    vi.stubEnv('SUPABASE_URL', 'https://supabase.test');
+    vi.stubEnv('SUPABASE_SERVICE_KEY', 'clave');
+    const f = vi.fn(async () => new Response(JSON.stringify({ id: 7 }), { status: 200 }));
+    vi.stubGlobal('fetch', f);
+    expect(await supabaseRpc('crear_despacho', { p_lineas: [] })).toEqual({ id: 7 });
+    expect(String((f.mock.calls[0] as unknown[])[0])).toBe('https://supabase.test/rest/v1/rpc/crear_despacho');
+  });
+
+  it('status no 2xx, red caida o sin config devuelven null', async () => {
+    vi.stubEnv('SUPABASE_URL', 'https://supabase.test');
+    vi.stubEnv('SUPABASE_SERVICE_KEY', 'clave');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 400 })));
+    expect(await supabasePost('/x', {})).toBeNull();
+    expect(await supabaseRpc('f', {})).toBeNull();
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed'); }));
+    expect(await supabasePost('/x', {})).toBeNull();
+    vi.unstubAllEnvs();
+    expect(await supabaseRpc('f', {})).toBeNull();
   });
 });

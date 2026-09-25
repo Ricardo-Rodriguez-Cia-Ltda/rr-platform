@@ -45,3 +45,33 @@ export async function supabasePatch(path: string, body: unknown): Promise<unknow
     return null;
   }
 }
+
+async function escribir(metodo: 'POST', ruta: string, body: unknown): Promise<unknown | null> {
+  const cfg = base();
+  if (!cfg) return null;
+  try {
+    const r = await fetch(`${cfg.url}/rest/v1${ruta}`, {
+      method: metodo,
+      headers: {
+        apikey: cfg.key, Authorization: `Bearer ${cfg.key}`,
+        'Content-Type': 'application/json', Prefer: 'return=representation',
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!r.ok) return null;
+    return (await r.json()) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+export async function supabasePost(path: string, body: unknown): Promise<unknown[] | null> {
+  return (await escribir('POST', path, body)) as unknown[] | null;
+}
+
+// Funciones SQL expuestas por PostgREST en /rpc/<nombre>. Se usan cuando una
+// escritura tiene que ser atomica (varias tablas a la vez).
+export async function supabaseRpc(fn: string, args: unknown): Promise<unknown | null> {
+  return escribir('POST', `/rpc/${fn}`, args);
+}
