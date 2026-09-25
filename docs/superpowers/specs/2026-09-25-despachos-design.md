@@ -126,8 +126,7 @@ No se puede recibir más de lo comprado.
 
 | Columna | Tipo | Uso |
 |---|---|---|
-| `id` | bigint identity | |
-| `numero` | bigint identity desde 1 | Número correlativo visible. |
+| `id` | bigint identity | Es también el número visible del despacho (N° 1, 2, 3…). |
 | `quote_id`, `quote_version` | text | El pedido del cliente. |
 | `modalidad` | text | `retiro_oficina`, `propio` o `courier`. |
 | `courier` | text, null | `bluexpress`, `starken`, `chilexpress` u `otro` (solo con `courier`). |
@@ -192,7 +191,10 @@ hoy (`pagado → entregado`). El botón manual se mantiene.
 
 ### Parte 3 — Couriers
 
-Paquete nuevo `packages/logistica` (`@rr/logistica`):
+Registro de couriers en `apps/backoffice/src/lib/couriers.ts`. Vive en el
+backoffice y no en un paquete compartido porque hoy es su único consumidor y
+el backoffice no depende de ningún paquete `@rr/*` (se despliega solo); se
+mueve a `packages/logistica` cuando aparezca un segundo consumidor (etapa 3):
 
 ```ts
 export type CourierId = 'bluexpress' | 'starken' | 'chilexpress' | 'otro';
@@ -200,8 +202,8 @@ export type CourierId = 'bluexpress' | 'starken' | 'chilexpress' | 'otro';
 export interface Courier {
   id: CourierId;
   nombre: string;
-  /** Link público de seguimiento, o null si no se puede armar. */
-  urlSeguimiento(numero: string): string | null;
+  /** Página pública de seguimiento; `conNumero` dice si ya lleva el número. null si no hay. */
+  urlSeguimiento(numero: string): { url: string; conNumero: boolean } | null;
   // Capacidades opcionales, para cuando haya integración (etapa 3):
   cotizar?(destino: { comuna: string }, bultos: Bulto[]): Promise<Tarifa[]>;
   crearEnvio?(despacho: DespachoParaCourier): Promise<{ numeroSeguimiento: string; etiquetaPdfUrl: string }>;
@@ -209,10 +211,13 @@ export interface Courier {
 }
 ```
 
-En la etapa 1 cada courier implementa solo `urlSeguimiento`. Los formatos de
-URL se verifican contra los sitios reales al implementar; si alguno no se
-puede armar con el número, devuelve `null` y la vista muestra solo el número.
-`otro` siempre devuelve `null`.
+En la etapa 1 cada courier implementa solo `urlSeguimiento`. Verificado el
+2026-09-25: Starken acepta el número en la URL
+(`https://www.starken.cl/seguimiento?codigo=<n>`); Blue Express
+(`https://www.blue.cl/seguimiento/`) y Chilexpress
+(`https://www.chilexpress.cl/estado-envio-paquete-courier`) no exponen un link
+con el número, así que se da su página y el mensaje pide ingresar el número.
+`otro` devuelve `null` y se muestra solo el número.
 
 ### Parte 4 — Backoffice
 
@@ -223,8 +228,10 @@ puede armar con el número, devuelve `null` y la vista muestra solo el número.
 - **Vista "Despachos"** (`/despachos`): pedidos pagados con líneas sin asignar
   a un despacho; despachos por estado; retiros pendientes en oficina; envíos
   con cobro pendiente.
-- **Detalle del pedido:** sus órdenes de compra con estado de compra, sus
-  despachos, y el botón "Crear despacho" con las líneas pendientes
+- **Por pedido, dentro de "Despachos"** (el backoffice no tiene página de
+  detalle de pedido; esta vista agrupa por pedido y cumple ese rol): sus
+  líneas con cantidades compradas, recibidas y asignadas, sus despachos, y el
+  botón "Crear despacho" con las líneas pendientes
   precargadas y la dirección de facturación del cliente como punto de partida.
 - **"Copiar mensaje"** en cada despacho: texto listo para pegar en WhatsApp,
   según el estado (listo para retiro / en camino con link de seguimiento /
