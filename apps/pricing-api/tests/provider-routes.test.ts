@@ -99,9 +99,12 @@ afterEach(() => {
 });
 
 describe('rutas /api/{proveedor}/...', () => {
-  // El alias existe para que Rayo no se entere del cambio: si las dos rutas
-  // divergen, el agente empieza a recibir algo distinto sin que nadie lo pida.
-  it('sirve /api/intcomex/search identico al alias /api/search', async () => {
+  // El alias /api/search ya no es un espejo de /api/intcomex/search: compara
+  // los tres mayoristas y agrega `proveedor` al ganador. Con solo Intcomex
+  // configurado en este test, tecnoglobal e ingram fallan por credenciales
+  // (capturado por cotizarLote como `incompleto`), asi que el alias devuelve
+  // el mismo producto que la ruta de Intcomex mas `proveedor` y `parcial`.
+  it('el alias /api/search compara los tres mayoristas y agrega proveedor + parcial sobre lo que ya da /api/intcomex/search', async () => {
     const resAlias = makeRes();
     await aliasSearch(makeReq({ q: 'probook' }, AUTH), resAlias);
 
@@ -114,8 +117,12 @@ describe('rutas /api/{proveedor}/...', () => {
     const resByRoute = makeRes();
     await searchByRoute(makeReq({ proveedor: 'intcomex', q: 'probook' }, AUTH), resByRoute);
 
-    expect(resByRoute.statusCode).toBe(resAlias.statusCode);
-    expect(resByRoute.body).toEqual(resAlias.body);
+    expect(resAlias.statusCode).toBe(resByRoute.statusCode);
+    expect(resAlias.body).toEqual({
+      ...resByRoute.body,
+      parcial: true,
+      productos: resByRoute.body.productos.map((p: any) => ({ ...p, proveedor: 'intcomex' })),
+    });
   });
 
   it('404 proveedor_desconocido para un proveedor que no existe', async () => {

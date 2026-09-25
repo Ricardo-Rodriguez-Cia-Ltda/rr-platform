@@ -84,9 +84,11 @@ sus propios SKU y su propio precio:
 | `tecnoglobal` | `/api/tecnoglobal/{search,product,facetas}` | Integrado y verificado contra su API real |
 | `ingram` | `/api/ingram/{search,product,facetas}` | Integrado y verificado contra su API real |
 
-`/search`, `/product` y `/facetas` **sin proveedor en la ruta siguen siendo
-Intcomex** y responden exactamente lo mismo que antes. Existen para que los
-consumidores actuales no tengan que cambiar nada.
+`/product` y `/facetas` **sin proveedor en la ruta siguen siendo Intcomex** y
+responden exactamente lo mismo que antes. `/search` sin proveedor en la ruta
+ya no es solo Intcomex: compara los tres mayoristas y por producto muestra el
+que gana con el mismo criterio de `/mejor-precio`. Ver la sección de
+`GET /search` para el detalle.
 
 `/price` elige proveedor por query param: `?provider=tecnoglobal`.
 
@@ -178,6 +180,13 @@ entre investigar una caída y pedirle las llaves al área de TI del proveedor.
 El endpoint principal. Recibe una descripción vaga y devuelve productos con
 precio y stock reales.
 
+Busca en los catálogos de **los tres mayoristas** (Intcomex, Tecnoglobal,
+Ingram) y agrupa las coincidencias del mismo producto entre proveedores. Por
+cada producto muestra un solo ganador, elegido con el **mismo criterio que
+`/mejor-precio`** (más barato con stock; si ninguno tiene stock confirmado,
+más barato con stock desconocido; recién al final, más barato sin stock). El
+campo `proveedor` en cada producto dice cuál mayorista ganó.
+
 ### Parámetros (query string)
 
 | Parámetro | Tipo | Req. | Default | Notas |
@@ -208,7 +217,8 @@ Si un parámetro se repite en la query string, se usa **la primera** aparición.
       "precio": 703.42,
       "moneda": "US",
       "stock": 12,
-      "foto": "https://proyecto.supabase.co/storage/v1/object/public/fotos-productos/hp/8a5z2lt.jpg"
+      "foto": "https://proyecto.supabase.co/storage/v1/object/public/fotos-productos/hp/8a5z2lt.jpg",
+      "proveedor": "intcomex"
     }
   ],
   "facetas": {
@@ -222,17 +232,23 @@ Si un parámetro se repite en la query string, se usa **la primera** aparición.
 
 Los tres contadores significan cosas distintas y se confunden con facilidad:
 
-- **`total`** — cuántos productos del catálogo calzan con `q` + filtros de
-  marca/categoría. Es el universo de la búsqueda textual.
-- **`evaluados`** — de esos, cuántos se alcanzaron a cotizar contra Intcomex
-  antes de juntar `limite` resultados. Siempre ≤ `total`.
+- **`total`** — cuántos **productos** (agrupados entre los tres catálogos, no
+  filas por catálogo) calzan con `q` + filtros de marca/categoría. Es el
+  universo de la búsqueda textual.
+- **`evaluados`** — de esos, cuántos se alcanzaron a cotizar contra los tres
+  mayoristas antes de juntar `limite` resultados. Siempre ≤ `total`.
 - **`productos`** — los que además pasaron `precio_max` y `solo_con_stock`.
   Como máximo `limite`.
 
 Campos de cada producto: `mpn`, `nombre`, `marca`, `categoria` y `stock` pueden
-ser `null` (el catálogo de Intcomex no siempre los trae). `sku`, `precio` y
-`moneda` siempre vienen. `foto` es la URL pública en Supabase Storage del banco
-de fotos, o `null` si el producto todavía no tiene una (ver
+ser `null` (el catálogo del mayorista ganador no siempre los trae). `sku`,
+`precio` y `moneda` siempre vienen, y son del **mayorista ganador**: dos
+llamadas al mismo producto pueden devolver un `sku` distinto si cambió quién
+tiene el mejor precio. `proveedor` es el nombre del mayorista ganador
+(`intcomex`, `tecnoglobal` o `ingram`) — campo que **solo informa `/search`**,
+que es el único endpoint que compara los tres; no aparece en `/product` ni en
+`/price`. `foto` es la URL pública en Supabase Storage del banco de fotos, o
+`null` si el producto todavía no tiene una (ver
 `docs/superpowers/specs/2026-09-23-banco-fotos-design.md`).
 
 `facetas.precio` solo aparece cuando `productos` no está vacío, y describe el
