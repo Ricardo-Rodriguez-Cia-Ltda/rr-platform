@@ -22,9 +22,12 @@ export function AccionesDespacho({ id, estado, modalidad, numeroSeguimiento, cos
   const router = useRouter();
   const [ocupado, setOcupado] = useState(false);
   const [aviso, setAviso] = useState('');
+  // Cuando el portapapeles falla no es un error: el mensaje se muestra en un
+  // textarea de solo lectura para que se pueda seleccionar y copiar a mano.
+  const [textoManual, setTextoManual] = useState('');
 
   async function post(ruta: string, body: unknown) {
-    setOcupado(true); setAviso('');
+    setOcupado(true); setAviso(''); setTextoManual('');
     const res = await fetch(ruta, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).catch(() => null);
     setOcupado(false);
     if (!res?.ok) {
@@ -36,8 +39,9 @@ export function AccionesDespacho({ id, estado, modalidad, numeroSeguimiento, cos
 
   async function copiar() {
     if (!mensaje) return;
+    setTextoManual('');
     try { await navigator.clipboard.writeText(mensaje); setAviso('Mensaje copiado'); }
-    catch { setAviso(mensaje); }
+    catch { setAviso(''); setTextoManual(mensaje); }
   }
 
   function guardar(form: FormData) {
@@ -71,6 +75,17 @@ export function AccionesDespacho({ id, estado, modalidad, numeroSeguimiento, cos
         <button disabled={ocupado} className="secundario">Guardar</button>
       </form>
       {aviso ? <span className={aviso === 'Mensaje copiado' ? 'aviso-ok' : 'aviso-error'}>{aviso}</span> : null}
+      {textoManual ? (
+        <div className="copiar-manual">
+          <p className="meta">No se pudo copiar automáticamente. Selecciona el texto y cópialo a mano:</p>
+          <textarea
+            readOnly
+            value={textoManual}
+            onFocus={(e) => e.currentTarget.select()}
+            aria-label="Mensaje para copiar a mano"
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

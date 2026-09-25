@@ -285,6 +285,13 @@ h2 { font-size: 15px; margin: 22px 0 10px; color: var(--gris); font-weight: 600;
 .fila-recepcion input { font: inherit; padding: 6px 8px; border: 1px solid var(--borde); border-radius: 8px; }
 .crear-despacho summary { cursor: pointer; color: var(--azul); font-weight: 600; font-size: 13px; margin: 6px 0; }
 .aviso-ok { color: var(--ok); font-size: 13px; }
+.copiar-manual { display: grid; gap: 4px; }
+.copiar-manual textarea {
+  font: inherit; font-size: 13px; padding: 8px 9px; resize: vertical;
+  border: 1px solid var(--borde); border-radius: 8px;
+  background: var(--papel-2); color: var(--tinta);
+  min-height: 60px;
+}
 .badge.por_comprar, .badge.por_preparar, .badge.fallido { background: var(--alerta-suave); color: var(--alerta); }
 .badge.comprada, .badge.por_retirar, .badge.en_camino, .badge.directo_al_cliente, .badge.recibida_parcial,
 .badge.listo, .badge.en_ruta { background: var(--azul-suave); color: var(--azul); }
