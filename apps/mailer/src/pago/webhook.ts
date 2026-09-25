@@ -6,9 +6,9 @@ import {
 } from './datos.js';
 import { firmaValida } from './firma.js';
 import { enviarTexto, invocarFunction } from './kapso.js';
-import { MENSAJES } from './mensajes.js';
+import { MENSAJES, formatearClp, mensajeRechazo } from './mensajes.js';
 import { consultarPago } from './mercadopago.js';
-import { armarPayloadEmision, reconstruirQuote } from './quote.js';
+import { armarPayloadEmision, reconstruirQuote, vigenciaUtil } from './quote.js';
 
 const REQUERIDAS = ['SUPABASE_URL', 'SUPABASE_SERVICE_KEY', 'MP_ACCESS_TOKEN', 'MP_WEBHOOK_SECRET', 'KAPSO_API_KEY'] as const;
 
@@ -125,6 +125,12 @@ function leerNotificacion(req: VercelRequest): { tipo: string; dataId: string } 
     dataId: String(firstString(q['data.id'] as any) ?? b?.data?.id ?? ''),
   };
 }
+
+/** Tiempo minimo que el link tiene que seguir vivo para invitar a reintentar con el. */
+export const TIEMPO_PARA_REINTENTAR_MS = 10 * 60 * 1000;
+
+/** Al llegar a este numero de rechazos del mismo pedido se alerta al equipo, una vez. */
+export const UMBRAL_RECHAZOS_ALERTA = 3;
 
 export function createWebhookHandler(alertar: Alertar = alertarPorDefecto) {
   return async function handler(
@@ -287,7 +293,28 @@ export function createWebhookHandler(alertar: Alertar = alertarPorDefecto) {
       // No cambia el estado: la fila sigue `pendiente` para que el siguiente
       // intento con el mismo link pueda reclamarla.
       await sumarRechazo(env, quoteId, String(pagoMP.id));
-      await avisar(MENSAJES.rechazado);
+      // El link se ofrece solo si al cliente le queda tiempo real para usarlo:
+      // la misma vigencia util que exige crear el link, mas el rato que toma
+      // reintentar.
+      const linkVigente = vigenciaUtil(String(fila.expira_at), Date.now() + TIEMPO_PARA_REINTENTAR_MS);
+      await avisar(mensajeRechazo(pagoMP.status_detail, linkVigente));
+      const rechazos = Number(fila.intentos_rechazados ?? 0) + 1;
+      // Justo en el umbral y no despues: una sola alerta por pedido, no una
+      // por cada intento que siga.
+      if (rechazos === UMBRAL_RECHAZOS_ALERTA) {
+        await alertar(
+          `Pedido con ${rechazos} rechazos de pago (cotizacion ${quoteId})`,
+          `El cliente intento pagar ${rechazos} veces y Mercado Pago rechazo todas. Vale la pena contactarlo antes `
+          + `de perder la venta.
+Cotizacion: ${quoteId}
+Pedido: ${fila.numero ?? '-'}
+`
+          + `Telefono: ${fila.telefono ?? '-'}
+Monto: ${formatearClp(Number(fila.monto_clp ?? 0))}
+`
+          + `Ultimo motivo de Mercado Pago: ${pagoMP.status_detail ?? 'sin detalle'}`,
+        );
+      }
       res.status(200).json({ ok: true, estado: 'rechazado' });
       return;
     }
