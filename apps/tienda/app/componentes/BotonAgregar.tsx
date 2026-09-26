@@ -15,6 +15,7 @@ export function BotonAgregar({ producto }: { producto: ProductoTienda }) {
       marca: producto.marca,
       nombre: producto.nombre,
       cantidad: 1,
+      proveedor: producto.proveedor,
       precioNetoClp: producto.precioNetoClp,
       precioTiendaClp: producto.precioClp,
     });

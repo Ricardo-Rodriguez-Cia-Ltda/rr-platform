@@ -1,8 +1,9 @@
 const API_BASE_DEFAULT = "https://api.pyxis-latam.cl/rr/captador-precios";
-// La API cotiza en sonda + ronda paralela: su peor caso honesto son ~2 lotes de
-// reloj (~15s con el mayorista lento) y su presupuesto interno es 20s. El
-// usuario prefirio explicito esperar ~10-15s y recibir productos. 25s aqui es
-// la red de seguridad exterior, no el caso normal.
+// /search compara los tres mayoristas (Intcomex, Ingram, Tecnoglobal) y por
+// producto muestra al que gano. Cotiza en sonda (primeros 50 grupos) + ronda
+// paralela si hace falta: su presupuesto interno son 18s contados desde que
+// le llega el pedido. El usuario prefirio explicito esperar ~10-15s y recibir
+// productos. 25s aqui es la red de seguridad exterior, no el caso normal.
 const TIMEOUT_MS = 25000;
 
 function json(payload, status = 200) {
@@ -92,6 +93,9 @@ async function handler(request, env) {
         marca: p.marca == null ? null : String(p.marca),
         nombre: String(p.nombre ?? ""),
         categoria: p.categoria == null ? null : String(p.categoria),
+        // Mayorista ganador (intcomex, ingram o tecnoglobal): generar-cotizacion-v2
+        // lo usa como fallback de sku si /mejor-precio no resuelve por mpn.
+        proveedor: p.proveedor == null ? null : String(p.proveedor),
         precio: precioVenta(p.precio, margen, tipoCambio),
         moneda: "CLP",
         disponible: Number(p.stock ?? 0) > 0

@@ -48,6 +48,14 @@ describe('validarPedido', () => {
   ])('rechaza linea que no es objeto: %s', (_tipo, valor) => {
     expect(validarPedido({ ...BASE, items: [valor] })).toHaveProperty('error');
   });
+  it('conserva proveedor cuando viene, y no lo agrega (ni undefined) cuando no viene', () => {
+    const conProveedor = validarPedido({ ...BASE, items: [{ ...ITEM, proveedor: 'ingram' }] });
+    if ('error' in conProveedor) throw new Error(conProveedor.error);
+    expect(conProveedor.items[0].proveedor).toBe('ingram');
+    const sinProveedor = validarPedido(BASE);
+    if ('error' in sinProveedor) throw new Error(sinProveedor.error);
+    expect(sinProveedor.items[0]).not.toHaveProperty('proveedor');
+  });
 });
 
 describe('payloads', () => {
@@ -55,6 +63,10 @@ describe('payloads', () => {
     const p = armarPayloadCotizacion([ITEM], '56941757584') as any;
     expect(p.execution_context.vars.cart_items).toEqual([{ sku: 'A', mpn: 'M-1', marca: 'HP', cantidad: 2 }]);
     expect(p.execution_context.context.phone_number).toBe('56941757584');
+  });
+  it('cotizacion: suma proveedor en cart_items solo cuando el item lo trae', () => {
+    const p = armarPayloadCotizacion([{ ...ITEM, proveedor: 'ingram' }], '56941757584') as any;
+    expect(p.execution_context.vars.cart_items).toEqual([{ sku: 'A', mpn: 'M-1', marca: 'HP', cantidad: 2, proveedor: 'ingram' }]);
   });
   it('cuerpo para crear pago: confirmacion booleana, origen tienda y sin facturacion solo billing_email', () => {
     const quote = { quote_id: 'q-1', lineas: [], total_clp: 2000 };

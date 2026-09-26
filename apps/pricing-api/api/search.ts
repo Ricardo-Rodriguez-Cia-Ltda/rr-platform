@@ -1,5 +1,7 @@
-import { createSearchHandler } from '../src/handlers/search.js';
+import { createMultiSearchHandler } from '../src/handlers/search-multi.js';
 import { PROVIDERS } from '@rr/providers';
 
-// Alias historico: el agente Rayo apunta aca y no debe enterarse del cambio.
-export default createSearchHandler(PROVIDERS.intcomex);
+// /search compara los tres mayoristas y muestra el mismo ganador que elige la
+// cotizacion (/mejor-precio). La busqueda de un solo mayorista sigue en
+// /{proveedor}/search.
+export default createMultiSearchHandler(PROVIDERS);

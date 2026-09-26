@@ -84,9 +84,11 @@ sus propios SKU y su propio precio:
 | `tecnoglobal` | `/api/tecnoglobal/{search,product,facetas}` | Integrado y verificado contra su API real |
 | `ingram` | `/api/ingram/{search,product,facetas}` | Integrado y verificado contra su API real |
 
-`/search`, `/product` y `/facetas` **sin proveedor en la ruta siguen siendo
-Intcomex** y responden exactamente lo mismo que antes. Existen para que los
-consumidores actuales no tengan que cambiar nada.
+`/product` y `/facetas` **sin proveedor en la ruta siguen siendo Intcomex** y
+responden exactamente lo mismo que antes. `/search` sin proveedor en la ruta
+ya no es solo Intcomex: compara los tres mayoristas y por producto muestra el
+que gana con el mismo criterio de `/mejor-precio`. Ver la sección de
+`GET /search` para el detalle.
 
 `/price` elige proveedor por query param: `?provider=tecnoglobal`.
 
@@ -178,6 +180,19 @@ entre investigar una caída y pedirle las llaves al área de TI del proveedor.
 El endpoint principal. Recibe una descripción vaga y devuelve productos con
 precio y stock reales.
 
+Busca en los catálogos de **los tres mayoristas** (Intcomex, Tecnoglobal,
+Ingram) y agrupa las coincidencias del mismo producto entre proveedores. Por
+cada producto muestra un solo ganador, elegido con el **mismo criterio que
+`/mejor-precio`** (más barato con stock; si ninguno tiene stock confirmado,
+más barato con stock desconocido; recién al final, más barato sin stock). El
+campo `proveedor` en cada producto dice cuál mayorista ganó.
+
+El texto y los filtros (`q`, `marca`, `categoria`, `subcategoria`) deciden
+**qué productos** aparecen. El precio de cada uno, en cambio, compara **todo**
+lo que los mayoristas venden con la misma clave (MPN + marca), aunque en su
+catálogo tenga otro nombre u otra categoría, igual que `/mejor-precio`. Solo
+participan los mayoristas con credenciales configuradas.
+
 ### Parámetros (query string)
 
 | Parámetro | Tipo | Req. | Default | Notas |
@@ -208,7 +223,8 @@ Si un parámetro se repite en la query string, se usa **la primera** aparición.
       "precio": 703.42,
       "moneda": "US",
       "stock": 12,
-      "foto": "https://proyecto.supabase.co/storage/v1/object/public/fotos-productos/hp/8a5z2lt.jpg"
+      "foto": "https://proyecto.supabase.co/storage/v1/object/public/fotos-productos/hp/8a5z2lt.jpg",
+      "proveedor": "intcomex"
     }
   ],
   "facetas": {
@@ -222,17 +238,26 @@ Si un parámetro se repite en la query string, se usa **la primera** aparición.
 
 Los tres contadores significan cosas distintas y se confunden con facilidad:
 
-- **`total`** — cuántos productos del catálogo calzan con `q` + filtros de
-  marca/categoría. Es el universo de la búsqueda textual.
-- **`evaluados`** — de esos, cuántos se alcanzaron a cotizar contra Intcomex
-  antes de juntar `limite` resultados. Siempre ≤ `total`.
+- **`total`** — cuántos **productos** (agrupados entre los tres catálogos, no
+  filas por catálogo) calzan con `q` + filtros de marca/categoría. Es el
+  universo de la búsqueda textual.
+- **`evaluados`** — de esos, cuántos se alcanzaron a cotizar contra los tres
+  mayoristas antes de juntar `limite` resultados. Siempre ≤ `total`.
 - **`productos`** — los que además pasaron `precio_max` y `solo_con_stock`.
   Como máximo `limite`.
 
-Campos de cada producto: `mpn`, `nombre`, `marca`, `categoria` y `stock` pueden
-ser `null` (el catálogo de Intcomex no siempre los trae). `sku`, `precio` y
-`moneda` siempre vienen. `foto` es la URL pública en Supabase Storage del banco
-de fotos, o `null` si el producto todavía no tiene una (ver
+Campos de cada producto: `mpn`, `nombre`, `marca`, `categoria` y `foto` salen
+del producto que representa al grupo (el de Intcomex si lo vende; si no, el
+del mayorista que mejor calzó con la búsqueda), así que no cambian cuando
+cambia el ganador. Pueden ser `null`, igual que `stock`. `sku`, `precio`,
+`moneda` y `stock` son del **mayorista ganador**; `sku`, `precio` y `moneda`
+siempre vienen: dos
+llamadas al mismo producto pueden devolver un `sku` distinto si cambió quién
+tiene el mejor precio. `proveedor` es el nombre del mayorista ganador
+(`intcomex`, `tecnoglobal` o `ingram`) — campo que **solo informa `/search`**,
+que es el único endpoint que compara los tres; no aparece en `/product` ni en
+`/price`. `foto` es la URL pública en Supabase Storage del banco de fotos, o
+`null` si el producto todavía no tiene una (ver
 `docs/superpowers/specs/2026-09-23-banco-fotos-design.md`).
 
 `facetas.precio` solo aparece cuando `productos` no está vacío, y describe el
@@ -318,13 +343,33 @@ ofrecía una mochila a quien buscó un notebook.
 ### `parcial`
 
 Cotizar es ir al mayorista, y con filtros activos la API recorre hasta 300
-candidatos. El primer lote va solo, como sonda; si no basta, el resto se cotiza
-**en una ronda paralela**, así que el peor caso honesto son ~2 lotes de reloj
-(~15 s con el mayorista lento, 2-3 s en un día normal). Hay además un
-presupuesto de **20 segundos**: si la sonda sola ya proyecta pasarse, la ronda
-no se lanza, la respuesta trae `parcial: true` y el recorrido queda a medias —
-lo mismo si un lote de la ronda falla. `evaluados` dice cuántos alcanzó a
-cotizar.
+candidatos. Los primeros 50 productos van solos, como sonda, cotizados en los
+tres mayoristas a la vez; si no bastan para juntar `limite`, el resto se
+cotiza **en una segunda ronda**, con sus lotes en paralelo. Las dos rondas
+comparten un presupuesto de **18 segundos** contados desde que llega el pedido
+(la tienda corta a los 21 s): un lote que no responde a tiempo se rescata del
+caché si se puede, y lo que ni ahí se resuelve queda sin precio para ese
+mayorista. Si no queda tiempo para la segunda ronda, tampoco se lanza.
+`evaluados` dice cuántos productos alcanzó a cotizar.
+
+`parcial: true` aparece cuando **algún producto mostrado o evaluado quedó a
+medias de verdad**: tiene un SKU sin resolver en algún mayorista y, o no hay
+ganador, o el ganador no tiene stock confirmado (`stock` no es mayor a 0).
+Que un solo mayorista se haya caído **no** activa `parcial` por sí solo: si
+otro mayorista ya lo vende con stock, ese sigue siendo el ganador legítimo —
+el caído solo podría haberle ganado en precio, nunca en disponibilidad. La
+otra causa de `parcial` es que no quedó tiempo para la segunda ronda: ahí sí
+quedaron candidatos sin mirar y no se puede afirmar que no haya nada mejor.
+
+Para saber **qué** mayorista quedó corto sin que eso implique `parcial`, está
+`proveedores_incompletos`: lista ordenada con los nombres de los mayoristas
+que dejaron al menos un SKU sin resolver (ni en vivo ni en caché) en esta
+búsqueda. Solo aparece cuando no está vacía. Es informativo, no un error: un
+ganador con stock de otro mayorista sigue siendo confiable aunque
+`proveedores_incompletos` lo mencione.
+
+En `/{proveedor}/search` (un solo mayorista) la sonda es el primer lote y el
+presupuesto es de 20 segundos.
 
 Una respuesta `parcial` no es un error, y sobre todo no autoriza a afirmar que
 algo no existe: solo se sabe de los `evaluados`.

@@ -24,9 +24,17 @@ const MAX_SKUS_PER_BATCH = 50;
 const PAGE_SIZE = 100;
 
 /**
- * Ingram permite 60 llamadas por minuto y por endpoint, y responde 429 al
- * pasarse. El catalogo de Chile son ~60 paginas, o sea justo el limite: sin
- * pausa entre paginas el volcado se corta a la mitad.
+ * Pausa base entre paginas, aparte de la espera por cuota de mas abajo.
+ *
+ * Medido contra la API real con un volcado de diagnostico (pageSize 100): la
+ * cuota NO es un contador limpio de 60 llamadas por minuto. `remaining` bajo
+ * de 59 a 0 en 77 paginas (~130 s) y solo se recargo una vez, a medias (+13
+ * en t=80 s); la pagina 78 recibio un 429. El catalogo real son ~13.200
+ * productos, muy por encima de las ~60 paginas que suponia esta pausa fija.
+ * Por eso esta pausa ya no alcanza por si sola para evitar el 429: quien
+ * manda es la cabecera (ver `quotaWaitMs` y `RATE_LIMIT_RESERVE`), y esta
+ * pausa queda solo como ritmo base entre paginas mientras la cuota tiene
+ * margen.
  */
 const DEFAULT_MS_BETWEEN_PAGES = 1100;
 
@@ -37,6 +45,26 @@ const DEFAULT_MS_BETWEEN_PAGES = 1100;
  * "ese producto no existe en Ingram".
  */
 const DEFAULT_MAX_PAGES = 500;
+
+/**
+ * Cuanta cuota se deja sin tocar durante el volcado de catalogo.
+ *
+ * El 429 real dice "quota limit exceeds ... on your API app": la cuota es del
+ * app completo, no del endpoint de catalogo, y /mejor-precio (cotizacion en
+ * vivo) pega al mismo contador. Sin este colchon el volcado se puede comer
+ * toda la cuota y dejar sin margen a una cotizacion que llegue mientras se
+ * refresca el catalogo.
+ */
+const RATE_LIMIT_RESERVE = 10;
+
+/** Reintentos por pagina ante un 429 (o 4xx de cuota) antes de fallar. */
+const MAX_QUOTA_RETRIES = 5;
+
+/** Tope superior para no dormir mas de lo razonable ante un reset raro. */
+const MAX_QUOTA_WAIT_MS = 120_000;
+
+/** Ingram gira su ventana de cuota en saltos de ~60 s; sirve de respaldo. */
+const DEFAULT_QUOTA_WAIT_MS = 60_000;
 
 /** Se renueva el token un poco antes de que expire, no justo al vencer. */
 const TOKEN_MARGIN_MS = 60 * 1000;
@@ -213,7 +241,7 @@ async function readJson<T>(response: Response, context: string): Promise<T> {
     throw new ProviderError(
       'upstream',
       quotaExceeded
-        ? `Ingram corto por cuota al pedir ${context} (permite 60 llamadas por minuto y por endpoint)`
+        ? `Ingram corto por cuota al pedir ${context} (la cuota es del API app completo, no por endpoint)`
         : `Ingram responded with HTTP ${response.status} al pedir ${context}`,
       text.slice(0, 500),
     );
@@ -223,6 +251,68 @@ async function readJson<T>(response: Response, context: string): Promise<T> {
   } catch {
     throw new ProviderError('upstream', 'Ingram returned an invalid JSON response');
   }
+}
+
+interface RateLimitInfo {
+  remaining: number | null;
+  resetAt: number | null;
+}
+
+/**
+ * Lee `x-ratelimit-remaining` y `x-ratelimit-reset` de una respuesta.
+ *
+ * `Headers.get` devuelve `null` cuando falta la cabecera, y `Number(null)` es
+ * `0`, no `NaN`: sin este chequeo previo una cabecera ausente se leeria como
+ * "quedan 0 llamadas" en vez de "no se sabe".
+ */
+function readRateLimit(response: Response): RateLimitInfo {
+  const remainingHeader = response.headers.get('x-ratelimit-remaining');
+  const resetHeader = response.headers.get('x-ratelimit-reset');
+  const remaining = remainingHeader == null ? NaN : Number(remainingHeader);
+  const resetAt = resetHeader == null ? NaN : Number(resetHeader);
+  return {
+    remaining: Number.isFinite(remaining) ? remaining : null,
+    resetAt: Number.isFinite(resetAt) && resetAt > 0 ? resetAt : null,
+  };
+}
+
+/**
+ * Cuanto esperar antes de la proxima llamada cuando la cuota esta al limite.
+ *
+ * Se calcula desde `x-ratelimit-reset` (mas 1 s de margen) porque, medido
+ * contra la API real, el reset avanza en saltos de ~60 s y no calza con un
+ * contador limpio de 60 llamadas por minuto. Sin cabecera usable, o con una
+ * invalida, se cae al fallback de 60 s.
+ *
+ * Si el calculo da menos de 5 s (reset ya pasado, o el reloj del host
+ * adelantado respecto al de Ingram por mas de 1 s) tampoco se usa ese numero:
+ * un reintento casi inmediato quema los 5 intentos en segundos, que es
+ * exactamente la falla que este colchon deberia evitar. En ese caso se cae al
+ * mismo fallback de 60 s.
+ */
+function quotaWaitMs(resetAt: number | null): number {
+  if (resetAt == null) return DEFAULT_QUOTA_WAIT_MS;
+  const espera = resetAt - Date.now() + 1000;
+  if (!Number.isFinite(espera) || espera < 5000) return DEFAULT_QUOTA_WAIT_MS;
+  return Math.min(espera, MAX_QUOTA_WAIT_MS);
+}
+
+function avisaEsperaPorCuota(page: number, esperaMs: number): void {
+  console.error(
+    `[ingram] catalogo: cuota casi agotada en pagina ${page}, espera ${Math.round(esperaMs / 1000)}s`,
+  );
+}
+
+/**
+ * Aviso de un 429 real (no el colchon proactivo de `avisaEsperaPorCuota`):
+ * Ingram ya corto la pagina, no es una espera preventiva. Se nombra aparte
+ * para que el log distinga "estamos por quedarnos sin cuota" de "ya nos
+ * quedamos sin cuota y estamos reintentando".
+ */
+function avisaReintento429(page: number, intento: number, esperaMs: number): void {
+  console.error(
+    `[ingram] catalogo: 429 por cuota en pagina ${page}, reintento ${intento}/${MAX_QUOTA_RETRIES}, espera ${Math.round(esperaMs / 1000)}s`,
+  );
 }
 
 export interface IngramProduct {
@@ -278,25 +368,95 @@ function maxPages(): number {
   return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_MAX_PAGES;
 }
 
+/**
+ * Pide una pagina del catalogo. Ante un 429 (o un 4xx que nombre la cuota)
+ * espera segun la cabecera y reintenta la misma pagina, hasta
+ * `MAX_QUOTA_RETRIES` veces; despues de eso falla como antes.
+ *
+ * `readJson` consume el body y lanza en cuanto ve un status no-2xx, asi que
+ * aca se revisa el status y las cabeceras antes de llamarlo: hace falta
+ * decidir si esto es motivo de reintento antes de convertirlo en error.
+ */
+async function fetchCatalogPage(
+  page: number,
+): Promise<{ pagina: CatalogPage; rateLimit: RateLimitInfo; finCatalogo?: boolean }> {
+  for (let intento = 0; ; intento += 1) {
+    const response = await fetchIngram('resellers/v6/catalog', {
+      params: { pageNumber: String(page), pageSize: String(PAGE_SIZE) },
+    });
+    const rateLimit = readRateLimit(response);
+
+    if (response.ok) {
+      return { pagina: await readJson<CatalogPage>(response, 'el catalogo'), rateLimit };
+    }
+
+    const text = await response.text().catch(() => '');
+    const cuotaAgotada = response.status === 429 || /quota limit exceeds/i.test(text);
+    if (cuotaAgotada && intento < MAX_QUOTA_RETRIES) {
+      const espera = quotaWaitMs(rateLimit.resetAt);
+      avisaReintento429(page, intento + 1, espera);
+      await sleep(espera);
+      continue;
+    }
+
+    // Pasada la ultima pagina real, Ingram no manda una pagina vacia como el
+    // resto: responde 404 con un cuerpo tipo
+    // `[{"traceid":"...","message":"Record not found",...}]`. En la primera
+    // pagina ese mismo 404 sigue siendo un error real (no hay catalogo); desde
+    // la segunda es el fin normal del listado, igual que un lote vacio.
+    if (page > 1 && response.status === 404 && /record not found/i.test(text)) {
+      return { pagina: { catalog: [] }, rateLimit, finCatalogo: true };
+    }
+
+    throw new ProviderError(
+      'upstream',
+      cuotaAgotada
+        ? 'Ingram corto por cuota al pedir el catalogo (la cuota es del API app completo, no por endpoint)'
+        : `Ingram responded with HTTP ${response.status} al pedir el catalogo`,
+      text.slice(0, 500),
+    );
+  }
+}
+
 export async function loadIngramCatalog(): Promise<NormalizedProduct[]> {
   const productos: NormalizedProduct[] = [];
   const limit = maxPages();
   let page = 1;
   let found: number | null = null;
+  // Espera pendiente por cuota casi agotada, calculada con la cabecera de la
+  // pagina anterior; cuando aplica reemplaza a la pausa fija de mas abajo.
+  let esperaPorCuota: number | null = null;
 
   const pause = msBetweenPages();
 
   for (; page <= limit; page += 1) {
     // La pausa va antes de cada pagina menos la primera: sin ella el volcado
     // dispara ~60 llamadas en pocos segundos y Ingram lo corta por cuota.
-    if (page > 1 && pause > 0) await sleep(pause);
+    if (page > 1) {
+      if (esperaPorCuota != null) {
+        avisaEsperaPorCuota(page, esperaPorCuota);
+        await sleep(esperaPorCuota);
+      } else if (pause > 0) {
+        await sleep(pause);
+      }
+    }
 
-    const response = await readJson<CatalogPage>(
-      await fetchIngram('resellers/v6/catalog', {
-        params: { pageNumber: String(page), pageSize: String(PAGE_SIZE) },
-      }),
-      'el catalogo',
-    );
+    const { pagina: response, rateLimit, finCatalogo } = await fetchCatalogPage(page);
+
+    if (finCatalogo) {
+      console.error(
+        `[ingram] catalogo: pagina ${page} respondio 404 Record not found, se toma como fin real del listado (${productos.length} productos)`,
+      );
+      break;
+    }
+
+    // Si esta pagina ya dejo la cuota al limite, la proxima espera hasta el
+    // reset en vez de la pausa fija; con margen de sobra no hace falta nada
+    // extra, la pausa de siempre alcanza.
+    esperaPorCuota =
+      rateLimit.remaining != null && rateLimit.remaining <= RATE_LIMIT_RESERVE
+        ? quotaWaitMs(rateLimit.resetAt)
+        : null;
 
     if (found === null && typeof response.recordsFound === 'number') {
       found = response.recordsFound;

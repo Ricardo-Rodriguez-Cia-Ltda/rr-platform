@@ -68,7 +68,7 @@ function catalogFor(proveedor: string): NormalizedProduct[] | null {
  * orden de preferencia es stock confirmado, despues desconocido, y ultimo el
  * cero confirmado, que es el unico "no" de verdad.
  */
-function pickBest(ofertas: Offer[]): WinningOffer | null {
+export function pickBest(ofertas: Offer[]): WinningOffer | null {
   if (ofertas.length === 0) return null;
 
   const withStock = ofertas.filter((o) => o.stock !== null && o.stock > 0);
@@ -90,7 +90,7 @@ function pickBest(ofertas: Offer[]): WinningOffer | null {
   return { ...candidates.reduce((a, b) => (b.precio < a.precio ? b : a)), criterio };
 }
 
-function cheapest(proveedor: string, prices: Map<string, PriceInfo>): Offer | null {
+export function cheapest(proveedor: string, prices: Map<string, PriceInfo>): Offer | null {
   let best: Offer | null = null;
   for (const [sku, precio] of prices) {
     // Un precio no positivo no es un precio, es ausencia de precio: sale

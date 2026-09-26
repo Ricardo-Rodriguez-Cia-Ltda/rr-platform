@@ -1,5 +1,7 @@
 const API_BASE_DEFAULT = "https://api.pyxis-latam.cl/rr/captador-precios";
 const TIMEOUT_MS = 25000;
+// Mayoristas que /search puede informar como `proveedor` de un producto.
+const PROVEEDORES_VALIDOS = new Set(["intcomex", "ingram", "tecnoglobal"]);
 
 // La arista fn_cotizar → agente_presentacion es incondicional: si esta
 // function falla y no toca las variables, el agente presenta la cotizacion
@@ -129,9 +131,17 @@ async function handler(request, env) {
     }
 
     // Fallback: sin mpn, o el mejor precio no se pudo resolver. Se cotiza contra
-    // Intcomex, que es de donde salio el producto en la busqueda.
+    // el mayorista que gano en la busqueda (item.proveedor, que /search ya
+    // informa); si no vino o no es uno de los tres conocidos, se cae a
+    // Intcomex como antes. La etiqueta `comparacion` se deja fija en
+    // "fallback_intcomex" para los tres casos: nada la distingue por
+    // mayorista (ni un prompt ni otro consumidor la lee para eso — se
+    // reviso functions, prompts, tienda y backoffice) y diversificarla solo
+    // agregaria valores al enum sin ningun beneficio.
     if (!resultado && sku) {
-      const params = new URLSearchParams({ proveedor: "intcomex", sku });
+      const proveedorItem = String(item.proveedor || "").trim().toLowerCase();
+      const proveedorFallback = PROVEEDORES_VALIDOS.has(proveedorItem) ? proveedorItem : "intcomex";
+      const params = new URLSearchParams({ proveedor: proveedorFallback, sku });
       const intento = await consultar(base, apiKey, params);
       if (intento.status === 200 && intento.datos?.mejor) {
         resultado = intento.datos;

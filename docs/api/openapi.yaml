@@ -13,10 +13,11 @@ info:
     consultan en vivo en cada request, con dos excepciones documentadas: el
     ranking de /{proveedor}/search contra Tecnoglobal puede traer precios de
     hasta una hora, porque su API limita muy fuerte el volcado del catálogo; y
-    /search (Intcomex e Ingram) puede servir precio de un caché propio de hasta
-    15 minutos, o hasta 24 h si el proveedor cae, con la edad declarada en
-    precios_de_hace_min. /product, /price y /mejor-precio siempre cotizan en
-    vivo, sin excepción.
+    /search puede servir precio de un caché propio de hasta 15 minutos, o
+    hasta 24 h si el proveedor cae, con la edad declarada en
+    precios_de_hace_min. /search compara los tres mayoristas y muestra por
+    producto el mismo ganador que /mejor-precio (campo `proveedor`).
+    /product, /price y /mejor-precio siempre cotizan en vivo, sin excepción.
 
     Cada distribuidor tiene su propio SKU: no son comparables entre sí. Lo
     único común es el mpn (part number del fabricante), que es lo que usa
@@ -52,10 +53,12 @@ paths:
     get:
       operationId: buscarProductos
       tags: [busqueda]
-      summary: Buscar productos por texto libre (Intcomex, compatibilidad)
+      summary: Buscar productos por texto libre (compara los tres mayoristas)
       description: |
-        Devuelve productos del catálogo que calzan con `q`, ya cotizados contra
-        el proveedor.
+        Devuelve productos que calzan con `q`, ya cotizados contra los tres
+        mayoristas (Intcomex, Tecnoglobal, Ingram). Por producto muestra un
+        solo ganador, elegido con el mismo criterio que `/mejor-precio`; el
+        campo `proveedor` de cada producto dice cuál mayorista ganó.
 
         Si la consulta calza más de 25 productos y no se envió `marca`,
         `categoria` ni `subcategoria`, responde 409 con las facetas
@@ -952,6 +955,11 @@ components:
           description: |
             URL pública en Supabase Storage del banco de fotos, o null si el
             producto todavía no tiene una.
+        proveedor:
+          type: string
+          description: |
+            Mayorista ganador (intcomex, tecnoglobal o ingram). Solo lo
+            informa /search, que es el único endpoint que compara los tres.
 
     ProductoDetallado:
       allOf:
@@ -982,10 +990,23 @@ components:
         parcial:
           type: boolean
           description: |
-            Presente y true solo si la búsqueda quedó a medias: la sonda inicial
-            proyectó pasarse del presupuesto (20s) y la ronda paralela no se
-            lanzó, o un lote de la ronda falló. No es un error, pero
-            impide afirmar que algo no existe: solo se sabe de los `evaluados`.
+            Presente y true solo si algun producto evaluado o mostrado quedo a
+            medias de verdad: tiene un SKU sin resolver en algun mayorista y,
+            ademas, no hay ganador o el ganador no tiene stock confirmado. Que
+            un mayorista se haya caido no basta por si solo — si otro ya lo
+            vende con stock, ese sigue siendo el ganador legitimo. Tambien es
+            true si no quedo tiempo para la segunda ronda y quedaron
+            candidatos sin mirar. No es un error, pero impide afirmar que algo
+            no existe: solo se sabe de los `evaluados`.
+        proveedores_incompletos:
+          type: array
+          description: |
+            Nombres ordenados de los mayoristas que dejaron al menos un SKU
+            sin resolver (ni en vivo ni en cache) en esta busqueda. Solo
+            presente cuando no esta vacio. Es informativo: no implica
+            `parcial`, porque un ganador con stock de otro mayorista sigue
+            siendo confiable aunque este proveedor haya fallado.
+          items: { type: string, enum: [intcomex, tecnoglobal, ingram] }
         productos:
           type: array
           description: |

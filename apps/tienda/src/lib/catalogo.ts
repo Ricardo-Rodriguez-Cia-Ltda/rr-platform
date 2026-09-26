@@ -9,6 +9,8 @@ const TIMEOUT_MS = 21000; // presupuesto de la API (20s) + margen
 export interface ProductoTienda {
   sku: string; mpn: string | null; marca: string | null; nombre: string;
   categoria: string | null;
+  /** Mayorista ganador (intcomex, tecnoglobal o ingram); lo informa /search. */
+  proveedor?: string;
   /** Neto unitario en CLP (sin IVA): es lo que el carro suma. */
   precioNetoClp: number;
   /** Neto unitario + IVA: es lo que se muestra. */
@@ -129,6 +131,9 @@ export async function buscarCatalogo(params: {
           marca: p.marca == null ? null : String(p.marca),
           nombre: String(p.nombre ?? ''),
           categoria: p.categoria == null ? null : String(p.categoria),
+          // Opcional de verdad: se omite la clave (no se deja en `undefined`)
+          // para no romper el invariante de "estas y solo estas claves".
+          ...(typeof p.proveedor === 'string' ? { proveedor: p.proveedor } : {}),
           precioNetoClp,
           precioClp,
           precioFmt: formatCLP(precioClp),

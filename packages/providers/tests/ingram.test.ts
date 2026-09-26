@@ -52,6 +52,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe('isConfigured', () => {
@@ -250,19 +251,176 @@ describe('loadIngramCatalog', () => {
   });
 
   // "esperar" no es lo mismo que "algo se rompio": quien lea el log tiene que
-  // saber que la cura es bajar el ritmo, no investigar una caida.
-  it('nombra la cuota cuando Ingram corta por exceso de llamadas', async () => {
+  // saber que la cura es bajar el ritmo, no investigar una caida. Ahora un
+  // 429 aislado se reintenta (ver describe de mas abajo); esto verifica que
+  // seis 429 seguidos en la misma pagina si terminan en error nombrando la
+  // cuota.
+  it('nombra la cuota cuando Ingram corta por exceso de llamadas seis veces seguidas', async () => {
+    vi.useFakeTimers();
+    const pagina429 = () =>
+      new Response(
+        JSON.stringify({ errors: [{ message: 'The quota limit exceeds for calls on your API app.' }] }),
+        { status: 429 },
+      );
     vi.stubGlobal(
       'fetch',
-      conToken(
-        new Response(
-          JSON.stringify({ errors: [{ message: 'The quota limit exceeds for calls on your API app.' }] }),
-          { status: 429 },
-        ),
-      ),
+      conToken(pagina429(), pagina429(), pagina429(), pagina429(), pagina429(), pagina429()),
     );
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    await expect(loadIngramCatalog()).rejects.toThrow(/corto por cuota/i);
+    const promesa = loadIngramCatalog();
+    const expectativa = expect(promesa).rejects.toThrow(/corto por cuota/i);
+    // Sin cabecera de reset se cae al fallback de 60 s; cinco esperas (una
+    // por reintento) antes de darse por vencido.
+    await vi.advanceTimersByTimeAsync(5 * 60_000 + 1000);
+    await expectativa;
+
+    expect(errorSpy).toHaveBeenCalledTimes(5);
+    errorSpy.mockRestore();
+  });
+
+  // Medido contra la API real (diagnostico de hoy): remaining bajo de 59 a 0
+  // en 77 paginas y solo se recargo una vez, a medias. Sin usar la cabecera,
+  // el volcado real se corta por cuota bastante antes de terminar el
+  // catalogo (~13.200 productos).
+  describe('cuota casi agotada (cabeceras x-ratelimit-*)', () => {
+    it('con remaining bajo espera hasta el reset antes de pedir la siguiente pagina', async () => {
+      vi.useFakeTimers();
+      const ahora = Date.now();
+      const pagina1 = new Response(JSON.stringify({ catalog: [{ ingramPartNumber: 'A1' }] }), {
+        status: 200,
+        headers: {
+          'x-ratelimit-remaining': '3',
+          'x-ratelimit-reset': String(ahora + 5000),
+        },
+      });
+      const fetchMock = conToken(pagina1, json({ catalog: [] }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      let listo = false;
+      const promesa = loadIngramCatalog().then((r) => {
+        listo = true;
+        return r;
+      });
+
+      // Todavia no pasaron los ~6 s (reset + 1 s): la pagina 2 sigue esperando.
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(fetchMock).toHaveBeenCalledTimes(2); // token + pagina 1
+      expect(listo).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(3500);
+      const catalogo = await promesa;
+
+      expect(listo).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(catalogo.map((p) => p.sku)).toEqual(['A1']);
+    });
+
+    it('avisa por consola cada vez que espera por cuota casi agotada', async () => {
+      vi.useFakeTimers();
+      const ahora = Date.now();
+      const pagina1 = new Response(JSON.stringify({ catalog: [{ ingramPartNumber: 'A1' }] }), {
+        status: 200,
+        headers: { 'x-ratelimit-remaining': '2', 'x-ratelimit-reset': String(ahora + 5000) },
+      });
+      vi.stubGlobal('fetch', conToken(pagina1, json({ catalog: [] })));
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const promesa = loadIngramCatalog();
+      await vi.advanceTimersByTimeAsync(7000);
+      await promesa;
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/^\[ingram\] catalogo: cuota casi agotada en pagina 2, espera \d+s$/),
+      );
+      errorSpy.mockRestore();
+    });
+
+    it('un 429 de cuota en una pagina se reintenta tras esperar y el catalogo se completa', async () => {
+      vi.useFakeTimers();
+      const ahora = Date.now();
+      const pagina1 = json({ catalog: [{ ingramPartNumber: 'A1' }] });
+      const pagina2Con429 = new Response(
+        JSON.stringify({ errors: [{ message: 'The quota limit exceeds for calls on your API app.' }] }),
+        {
+          status: 429,
+          // reset a 6 s: por encima del piso de 5 s de quotaWaitMs, asi la
+          // espera sale de la cabecera y no del fallback de 60 s (ver test
+          // aparte para el caso con reset ya vencido).
+          headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(ahora + 6000) },
+        },
+      );
+      const pagina2Ok = json({ catalog: [{ ingramPartNumber: 'A2' }] });
+      const paginaVacia = json({ catalog: [] });
+
+      vi.stubGlobal('fetch', conToken(pagina1, pagina2Con429, pagina2Ok, paginaVacia));
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const promesa = loadIngramCatalog();
+      await vi.advanceTimersByTimeAsync(8000);
+      const catalogo = await promesa;
+
+      expect(catalogo.map((p) => p.sku)).toEqual(['A1', 'A2']);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('429 por cuota en pagina 2, reintento 1/5'),
+      );
+      errorSpy.mockRestore();
+    });
+
+    // El reset puede llegar ya vencido (cabecera stale, o el reloj del host
+    // adelantado respecto al de Ingram): el calculo crudo (reset + 1s - ahora)
+    // da un numero negativo, y sin piso el reintento saldria casi de
+    // inmediato, quemando los 5 intentos en segundos en vez de dar tiempo a
+    // que la cuota se recargue.
+    it('un reset ya vencido no dispara un reintento casi inmediato: usa el fallback de 60 s', async () => {
+      vi.useFakeTimers();
+      const ahora = Date.now();
+      const pagina1 = json({ catalog: [{ ingramPartNumber: 'A1' }] });
+      const pagina2Con429 = new Response(
+        JSON.stringify({ errors: [{ message: 'The quota limit exceeds for calls on your API app.' }] }),
+        {
+          status: 429,
+          headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(ahora - 5000) },
+        },
+      );
+      const pagina2Ok = json({ catalog: [{ ingramPartNumber: 'A2' }] });
+      const paginaVacia = json({ catalog: [] });
+
+      vi.stubGlobal('fetch', conToken(pagina1, pagina2Con429, pagina2Ok, paginaVacia));
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      let listo = false;
+      const promesa = loadIngramCatalog().then((r) => {
+        listo = true;
+        return r;
+      });
+
+      // A los 10 s todavia no paso el fallback de 60 s: el reintento no salio.
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(listo).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(55_000);
+      const catalogo = await promesa;
+
+      expect(listo).toBe(true);
+      expect(catalogo.map((p) => p.sku)).toEqual(['A1', 'A2']);
+      errorSpy.mockRestore();
+    });
+
+    // Sin cabeceras, el volcado se comporta igual que antes: nada de esperas
+    // largas de cuota, solo la pausa fija entre paginas (aca en 0).
+    it('sin cabeceras de cuota no agrega esperas extra', async () => {
+      const fetchMock = conToken(
+        json({ catalog: [{ ingramPartNumber: 'A1' }] }),
+        json({ catalog: [] }),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const t0 = Date.now();
+      await loadIngramCatalog();
+
+      expect(Date.now() - t0).toBeLessThan(500);
+    });
   });
 
   it('descarta productos sin ingramPartNumber, que no se pueden cotizar', async () => {
@@ -299,6 +457,44 @@ describe('loadIngramCatalog', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(loadIngramCatalog()).rejects.toThrow();
+  });
+
+  // Visto en una descarga real: pasada la ultima pagina Ingram no devuelve una
+  // pagina vacia como las demas, responde 404 con "Record not found". El
+  // volcado viejo no llegaba tan lejos y nunca lo vio.
+  describe('fin de catalogo con 404 "Record not found"', () => {
+    function pagina404RecordNotFound(): Response {
+      return new Response(
+        JSON.stringify([{ traceid: 'abc123', type: 'Errors', message: 'Record not found', fields: [] }]),
+        { status: 404 },
+      );
+    }
+
+    it('un 404 "Record not found" pasada la primera pagina termina el catalogo ahi', async () => {
+      const fetchMock = conToken(
+        json({ catalog: [{ ingramPartNumber: 'A1' }] }),
+        json({ catalog: [{ ingramPartNumber: 'A2' }] }),
+        pagina404RecordNotFound(),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const catalogo = await loadIngramCatalog();
+
+      expect(catalogo.map((p) => p.sku)).toEqual(['A1', 'A2']);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('pagina 3 respondio 404 Record not found'),
+      );
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('2 productos'));
+      errorSpy.mockRestore();
+    });
+
+    it('un 404 "Record not found" en la primera pagina sigue siendo un error', async () => {
+      const fetchMock = conToken(pagina404RecordNotFound());
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(loadIngramCatalog()).rejects.toThrow(/HTTP 404/);
+    });
   });
 });
 
@@ -380,6 +576,23 @@ describe('getPrices', () => {
 
   it('el tope declarado coincide con el que aplica getPrices', () => {
     expect(ingram.maxSkusPerBatch).toBe(50);
+  });
+
+  // El 429 real dice "quota limit exceeds ... on your API app": la cuota es
+  // del app completo, no de 60 llamadas por minuto y por endpoint como decia
+  // antes este mensaje.
+  it('un 429 de cuota nombra que la cuota es del API app completo, no por endpoint', async () => {
+    vi.stubGlobal(
+      'fetch',
+      conToken(
+        new Response(
+          JSON.stringify({ errors: [{ message: 'The quota limit exceeds for calls on your API app.' }] }),
+          { status: 429 },
+        ),
+      ),
+    );
+
+    await expect(getPrices(['4A0036'])).rejects.toThrow(/cuota es del API app completo/);
   });
 });
 
