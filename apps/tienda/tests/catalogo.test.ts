@@ -47,6 +47,17 @@ describe('buscarCatalogo', () => {
       expect(Object.keys(p).sort()).toEqual(['categoria', 'disponible', 'foto', 'marca', 'mpn', 'nombre', 'precioClp', 'precioFmt', 'precioNetoClp', 'sku']);
     }
   });
+  it('propaga proveedor cuando la API lo informa, y lo omite (no undefined) cuando no viene', async () => {
+    conEnv();
+    const conProveedor = {
+      ...RESPUESTA,
+      productos: [{ ...RESPUESTA.productos[0], proveedor: 'ingram' }, RESPUESTA.productos[1]],
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(conProveedor), { status: 200 })));
+    const r = await buscarCatalogo({ q: 'notebook' });
+    expect(r?.productos[0].proveedor).toBe('ingram');
+    expect(r?.productos[1]).not.toHaveProperty('proveedor');
+  });
   it('lee las facetas en la forma real {valor,n} y saca los nombres', async () => {
     conEnv();
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(RESPUESTA), { status: 200 })));

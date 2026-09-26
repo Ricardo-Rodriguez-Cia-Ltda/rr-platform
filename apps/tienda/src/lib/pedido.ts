@@ -43,6 +43,7 @@ export function validarPedido(body: unknown):
       marca: crudo.marca == null ? null : String(crudo.marca),
       nombre: String(crudo.nombre ?? ''),
       cantidad,
+      ...(typeof crudo.proveedor === 'string' ? { proveedor: crudo.proveedor } : {}),
       precioNetoClp: Number(crudo.precioNetoClp ?? 0),
       precioTiendaClp: Number(crudo.precioTiendaClp ?? 0),
     });
@@ -62,7 +63,14 @@ export function validarPedido(body: unknown):
 export function armarPayloadCotizacion(items: ItemCarro[], telefono: string): unknown {
   return {
     execution_context: {
-      vars: { cart_items: items.map((i) => ({ sku: i.sku, mpn: i.mpn, marca: i.marca, cantidad: i.cantidad })) },
+      vars: {
+        cart_items: items.map((i) => ({
+          sku: i.sku, mpn: i.mpn, marca: i.marca, cantidad: i.cantidad,
+          // Solo cuando /search lo informo: asi el bot sabe de que mayorista
+          // salio el sku sin tener que adivinarlo (generar-cotizacion-v2.js).
+          ...(i.proveedor ? { proveedor: i.proveedor } : {}),
+        })),
+      },
       context: { phone_number: telefono },
     },
   };
