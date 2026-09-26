@@ -16,16 +16,64 @@ export const MAX_UNIDADES = 20;
 const CLAVE = 'drc-carro';
 
 /**
+ * Alias de marca: MISMA tabla que BRAND_ALIASES en packages/domain/src/product.ts.
+ *
+ * La tienda no depende de @rr/domain (no esta en su package.json ni en su
+ * tsconfig, que ademas excluye del build de paquetes del monorepo), asi que
+ * esta tabla se copia a mano en vez de importar `canonicalBrand`. Un test en
+ * carro.test.ts pinea que ambas dan el mismo resultado para las marcas de
+ * esta lista; si la tabla del dominio cambia, hay que actualizar esta.
+ */
+const ALIAS_MARCA: [prefijo: string, canonica: string][] = [
+  ['hewlett packard enterprise', 'hpe'],
+  ['american power', 'apc'],
+  ['hyperx', 'hp'],
+  ['poly', 'hp'],
+  ['hp poly', 'hp'],
+  ['aruba', 'hpe'],
+  ['meraki', 'cisco'],
+];
+
+/**
+ * Separa en palabras igual que `tokenize` de packages/domain/src/text.ts:
+ * saca acentos, pasa a minuscula y corta en cualquier corrida de caracteres
+ * que no sean letra o numero (no solo espacios). Sin esto "HP-POLY" queda
+ * como un solo token y nunca calza con el alias "hp poly".
+ */
+function normalizarPalabras(texto: string): string {
+  return texto
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean)
+    .join(' ');
+}
+
+/** Espejo de `canonicalBrand` (packages/domain/src/product.ts): ver ALIAS_MARCA. */
+function marcaCanonica(marca: string | null): string {
+  const normalizada = normalizarPalabras(String(marca ?? ''));
+  if (!normalizada) return '';
+  for (const [prefijo, canonica] of ALIAS_MARCA) {
+    if (normalizada === prefijo || normalizada.startsWith(`${prefijo} `)) return canonica;
+  }
+  return normalizada.split(' ')[0];
+}
+
+/**
  * Identifica una linea del carro por PRODUCTO, no por sku: el sku es del
  * mayorista ganador y puede cambiar de una busqueda a otra sin que el
  * producto sea otro (ver docs/superpowers/specs de union-key). Con mpn y
  * marca se arma la misma clave que usa la union entre mayoristas (mpn
- * compactado + primera palabra de la marca); sin eso, el sku es lo unico
- * estable.
+ * compactado + marca canonica, con la misma tabla de alias); sin eso, el sku
+ * es lo unico estable.
+ *
+ * Exportada: la usan tambien Checkout.tsx (React key y quien identifica la
+ * linea a cambiar) y los tests.
  */
-function claveProducto(item: Pick<ItemCarro, 'sku' | 'mpn' | 'marca'>): string {
+export function claveProducto(item: Pick<ItemCarro, 'sku' | 'mpn' | 'marca'>): string {
   const mpn = String(item?.mpn ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const marca = String(item?.marca ?? '').trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+  const marca = marcaCanonica(item?.marca ?? null);
   if (mpn && marca) return `${mpn}|${marca}`;
   return `sku:${item?.sku}`;
 }
@@ -56,12 +104,17 @@ export function agregar(items: ItemCarro[], nuevo: ItemCarro): ItemCarro[] | { e
   return [...items, nuevo];
 }
 
-export function cambiarCantidad(items: ItemCarro[], sku: string, cantidad: number): ItemCarro[] {
+/**
+ * `clave` es `claveProducto(item)`, no el sku: dos lineas de proveedores
+ * distintos pueden compartir sku (ver comentario de `claveProducto`), y
+ * identificar por sku cambiaria o borraria las dos a la vez.
+ */
+export function cambiarCantidad(items: ItemCarro[], clave: string, cantidad: number): ItemCarro[] {
   // Si no es finito, devolver items sin cambios
   if (!Number.isFinite(cantidad)) return items;
-  if (cantidad <= 0) return items.filter((i) => i.sku !== sku);
+  if (cantidad <= 0) return items.filter((i) => claveProducto(i) !== clave);
   const clamped = Math.min(Math.max(1, Math.round(cantidad)), MAX_UNIDADES);
-  return items.map((i) => (i.sku === sku ? { ...i, cantidad: clamped } : i));
+  return items.map((i) => (claveProducto(i) === clave ? { ...i, cantidad: clamped } : i));
 }
 
 /**
@@ -89,16 +142,24 @@ export function contarUnidades(items: ItemCarro[]): number {
  * deberia, pero leerCarro no confia en lo que hay en localStorage). Las
  * cantidades se suman con tope MAX_UNIDADES; sku, proveedor y precios quedan
  * los de la ULTIMA linea de cada clave.
+ *
+ * Lineas con sku vacio o con cantidad invalida (no finita o <= 0) se
+ * descartan en vez de colarse como una linea de 0 unidades: `agregar` y
+ * `cambiarCantidad` nunca guardan algo asi, asi que solo puede venir de
+ * localStorage tocado a mano, y una cantidad 0 igual llega a
+ * `validarPedido` como "cantidad invalida" en vez de desaparecer del carro.
  */
 function fusionarPorClave(items: ItemCarro[]): ItemCarro[] {
   const orden: string[] = [];
   const porClave = new Map<string, ItemCarro>();
   for (const item of items) {
     if (!item || typeof item !== 'object') continue;
+    const sku = typeof item.sku === 'string' ? item.sku.trim() : '';
+    const cantidadNueva = Number(item.cantidad);
+    if (!sku || !Number.isFinite(cantidadNueva) || cantidadNueva <= 0) continue;
     const clave = claveProducto(item);
     const previo = porClave.get(clave);
     const cantidadPrevia = previo ? Number(previo.cantidad) || 0 : 0;
-    const cantidadNueva = Number(item.cantidad) || 0;
     if (!previo) orden.push(clave);
     porClave.set(clave, { ...item, cantidad: Math.min(MAX_UNIDADES, cantidadPrevia + cantidadNueva) });
   }

@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { cambiarCantidad, guardarCarro, leerCarro, totalIndicativo, type ItemCarro } from '../../src/lib/carro.js';
+import { cambiarCantidad, claveProducto, guardarCarro, leerCarro, totalIndicativo, type ItemCarro } from '../../src/lib/carro.js';
 import { leerFicha } from '../../src/lib/ficha.js';
 import { formatCLP } from '../../src/lib/precios.js';
 
@@ -33,8 +33,8 @@ export function Checkout({ iva }: { iva: number }) {
 
   useEffect(() => { setItems(leerCarro()); setDatos(leerDatos()); }, []);
 
-  function actualizar(sku: string, cantidad: number) {
-    const nuevos = cambiarCantidad(items, sku, cantidad);
+  function actualizar(clave: string, cantidad: number) {
+    const nuevos = cambiarCantidad(items, clave, cantidad);
     setItems(nuevos);
     guardarCarro(nuevos);
     setRecotizado(null);
@@ -111,7 +111,7 @@ export function Checkout({ iva }: { iva: number }) {
         <div>
           <div className="panel">
             {items.map((i) => (
-              <div className="linea-carro" key={i.sku}>
+              <div className="linea-carro" key={claveProducto(i)}>
                 <div className="cuerpo">
                   <div className="titulo">{leerFicha(i.nombre, i.marca).titulo || i.nombre}</div>
                   <div className="mpn">
@@ -130,7 +130,7 @@ export function Checkout({ iva }: { iva: number }) {
                     max={20}
                     value={i.cantidad}
                     disabled={trabajando}
-                    onChange={(e) => actualizar(i.sku, Number(e.target.value))}
+                    onChange={(e) => actualizar(claveProducto(i), Number(e.target.value))}
                     aria-label={`Cantidad de ${i.nombre}`}
                   />
                 </div>

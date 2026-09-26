@@ -241,7 +241,7 @@ async function readJson<T>(response: Response, context: string): Promise<T> {
     throw new ProviderError(
       'upstream',
       quotaExceeded
-        ? `Ingram corto por cuota al pedir ${context} (permite 60 llamadas por minuto y por endpoint)`
+        ? `Ingram corto por cuota al pedir ${context} (la cuota es del API app completo, no por endpoint)`
         : `Ingram responded with HTTP ${response.status} al pedir ${context}`,
       text.slice(0, 500),
     );
@@ -283,17 +283,35 @@ function readRateLimit(response: Response): RateLimitInfo {
  * contra la API real, el reset avanza en saltos de ~60 s y no calza con un
  * contador limpio de 60 llamadas por minuto. Sin cabecera usable, o con una
  * invalida, se cae al fallback de 60 s.
+ *
+ * Si el calculo da menos de 5 s (reset ya pasado, o el reloj del host
+ * adelantado respecto al de Ingram por mas de 1 s) tampoco se usa ese numero:
+ * un reintento casi inmediato quema los 5 intentos en segundos, que es
+ * exactamente la falla que este colchon deberia evitar. En ese caso se cae al
+ * mismo fallback de 60 s.
  */
 function quotaWaitMs(resetAt: number | null): number {
   if (resetAt == null) return DEFAULT_QUOTA_WAIT_MS;
   const espera = resetAt - Date.now() + 1000;
-  if (!Number.isFinite(espera)) return DEFAULT_QUOTA_WAIT_MS;
-  return Math.min(Math.max(espera, 0), MAX_QUOTA_WAIT_MS);
+  if (!Number.isFinite(espera) || espera < 5000) return DEFAULT_QUOTA_WAIT_MS;
+  return Math.min(espera, MAX_QUOTA_WAIT_MS);
 }
 
 function avisaEsperaPorCuota(page: number, esperaMs: number): void {
   console.error(
     `[ingram] catalogo: cuota casi agotada en pagina ${page}, espera ${Math.round(esperaMs / 1000)}s`,
+  );
+}
+
+/**
+ * Aviso de un 429 real (no el colchon proactivo de `avisaEsperaPorCuota`):
+ * Ingram ya corto la pagina, no es una espera preventiva. Se nombra aparte
+ * para que el log distinga "estamos por quedarnos sin cuota" de "ya nos
+ * quedamos sin cuota y estamos reintentando".
+ */
+function avisaReintento429(page: number, intento: number, esperaMs: number): void {
+  console.error(
+    `[ingram] catalogo: 429 por cuota en pagina ${page}, reintento ${intento}/${MAX_QUOTA_RETRIES}, espera ${Math.round(esperaMs / 1000)}s`,
   );
 }
 
@@ -361,7 +379,7 @@ function maxPages(): number {
  */
 async function fetchCatalogPage(
   page: number,
-): Promise<{ pagina: CatalogPage; rateLimit: RateLimitInfo }> {
+): Promise<{ pagina: CatalogPage; rateLimit: RateLimitInfo; finCatalogo?: boolean }> {
   for (let intento = 0; ; intento += 1) {
     const response = await fetchIngram('resellers/v6/catalog', {
       params: { pageNumber: String(page), pageSize: String(PAGE_SIZE) },
@@ -376,9 +394,18 @@ async function fetchCatalogPage(
     const cuotaAgotada = response.status === 429 || /quota limit exceeds/i.test(text);
     if (cuotaAgotada && intento < MAX_QUOTA_RETRIES) {
       const espera = quotaWaitMs(rateLimit.resetAt);
-      avisaEsperaPorCuota(page, espera);
+      avisaReintento429(page, intento + 1, espera);
       await sleep(espera);
       continue;
+    }
+
+    // Pasada la ultima pagina real, Ingram no manda una pagina vacia como el
+    // resto: responde 404 con un cuerpo tipo
+    // `[{"traceid":"...","message":"Record not found",...}]`. En la primera
+    // pagina ese mismo 404 sigue siendo un error real (no hay catalogo); desde
+    // la segunda es el fin normal del listado, igual que un lote vacio.
+    if (page > 1 && response.status === 404 && /record not found/i.test(text)) {
+      return { pagina: { catalog: [] }, rateLimit, finCatalogo: true };
     }
 
     throw new ProviderError(
@@ -414,7 +441,14 @@ export async function loadIngramCatalog(): Promise<NormalizedProduct[]> {
       }
     }
 
-    const { pagina: response, rateLimit } = await fetchCatalogPage(page);
+    const { pagina: response, rateLimit, finCatalogo } = await fetchCatalogPage(page);
+
+    if (finCatalogo) {
+      console.error(
+        `[ingram] catalogo: pagina ${page} respondio 404 Record not found, se toma como fin real del listado (${productos.length} productos)`,
+      );
+      break;
+    }
 
     // Si esta pagina ya dejo la cuota al limite, la proxima espera hasta el
     // reset en vez de la pausa fija; con margen de sobra no hace falta nada
