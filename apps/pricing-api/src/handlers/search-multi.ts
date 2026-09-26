@@ -73,6 +73,8 @@ export function createMultiSearchHandler(providers: Record<string, Provider>): H
     );
 
     const precios: Record<string, Map<string, PriceInfo>> = Object.fromEntries(cargados.map(({ provider }) => [provider.name, new Map()]));
+    // SKU que ni se cotizaron en vivo ni se rescataron del cache, por mayorista.
+    const sinResolverPorProveedor: Record<string, Set<string>> = Object.fromEntries(cargados.map(({ provider }) => [provider.name, new Set()]));
     let parcial = false;
     let maxAgeMs = 0;
     const conSkus = new Set<string>();
@@ -92,7 +94,7 @@ export function createMultiSearchHandler(providers: Record<string, Provider>): H
       );
       for (const l of lotes) {
         for (const [sku, p] of l.precios) precios[l.nombre].set(sku, p);
-        if (l.incompleto) parcial = true;
+        for (const sku of l.sinResolver) sinResolverPorProveedor[l.nombre].add(sku);
         maxAgeMs = Math.max(maxAgeMs, l.maxAgeMs);
         if ((skusDe[l.nombre] ?? []).length > 0) {
           conSkus.add(l.nombre);
@@ -106,6 +108,14 @@ export function createMultiSearchHandler(providers: Record<string, Provider>): H
     const procesar = (ronda: GrupoBusqueda[]): void => {
       for (const g of ronda) {
         const ganador = elegirGanador(g, precios);
+        // Un grupo con un SKU sin resolver es "incompleto" solo si ademas no
+        // hay ganador o el ganador no tiene stock: un mayorista caido puede
+        // ganarle en precio a un ganador con stock, y eso es aceptable — no
+        // vale la pena marcar `parcial` por eso.
+        const sinResolver = Object.entries(g.porProveedor).some(
+          ([proveedor, lista]) => lista.some((p) => sinResolverPorProveedor[proveedor]?.has(p.sku)),
+        );
+        if (sinResolver && (!ganador || (ganador.stock ?? 0) <= 0)) parcial = true;
         if (!ganador) continue;
         // Lo descriptivo sale del representante (Intcomex si esta): sus nombres
         // y categorias son los que entienden la tienda y explainEmpty. Lo que
@@ -152,11 +162,19 @@ export function createMultiSearchHandler(providers: Record<string, Provider>): H
       return;
     }
 
+    // Mayoristas que dejaron al menos un SKU sin resolver, aunque no hayan
+    // llegado a marcar `parcial` (un ganador con stock los tapa).
+    const proveedoresIncompletos = Object.entries(sinResolverPorProveedor)
+      .filter(([, skus]) => skus.size > 0)
+      .map(([nombre]) => nombre)
+      .sort();
+
     const devueltos = productos.map((p) => p.precio);
     res.status(200).json({
       total: grupos.length,
       evaluados: evaluados.length,
       ...(parcial ? { parcial: true } : {}),
+      ...(proveedoresIncompletos.length > 0 ? { proveedores_incompletos: proveedoresIncompletos } : {}),
       productos,
       facetas: devueltos.length > 0 ? { ...facetas, precio: { min: Math.min(...devueltos), max: Math.max(...devueltos) } } : facetas,
       ...(productos.length === 0 && evaluados.length > 0 ? { sin_resultados: explainEmpty(evaluados, onlyWithStock, parcial) } : {}),

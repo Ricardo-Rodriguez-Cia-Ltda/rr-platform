@@ -990,10 +990,23 @@ components:
         parcial:
           type: boolean
           description: |
-            Presente y true solo si la búsqueda quedó a medias: la sonda inicial
-            proyectó pasarse del presupuesto (20s) y la ronda paralela no se
-            lanzó, o un lote de la ronda falló. No es un error, pero
-            impide afirmar que algo no existe: solo se sabe de los `evaluados`.
+            Presente y true solo si algun producto evaluado o mostrado quedo a
+            medias de verdad: tiene un SKU sin resolver en algun mayorista y,
+            ademas, no hay ganador o el ganador no tiene stock confirmado. Que
+            un mayorista se haya caido no basta por si solo — si otro ya lo
+            vende con stock, ese sigue siendo el ganador legitimo. Tambien es
+            true si no quedo tiempo para la segunda ronda y quedaron
+            candidatos sin mirar. No es un error, pero impide afirmar que algo
+            no existe: solo se sabe de los `evaluados`.
+        proveedores_incompletos:
+          type: array
+          description: |
+            Nombres ordenados de los mayoristas que dejaron al menos un SKU
+            sin resolver (ni en vivo ni en cache) en esta busqueda. Solo
+            presente cuando no esta vacio. Es informativo: no implica
+            `parcial`, porque un ganador con stock de otro mayorista sigue
+            siendo confiable aunque este proveedor haya fallado.
+          items: { type: string, enum: [intcomex, tecnoglobal, ingram] }
         productos:
           type: array
           description: |

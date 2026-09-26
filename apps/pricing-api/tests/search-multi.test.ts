@@ -130,7 +130,7 @@ describe('GET /search (tres mayoristas)', () => {
     expect(r.body.productos.map((p: any) => p.sku)).toEqual(['I2']);
   });
 
-  it('un mayorista caido deja la respuesta parcial con lo de los demas', async () => {
+  it('un mayorista caido no marca parcial si el ganador con stock lo tapa, pero avisa el proveedor incompleto', async () => {
     catalogos.intcomex = [prod('I1', 'A1', 'Toner negro', 'HP', 'Toner')];
     catalogos.ingram = [prod('G1', 'A1', 'Toner negro', 'HP', 'Toner')];
     const h = createMultiSearchHandler({
@@ -140,8 +140,40 @@ describe('GET /search (tres mayoristas)', () => {
     const r = res();
     await h(req({ q: 'toner' }), r);
     expect(r.statusCode).toBe(200);
-    expect(r.body.parcial).toBe(true);
+    expect(r.body.parcial).toBeUndefined();
+    expect(r.body.proveedores_incompletos).toEqual(['ingram']);
     expect(r.body.productos[0].proveedor).toBe('intcomex');
+  });
+
+  it('un mayorista caido SI marca parcial cuando el ganador no tiene stock', async () => {
+    catalogos.intcomex = [prod('I1', 'A1', 'Toner negro', 'HP', 'Toner')];
+    catalogos.ingram = [prod('G1', 'A1', 'Toner negro', 'HP', 'Toner')];
+    const h = createMultiSearchHandler({
+      intcomex: proveedor('intcomex', { I1: P(50, 0) }),
+      ingram: proveedor('ingram', {}, true),
+    });
+    const r = res();
+    await h(req({ q: 'toner' }), r);
+    expect(r.statusCode).toBe(200);
+    expect(r.body.parcial).toBe(true);
+    expect(r.body.proveedores_incompletos).toEqual(['ingram']);
+    expect(r.body.productos[0].proveedor).toBe('intcomex');
+  });
+
+  it('un mayorista caido SI marca parcial cuando un grupo solo existe en el que cayo', async () => {
+    catalogos.intcomex = [prod('I1', 'A1', 'Toner negro', 'HP', 'Toner')];
+    catalogos.ingram = [prod('G1', 'B2', 'Mouse inalambrico', 'HP', 'Perifericos')];
+    const h = createMultiSearchHandler({
+      intcomex: proveedor('intcomex', { I1: P(50, 3) }),
+      ingram: proveedor('ingram', {}, true),
+    });
+    const r = res();
+    await h(req({ q: 'toner mouse' }), r);
+    expect(r.statusCode).toBe(200);
+    expect(r.body.parcial).toBe(true);
+    expect(r.body.proveedores_incompletos).toEqual(['ingram']);
+    // El grupo de Intcomex sigue mostrandose, con o sin stock del caido.
+    expect(r.body.productos.map((p: any) => p.proveedor)).toEqual(['intcomex']);
   });
 
   it('502 si no se pudo cotizar nada; 503 si ningun catalogo cargo', async () => {

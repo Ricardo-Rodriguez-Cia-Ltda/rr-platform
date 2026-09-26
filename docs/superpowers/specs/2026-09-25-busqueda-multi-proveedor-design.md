@@ -101,6 +101,13 @@ producto suma `proveedor`. Los errores de entrada (400/401/405) son los mismos.
 Si ningún mayorista pudo cotizar nada (ni en vivo ni desde caché) y no hay
 nada que mostrar, 502 `upstream`, como hoy.
 
+`parcial` ya no se activa por cualquier SKU sin resolver de cualquier
+mayorista: solo cuando un producto queda de verdad a medias (SKU sin resolver
+y, además, sin ganador o con el ganador sin stock), o si no quedó tiempo para
+la segunda ronda. Qué mayorista quedó corto, sin que eso implique `parcial`,
+lo dice el nuevo `proveedores_incompletos` (nombres ordenados, solo si no está
+vacío).
+
 ## Pruebas
 
 - `cotizarLote`: caché fresco sin llamada, lotes en paralelo, lote fallido

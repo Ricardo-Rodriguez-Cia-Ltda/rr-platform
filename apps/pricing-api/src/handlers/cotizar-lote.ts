@@ -6,8 +6,10 @@ export interface ResultadoLote {
   precios: Map<string, PriceInfo>;
   /** Edad del dato de cache mas viejo que se uso con precio; 0 si todo fue en vivo. */
   maxAgeMs: number;
-  /** Algun SKU quedo sin resolver: ni en vivo ni en cache. */
+  /** Algun SKU quedo sin resolver: ni en vivo ni en cache. Equivale a sinResolver.size > 0. */
   incompleto: boolean;
+  /** Los SKU que ni se cotizaron en vivo ni se rescataron del cache. */
+  sinResolver: Set<string>;
   /** Habia SKU por cotizar en vivo y ningun lote respondio. */
   fallaTotal: boolean;
 }
@@ -29,7 +31,7 @@ function conLimite<T>(promesa: Promise<T>, deadline: number): Promise<T> {
 export async function cotizarLote(provider: Provider, skus: string[], deadline: number): Promise<ResultadoLote> {
   const unicos = [...new Set(skus)];
   const precios = new Map<string, PriceInfo>();
-  if (unicos.length === 0) return { precios, maxAgeMs: 0, incompleto: false, fallaTotal: false };
+  if (unicos.length === 0) return { precios, maxAgeMs: 0, incompleto: false, sinResolver: new Set(), fallaTotal: false };
 
   const cache = getPriceCache(provider.name);
   const lookup = cache.get(unicos);
@@ -47,14 +49,14 @@ export async function cotizarLote(provider: Provider, skus: string[], deadline: 
     if (fresca) usar(sku, fresca);
     else pendientes.push(sku);
   }
-  if (pendientes.length === 0) return { precios, maxAgeMs, incompleto: false, fallaTotal: false };
+  if (pendientes.length === 0) return { precios, maxAgeMs, incompleto: false, sinResolver: new Set(), fallaTotal: false };
 
   const lotes: string[][] = [];
   for (let i = 0; i < pendientes.length; i += provider.maxSkusPerBatch) lotes.push(pendientes.slice(i, i + provider.maxSkusPerBatch));
   const resultados = await Promise.allSettled(lotes.map((lote) => conLimite(provider.getPrices(lote), deadline)));
 
   let algunoOk = false;
-  let incompleto = false;
+  const sinResolver = new Set<string>();
   resultados.forEach((r, i) => {
     const lote = lotes[i];
     if (r.status === 'fulfilled') {
@@ -70,8 +72,8 @@ export async function cotizarLote(provider: Provider, skus: string[], deadline: 
     for (const sku of lote) {
       const utilizable = lookup.usable.get(sku);
       if (utilizable) usar(sku, utilizable);
-      else incompleto = true;
+      else sinResolver.add(sku);
     }
   });
-  return { precios, maxAgeMs, incompleto, fallaTotal: !algunoOk };
+  return { precios, maxAgeMs, incompleto: sinResolver.size > 0, sinResolver, fallaTotal: !algunoOk };
 }

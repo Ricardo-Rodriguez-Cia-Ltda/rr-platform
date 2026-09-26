@@ -348,9 +348,25 @@ tres mayoristas a la vez; si no bastan para juntar `limite`, el resto se
 cotiza **en una segunda ronda**, con sus lotes en paralelo. Las dos rondas
 comparten un presupuesto de **18 segundos** contados desde que llega el pedido
 (la tienda corta a los 21 s): un lote que no responde a tiempo se rescata del
-caché si se puede, y si no queda tiempo para la segunda ronda no se lanza. En
-esos casos, o si un mayorista falla, la respuesta trae `parcial: true` y el
-recorrido queda a medias. `evaluados` dice cuántos alcanzó a cotizar.
+caché si se puede, y lo que ni ahí se resuelve queda sin precio para ese
+mayorista. Si no queda tiempo para la segunda ronda, tampoco se lanza.
+`evaluados` dice cuántos productos alcanzó a cotizar.
+
+`parcial: true` aparece cuando **algún producto mostrado o evaluado quedó a
+medias de verdad**: tiene un SKU sin resolver en algún mayorista y, o no hay
+ganador, o el ganador no tiene stock confirmado (`stock` no es mayor a 0).
+Que un solo mayorista se haya caído **no** activa `parcial` por sí solo: si
+otro mayorista ya lo vende con stock, ese sigue siendo el ganador legítimo —
+el caído solo podría haberle ganado en precio, nunca en disponibilidad. La
+otra causa de `parcial` es que no quedó tiempo para la segunda ronda: ahí sí
+quedaron candidatos sin mirar y no se puede afirmar que no haya nada mejor.
+
+Para saber **qué** mayorista quedó corto sin que eso implique `parcial`, está
+`proveedores_incompletos`: lista ordenada con los nombres de los mayoristas
+que dejaron al menos un SKU sin resolver (ni en vivo ni en caché) en esta
+búsqueda. Solo aparece cuando no está vacía. Es informativo, no un error: un
+ganador con stock de otro mayorista sigue siendo confiable aunque
+`proveedores_incompletos` lo mencione.
 
 En `/{proveedor}/search` (un solo mayorista) la sonda es el primer lote y el
 presupuesto es de 20 segundos.

@@ -50,6 +50,7 @@ describe('cotizarLote', () => {
     expect(r.precios.get('A')?.price).toBe(10);
     expect(r.precios.has('B')).toBe(false);
     expect(r.incompleto).toBe(true);
+    expect(r.sinResolver).toEqual(new Set(['B']));
     expect(r.fallaTotal).toBe(true);
     expect(r.maxAgeMs).toBeGreaterThan(15 * 60 * 1000);
   });
@@ -61,11 +62,12 @@ describe('cotizarLote', () => {
     expect(Date.now() - inicio).toBeLessThan(2000);
     expect(r.precios.size).toBe(0);
     expect(r.incompleto).toBe(true);
+    expect(r.sinResolver).toEqual(new Set(['A']));
   });
 
   it('sin SKU no llama a nada', async () => {
     const prov = proveedor(async () => new Map());
-    expect(await cotizarLote(prov, [], Date.now() + 5000)).toEqual({ precios: new Map(), maxAgeMs: 0, incompleto: false, fallaTotal: false });
+    expect(await cotizarLote(prov, [], Date.now() + 5000)).toEqual({ precios: new Map(), maxAgeMs: 0, incompleto: false, sinResolver: new Set(), fallaTotal: false });
     expect(prov.getPrices).not.toHaveBeenCalled();
   });
 });
