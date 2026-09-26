@@ -179,6 +179,30 @@ describe('generar-cotizacion-v2', () => {
     expect(data.quote.lineas[0].comparacion).toBe('fallback_intcomex');
   });
 
+  it('el fallback usa el proveedor ganador que trajo el item, no siempre intcomex', async () => {
+    const carroIngram = [{ ...cart[0], proveedor: 'ingram' }];
+    const { data, spy } = await quote(carroIngram, [
+      { payload: { error: 'not_found' }, status: 404 },
+      { payload: bestPriceOk },
+    ]);
+    const url = new URL((spy.mock.calls[1] as any)?.[0] as string);
+    expect(url.searchParams.get('proveedor')).toBe('ingram');
+    expect(url.searchParams.get('sku')).toBe('AR155EPS14');
+    // La etiqueta se mantiene igual para los tres mayoristas: no distingue
+    // cual gano el fallback, solo que se uso el camino de fallback.
+    expect(data.quote.lineas[0].comparacion).toBe('fallback_intcomex');
+  });
+
+  it('un proveedor desconocido o vacio en el item cae a intcomex en el fallback', async () => {
+    const carroRaro = [{ ...cart[0], proveedor: 'otro-mayorista' }];
+    const { spy } = await quote(carroRaro, [
+      { payload: { error: 'not_found' }, status: 404 },
+      { payload: bestPriceOk },
+    ]);
+    const url = new URL((spy.mock.calls[1] as any)?.[0] as string);
+    expect(url.searchParams.get('proveedor')).toBe('intcomex');
+  });
+
   it('no cotiza si el fallback tambien falla', async () => {
     const { data, status } = await quote(cart, [
       { payload: { error: 'not_found' }, status: 404 },

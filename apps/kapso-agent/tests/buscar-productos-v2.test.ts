@@ -62,6 +62,16 @@ describe('buscar-productos-v2', () => {
     const data = (await res.json()) as any;
     expect(data.productos).toHaveLength(0);
   });
+
+  it('propaga el proveedor ganador de cada producto', async () => {
+    respondWith({ ...search, productos: [{ ...search.productos[0], proveedor: 'ingram' }, search.productos[1]] });
+    const res = await handler(request({ input: { q: 'cinta epson' } }), env);
+    const data = (await res.json()) as any;
+    expect(data.productos[0].proveedor).toBe('ingram');
+    // Sin proveedor en la respuesta de la API (contrato viejo), cae a null en
+    // vez de "undefined": generar-cotizacion-v2 lo trata igual que hoy.
+    expect(data.productos[1].proveedor).toBeNull();
+  });
 });
 
 // Una busqueda vacia no es una caida. Antes la function devolvia estado "ok"
